@@ -81,6 +81,9 @@ private:
   KomportView *mView;
   int mValue;
   int mMaximum;
+  /** carries the sub-notch remainder of wheelEvent()'s angleDelta() between
+   *  events - see KomportView::mAccumWheelDelta for why */
+  int mAccumWheelDelta = 0;
 };
 
 #endif // KOMPORTMINIMAP_H

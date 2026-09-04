@@ -137,8 +137,14 @@ void KomportMinimapScrollBar::mouseMoveEvent(QMouseEvent *_e)
 
 void KomportMinimapScrollBar::wheelEvent(QWheelEvent *_e)
 {
-  int steps = _e->angleDelta().y() / 120; // 120 = one notch
+  // See KomportView::wheelEvent() for why this accumulates rather than
+  // truncating each event's angleDelta() individually: many mice/touchpads
+  // split a single notch across several small-delta events, which a plain
+  // /120 would round down to zero every time.
+  mAccumWheelDelta += _e->angleDelta().y();
+  int steps = mAccumWheelDelta / 120; // 120 = one notch
   if ( steps != 0 ) {
+    mAccumWheelDelta -= steps * 120;
     setValue( mValue + steps * 3 ); // a few lines per notch, like a normal scrollbar; emits itself
   }
   _e->accept();

@@ -463,8 +463,18 @@ void KomportView::mouseMoveEvent( QMouseEvent* _e ){
 }
 /** mouse wheel scrolls the scrollback, same as dragging the minimap */
 void KomportView::wheelEvent( QWheelEvent* _e ){
-    int steps = _e->angleDelta().y() / 120; // 120 = one notch
+    // angleDelta() isn't always a full +-120 "notch" per event - many mice
+    // and touchpads (especially with smooth-scrolling drivers, e.g.
+    // libinput on Linux) split a single notch across several events with
+    // small deltas. Truncating each one individually via a plain /120
+    // rounds most of them down to zero, so nothing moves unless the user
+    // scrolls hard enough to produce one big burst in a single event.
+    // Accumulate instead, and only step once a full notch's worth has
+    // built up - mAccumWheelDelta carries the remainder to the next event.
+    mAccumWheelDelta += _e->angleDelta().y();
+    int steps = mAccumWheelDelta / 120; // 120 = one notch
     if ( steps != 0 ) {
+        mAccumWheelDelta -= steps * 120;
         mScrollBar->setValue( mScrollBar->value() + steps * 3 ); // emits valueChanged() itself, which drives slotScroll()
     }
     _e->accept();

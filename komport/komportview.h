@@ -161,6 +161,11 @@ private: // Private attributes
   int mAutoScrollTimer;
   /** for tracking mouse during selctions */
   QPoint mMousePos;
+  /** carries the sub-notch remainder of wheelEvent()'s angleDelta() between
+   *  events, so wheel/touchpad hardware that reports many small deltas
+   *  instead of one +-120 "notch" per event still scrolls smoothly rather
+   *  than needing to build up a full notch's worth in one single event */
+  int mAccumWheelDelta = 0;
 public slots: // Public slots
   /** notify cursor position has changde */
   void slotCursorChanged(QPoint _old, QPoint _new);
