@@ -118,6 +118,26 @@ mit sichtbarem Text) — eigener, in sich abgeschlossener Auftrag, am besten
 NACH den funktionalen Meilensteinen 4/5, damit nicht doppelt an neu
 hinzukommenden Strings gearbeitet werden muss.
 
+### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — offen
+
+> Option zur Zeichensatz-Übersetzung zwischen `QSerialPort` und der
+> Emulation, um die Kommunikation mit historischen Systemen zu
+> ermöglichen:
+> - GUI: ein Dropdown "Zeichensatz" (Standard, IBM CP437, Amiga, PETSCII).
+> - Logik: zweiseitige Lookup-Tabellen (RX/TX), die historische
+>   Zeichensätze dynamisch in modernes UTF-8 (und umgekehrt) umrechnen,
+>   damit Sonder- und Grafikzeichen auf Retro-Plattformen fehlerfrei
+>   dargestellt werden.
+> - Integration: das Mapping muss ebenfalls im aktuellen Geräteprofil
+>   speicherbar sein (wie Baudrate/Makros/Zeilenende, siehe Abschnitt 11
+>   in `TODO-ARCHIVE.md`).
+
+Eigenständiges Feature, unabhängig von den VT220/Farbschema-Meilensteinen
+4/5 — reine Byte-Ebene (vor der Terminal-Emulation), keine Überschneidung.
+Sitzt an der gleichen Stelle im Datenfluss wie der Hex-Monitor (roher
+RX/TX-Bytestrom), bevor `KomportEmulation` die Escape-Sequenzen
+interpretiert.
+
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 
 Architektonischer Leitfaden für später, explizit **nicht** für den aktuellen
