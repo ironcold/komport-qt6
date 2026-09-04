@@ -24,6 +24,7 @@
 #include <QFontMetrics>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 
 // application specific includes
 #include "komportview.h"
@@ -203,13 +204,20 @@ void KomportView::keyReleaseEvent(QKeyEvent* _e){
 
 /** paint event */
 void KomportView::paintEvent(QPaintEvent* _e){
+  QRect rect = _e->rect();
+  QPainter p(this);
+  // Fill first - WA_OpaquePaintEvent means Qt trusts this to paint
+  // everything itself, and height() is rarely an exact multiple of
+  // cellHeight() now that height tracks the window, so there's usually a
+  // thin margin below the last row that mPixmap doesn't cover.
+  p.fillRect(rect, cellArray()->defaultBackgroundColor());
   // Clip to mPixmap's own bounds (the character-grid area) - the minimap
   // to the right is a proper child widget and paints itself; this must
   // not draw over/under it with stale pixmap content.
-  QRect rect = _e->rect().intersected( QRect(QPoint(0,0), mPixmap.size()) );
-  if ( rect.isEmpty() ) return;
-  QPainter p(this);
-  p.drawPixmap(rect.topLeft(), mPixmap, rect);
+  QRect gridRect = rect.intersected( QRect(QPoint(0,0), mPixmap.size()) );
+  if ( !gridRect.isEmpty() ) {
+    p.drawPixmap(gridRect.topLeft(), mPixmap, gridRect);
+  }
 }
 
 /** timer event */
@@ -285,12 +293,17 @@ KomportCell* KomportView::cellAtHistoryRow(int _col, int _row) {
 void KomportView::setCellSize(){
   QFontMetrics fm = fontMetrics();
   cellArray()->setCellSize(QSize(fm.horizontalAdvance(QChar('H')),fm.height()));
-  // The widget's own size is the character grid plus the minimap strip
-  // reserved alongside it - see resizeEvent()/paintEvent() for how the
-  // two regions are kept apart.
-  QSize sz(cellArray()->width() + mScrollBar->width(), cellArray()->height());
-  setMinimumSize(sz);
-  setMaximumSize(sz);
+
+  // Width is locked to the configured column count (+ the minimap strip) -
+  // a classic fixed-width terminal, kept that way on purpose. Height is
+  // NOT locked: only a modest minimum (so the grid can't be shrunk to
+  // nothing) and no maximum, so the window can be resized taller/shorter
+  // freely - resizeEvent() adjusts the actual row count (resizeGridRows())
+  // to match whatever height the window ends up with.
+  int fixedWidth = cellArray()->width() + mScrollBar->width();
+  int minRows = qMin(cellArray()->arrayHeight(), 3);
+  setMinimumSize( fixedWidth, minRows * cellArray()->cellHeight() );
+  setMaximumSize( fixedWidth, QWIDGETSIZE_MAX );
 }
 
 /** notify cursor position has changde */
@@ -329,6 +342,17 @@ KomportSerial* KomportView::getSerial(){
 /** resize the offscreen pixmap and refresh */
 void KomportView::resizeEvent(QResizeEvent* _e){
   Q_UNUSED(_e);
+
+  // Height (not width - width stays fixed at the configured column count,
+  // a classic fixed-width terminal, by design) tracks the available
+  // window space: recompute how many rows fit and grow/shrink the live
+  // grid to match.
+  int cellHeight = cellArray()->cellHeight();
+  if ( cellHeight > 0 ) {
+    int newRows = qMax(1, height() / cellHeight);
+    resizeGridRows(newRows);
+  }
+
   // mScrollBar is a proper child of this widget now, so its position only
   // ever needs to be expressed relative to `this` - correct regardless of
   // how this view itself is embedded (e.g. inside the central QSplitter).
@@ -339,9 +363,11 @@ void KomportView::resizeEvent(QResizeEvent* _e){
 
   // QPixmap has no in-place resize() in Qt6 - build a new one and copy the
   // previous contents into its top-left corner, matching what Qt3's
-  // QPixmap::resize() did. Sized to the character-grid area only (this
-  // widget's own size includes the minimap strip, the pixmap doesn't).
-  QSize gridSize( qMax(0, width() - mmWidth), height() );
+  // QPixmap::resize() did. Sized to the character-grid's own pixel size
+  // (arrayHeight() * cellHeight()), which is now current after
+  // resizeGridRows() above - not the raw widget height, which is rarely
+  // an exact multiple of cellHeight() (paintEvent() fills that margin).
+  QSize gridSize( qMax(0, width() - mmWidth), cellArray()->height() );
   QPixmap resized( gridSize );
   resized.fill(cellArray()->defaultBackgroundColor());
   QPainter p(&resized);
@@ -349,6 +375,37 @@ void KomportView::resizeEvent(QResizeEvent* _e){
   p.end();
   mPixmap = resized;
   cellArray()->update();
+}
+
+/** grow/shrink the live grid to _newRows, keeping the column count fixed */
+void KomportView::resizeGridRows(int _newRows){
+  int oldRows = cellArray()->arrayHeight();
+  if ( _newRows == oldRows || _newRows < 1 ) return;
+  int w = cellArray()->arrayWidth();
+  QPoint cur = cellArray()->cursor();
+
+  if ( _newRows < oldRows ) {
+    // Shrinking: push the rows that no longer fit off the top into the
+    // scrollback buffer first, one at a time - exactly what a normal
+    // line-feed-driven scroll does in slotAboutToScrollUp(), just without
+    // also re-growing the live grid back afterward.
+    int removed = oldRows - _newRows;
+    for ( int n = 0; n < removed; ++n ) {
+      if ( mScrollBuffer.arrayHeight() > 0 ) {
+        for ( int x = 0; x < w; ++x ) {
+          mScrollBuffer.cell( x, mScrollBuffer.arrayHeight()-1 )->copy( cellArray()->cell(x, n) );
+        }
+        mScrollBuffer.scrollUp();
+      }
+    }
+    cur.setY( qBound(0, cur.y() - removed, _newRows - 1) );
+  } else {
+    cur.setY( qBound(0, cur.y(), _newRows - 1) );
+  }
+
+  cellArray()->setArraySize( QSize(w, _newRows) );
+  cellArray()->setCursor(cur);
+  resetScroll(); // scrollback depth may have changed
 }
 /** notification that the cell array has scrolled up so we need to scroll visually */
 void KomportView::slotScrolledUp(){
@@ -403,6 +460,14 @@ void KomportView::mouseMoveEvent( QMouseEvent* _e ){
          selectEnd( (mMousePos = _e->position().toPoint()) );
          select( mSelectStart, mSelectEnd );
      }
+}
+/** mouse wheel scrolls the scrollback, same as dragging the minimap */
+void KomportView::wheelEvent( QWheelEvent* _e ){
+    int steps = _e->angleDelta().y() / 120; // 120 = one notch
+    if ( steps != 0 ) {
+        mScrollBar->setValue( mScrollBar->value() + steps * 3 ); // emits valueChanged() itself, which drives slotScroll()
+    }
+    _e->accept();
 }
 /** make a selection by cell coordinates */
 void KomportView::select(QPoint start, QPoint end, bool clip){

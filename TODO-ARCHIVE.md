@@ -727,3 +727,114 @@ eingebettet ist (behebt die Ursache strukturell, nicht nur das Symptom).
 - Visuelle Kontrolle der Minimap-Silhouette/des Hover-Previews selbst konnte
   in dieser Sandbox nicht erfolgen (kein echtes Display) — auf echter
   Hardware/Display gegenzuprüfen empfohlen.
+
+## 16. Terminalhöhe folgt der Fensterhöhe, Mausrad im Textfenster, Tooltip-Race im Toolbar
+
+Rückmeldung nach den ersten Tests auf echter Hardware.
+
+### 16.1 Terminal-Zeilenzahl folgt jetzt der Fensterhöhe (Breite bleibt fest)
+
+Bug: `KomportView` hatte in `setCellSize()` eine feste Mindest-/Maximalgröße
+für Breite **und** Höhe — das Grid wuchs/schrumpfte beim Ziehen am
+Fensterrand nie mit, die Minimap-Scrollbar blieb auf ihrer ursprünglichen
+Höhe stehen. Nicht beabsichtigt, reine Altlast aus der nie überarbeiteten
+Erstportierung.
+
+Fix (`komportview.h`/`.cpp`):
+
+- `setCellSize()`: sperrt jetzt nur noch die Breite fest
+  (`cellArray()->width() + mScrollBar->width()`, als Min- **und**
+  Maximalbreite gesetzt); die Höhe bekommt nur noch eine kleine
+  Mindesthöhe (3 Zeilen) und sonst `QWIDGETSIZE_MAX` als Maximum.
+- Neue Methode `resizeGridRows(int _newRows)`: wächst/schrumpft das
+  Live-Grid über `KomportCellArray::setArraySize()` auf die neue
+  Zeilenzahl, bei fester Spaltenzahl. Beim Schrumpfen werden die
+  wegfallenden obersten Zeilen zunächst in den Scrollback-Puffer
+  geschoben (genau wie ein normaler zeilenweiser Scroll in
+  `slotAboutToScrollUp()`) — es geht nichts verloren, nur weil das
+  Fenster kleiner gezogen wird. Cursor-Y-Position wird passend
+  nachgeführt, `resetScroll()` am Ende (Scrollback-Tiefe hat sich
+  ggf. geändert).
+- `resizeEvent()`: berechnet aus der neuen Fensterhöhe die passende
+  Zeilenzahl (`height() / cellArray()->cellHeight()`), ruft
+  `resizeGridRows()` auf, und sized den Offscreen-Pixmap-Puffer danach
+  anhand von `cellArray()->height()` (tatsächliche Grid-Pixelhöhe nach
+  dem Resize) statt der rohen Widget-Höhe — die ist selten ein exaktes
+  Vielfaches von `cellHeight()`.
+- `paintEvent()`: füllt den Hintergrund jetzt zuerst komplett mit
+  `cellArray()->defaultBackgroundColor()`, bevor der Pixmap-Ausschnitt
+  gezeichnet wird — deckt den Rand unterhalb der letzten Zeile ab, falls
+  die Widget-Höhe kein exaktes Vielfaches von `cellHeight()` ist.
+
+### 16.2 Mausrad im Textfenster
+
+Bug: `KomportView` hatte nie einen `wheelEvent()`-Override — nur die neue
+Minimap-Scrollbar und der Hex-Monitor reagierten aufs Mausrad, im
+eigentlichen Terminaltextfenster passierte nichts.
+
+Fix: `KomportView::wheelEvent()` hinzugefügt — scrollt `mScrollBar` um
+3 Zeilen pro Rasterschritt (`angleDelta().y() / 120`), exakt wie das
+`wheelEvent()` der Minimap selbst. `KomportMinimapScrollBar::setValue()`
+emittiert dabei jetzt zuverlässig `valueChanged()` bei jeder echten
+Wertänderung (siehe 16.3) — davon hängt ab, dass das Scrollen tatsächlich
+einen Repaint auslöst.
+
+### 16.3 Nebenbei gefundener Bug: Minimap-`setValue()` emittierte nicht
+
+`KomportMinimapScrollBar::setValue()` (aus Meilenstein 2+3, Abschnitt 15)
+hat den `valueChanged()`-Signal beim Setzen nie ausgelöst — anders als ein
+echter `QScrollBar`, der das bei jeder tatsächlichen Wertänderung tut, egal
+auf welchem Weg der Wert gesetzt wurde. `KomportView::resetScroll()` (wird
+nach praktisch jeder eingehenden Zeile aufgerufen) verlässt sich genau
+darauf, um ein Repaint auszulösen — dadurch aktualisierte sich die Ansicht
+nicht zuverlässig. Fix: `emit valueChanged(mValue);` in `setValue()`
+ergänzt; die dadurch redundanten expliziten `emit`-Aufrufe in
+`scrollToPixelY()` und `wheelEvent()` wieder entfernt.
+
+### 16.4 Tooltip-Truncation beim schnellen Wechsel zwischen Toolbar-Icons
+
+Rückmeldung: einzelne Hover-Tooltips (Statusleistentext beim Hovern über
+ein Toolbar-Icon) werden korrekt angezeigt, beim schnellen Wechsel von
+Icon zu Icon (direkt benachbart) erscheint der Text wieder abgeschnitten —
+derselbe optische Fehler wie beim ursprünglichen, bereits behobenen
+Tooltip-Bug (Abschnitt 11).
+
+Vermutete Ursache: `QLayout::updateGeometry()`/`invalidate()` löst in Qt
+kein sofortiges Relayout aus, sondern postet ein `QEvent::LayoutRequest`,
+das erst im nächsten Durchlauf der Event-Loop verarbeitet wird. Bei einem
+einzelnen, isolierten Hover ist genug Zeit dafür, bevor der nächste Paint
+kommt — beim schnellen Wechsel zwischen zwei benachbarten Icons kann das
+knapp werden, und der neue (ggf. längere) Statusleistentext wird gegen die
+noch alte, schmalere Geometrie gemalt und dabei abgeschnitten.
+
+Fix (`initToolBar()` in `komport.cpp`): explizite `QAction::hovered()`-
+Verbindung für jede Toolbar-Aktion mit gesetztem `statusTip()`, die nach
+`statusBar()->showMessage(...)` sofort `statusBar()->layout()->activate()`
+erzwingt statt auf das deferred Relayout zu warten.
+
+**Ehrlicher Hinweis zur Verifikation:** Das exakte Race-Verhalten selbst
+ließ sich in dieser Sandbox (kein echtes Display, nur `offscreen`-Plattform
+mit synthetischen `QTest::mouseMove()`-Events) nicht reproduzieren — ein
+Testprogramm mit zwei benachbarten Toolbar-Buttons zeigte in jedem
+getesteten Ablauf bereits ohne den Fix den korrekten Text. Der Fix ist eine
+standardkonforme, risikoarme Absicherung gegen die wahrscheinlichste
+Ursache (deferred Layout), aber **nicht visuell auf echter Hardware
+bestätigt** — bitte nach diesem Update erneut gegenprüfen.
+
+### 16.5 Verifikation
+
+- Build mit `-Wall -Wextra`: 0 Warnungen, 0 Fehler.
+- Offscreen-Smoke-Test: startet weiterhin fehlerfrei.
+- Zusätzlicher, nicht ausgelieferter Integrationstest (`komport_resizetest`,
+  provisorisches CMake-Target, danach wieder entfernt) über ein echtes
+  `pty`-Gerät, 11 Prüfungen, alle grün:
+  - Fenster höher gezogen → Zeilenzahl wächst, Spaltenzahl bleibt fix;
+  - Fenster wieder verkleinert → Zeilenzahl schrumpft, Spaltenzahl bleibt
+    fix, `totalHistoryRows()` (Scrollback+Live) wird dabei **nicht**
+    kleiner — die oben herausgeschobenen Zeilen landen nachweislich im
+    Scrollback statt verworfen zu werden;
+  - `cellAtHistoryRow()` bleibt nach mehrfachem Resize für jede gültige
+    Koordinate crash-sicher, Grenzfälle (negativ, genau `total`, weit
+    darüber) liefern weiterhin sauber `nullptr`;
+  - synthetische `QWheelEvent`s (rauf und runter) werden an `KomportView`
+    zugestellt, ohne abzustürzen.

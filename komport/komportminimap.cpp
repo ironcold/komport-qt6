@@ -58,6 +58,13 @@ void KomportMinimapScrollBar::setValue(int _value)
   if ( clamped == mValue ) return;
   mValue = clamped;
   update();
+  // Real QScrollBar emits valueChanged() on any actual change, whichever
+  // way it was set - callers throughout komportview.cpp (resetScroll() in
+  // particular) rely on that to trigger a repaint, the same way they did
+  // with the QScrollBar this replaces. Without this, resetScroll() (called
+  // after essentially every incoming line) silently stopped updating the
+  // view.
+  emit valueChanged(mValue);
 }
 
 void KomportMinimapScrollBar::paintEvent(QPaintEvent *_e)
@@ -115,8 +122,7 @@ void KomportMinimapScrollBar::scrollToPixelY(int _y)
   int row = qBound(0, _y * total / height(), total - 1);
   const int viewportRows = mView->cellArray()->arrayHeight();
   int scrolled = qBound(0, total - viewportRows - row, mMaximum);
-  setValue(mMaximum - scrolled);
-  emit valueChanged(mValue);
+  setValue(mMaximum - scrolled); // emits valueChanged() itself if it actually changed
 }
 
 void KomportMinimapScrollBar::mousePressEvent(QMouseEvent *_e)
@@ -133,8 +139,7 @@ void KomportMinimapScrollBar::wheelEvent(QWheelEvent *_e)
 {
   int steps = _e->angleDelta().y() / 120; // 120 = one notch
   if ( steps != 0 ) {
-    setValue( mValue + steps * 3 ); // a few lines per notch, like a normal scrollbar
-    emit valueChanged(mValue);
+    setValue( mValue + steps * 3 ); // a few lines per notch, like a normal scrollbar; emits itself
   }
   _e->accept();
 }

@@ -112,12 +112,22 @@ protected: // Protected methods
   void mouseReleaseEvent( QMouseEvent* _e ) override;
   /** No descriptions */
   void mousePressEvent( QMouseEvent* _e ) override;
+  /** mouse wheel scrolls the scrollback, same as dragging the minimap */
+  void wheelEvent( QWheelEvent* _e ) override;
  /** begin a selection by pixel coordinate */
   void selectStart( QPoint _pt );
   /** end a selection by pixel coordinate */
   void selectEnd( QPoint _pt );
   /** reset scrollbar */
   void resetScroll();
+  /** grow/shrink the live grid to _newRows, keeping the column count fixed.
+   *  Shrinking pushes the rows that no longer fit off the top into the
+   *  scrollback buffer first (like a normal line-feed-driven scroll would),
+   *  so nothing is silently discarded; growing just appends blank rows at
+   *  the bottom. Adjusts the cursor position to match. Called from
+   *  resizeEvent() so the terminal's row count tracks the window's height
+   *  (the column count/width stays fixed, matching a classic terminal). */
+  void resizeGridRows(int _newRows);
 private: // Private attributes
   /** character cell array */
   KomportCellArray mCellArray;
