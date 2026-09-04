@@ -268,17 +268,29 @@ void KomportApp::initToolBar()
 
   // Drive toolbar-icon hover hints through hoverHintLabel (see komport.h)
   // instead of statusBar()->showMessage(): showMessage()'s geometry
-  // recomputes lazily (a posted, deferred QEvent::LayoutRequest), and a
-  // fast sweep across adjacent toolbar icons could outrun it, clipping the
-  // new text against the still-stale, narrower geometry left over from the
-  // previous one - the icon-to-icon truncation this works around.
+  // recomputes lazily (a posted, deferred QEvent::LayoutRequest), which
+  // could in theory clip a message against stale geometry.
   // hoverHintLabel's width doesn't depend on its text (QSizePolicy::Ignored),
   // so plain setText() here never needs a relayout in the first place.
+  //
+  // The actually-reported truncation ("individual hovers fine, sweeping
+  // icon-to-icon truncated, leaving the toolbar and coming back in fine
+  // again") turned out not to be that at all, though - that exact pattern
+  // is the signature of a well-known Qt/Plasma quirk where the *native*
+  // QToolTip popup reuses the previous tooltip window's geometry when
+  // transitioning directly between two adjacent widgets' tooltips with no
+  // gap in between, clipping the new (possibly longer) text against the
+  // old, narrower size; leaving and re-entering forces a fresh popup.
+  // hoverHintLabel was never involved - so on top of driving it, suppress
+  // the native tooltip popup for these buttons entirely below.
   for ( QAction *action : mainToolBar->actions() ) {
     if ( action->statusTip().isEmpty() ) continue;
     connect( action, &QAction::hovered, this, [this, action]{
       hoverHintLabel->setText( action->statusTip() );
     } );
+    if ( QWidget *button = mainToolBar->widgetForAction(action) ) {
+      button->installEventFilter(this); // swallows QEvent::ToolTip, see eventFilter()
+    }
   }
   // and reset back to "Ready." once the mouse leaves the toolbar entirely
   // (see eventFilter()) - icon-to-icon moves are handled directly above,
@@ -779,6 +791,16 @@ void KomportApp::closeEvent(QCloseEvent *event)
 
 bool KomportApp::eventFilter(QObject *watched, QEvent *event)
 {
+  // Swallow the native QToolTip popup for toolbar icon buttons entirely -
+  // this filter is only ever installed on mainToolBar itself and on its
+  // icon buttons (see initToolBar()), so it's safe to do this
+  // unconditionally for every QEvent::ToolTip it sees. hoverHintLabel
+  // (below) is the sole hover-hint mechanism for these buttons now; see
+  // the comment in initToolBar() for why the native popup had to go
+  // rather than just being patched.
+  if ( event->type() == QEvent::ToolTip ) {
+    return true;
+  }
   // Reset the hover hint back to "Ready." once the mouse leaves the
   // toolbar entirely - moving from one icon straight to an adjacent one
   // never reaches this (each icon's own QAction::hovered() connection in

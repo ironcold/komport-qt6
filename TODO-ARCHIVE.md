@@ -951,3 +951,71 @@ weiterhin, unabhängig davon, wie lange das Panel geschlossen bleibt.
   Maus-/Renderingereignisse zu simulieren) — Build- und Smoke-Test-grün,
   ansonsten auf Code-Review-Ebene verifiziert; auf echter Hardware
   gegenzuprüfen.
+
+## 18. Tooltip-Truncation war die ganze Zeit das native `QToolTip`-Popup, nicht die Statusleiste
+
+Nutzer hat einen kurzen Screen-Record aufgenommen (`helper/`, per `ffmpeg`
+in Einzelbilder zerlegt und ausgewertet), um Abschnitt 17.1 gegenzuprüfen.
+Ergebnis: der Fix aus Abschnitt 17.1 hat wieder nicht geholfen. Auf
+Nachfrage präzisiert der Nutzer das Reproduktionsmuster deutlich:
+
+> Die ersten, verstümmelten Tooltips im Video sind von Icon zu Icon.
+> Danach, dort wo es passt, ist es jedes Mal nach oben aus dem Icon raus
+> und neu ins nächste rein — und das funktioniert.
+
+Dieses exakte Muster — direkter Wechsel zwischen zwei benachbarten Icons
+verstümmelt, aber die Toolbar erst verlassen und neu hineingehen zeigt
+korrekten Text — ist die Signatur eines bekannten Qt/Plasma-Verhaltens:
+das **native `QToolTip`-Popup** (nicht die Statusleiste!) wird beim
+direkten Übergang zwischen den Tooltips zweier benachbarter Widgets ohne
+Lücke dazwischen oft als *dasselbe* Popup-Fenster mit der *alten*,
+zwischengespeicherten Größe wiederverwendet statt komplett neu erzeugt —
+der neue (ggf. längere) Text wird gegen die alte, schmalere Geometrie
+abgeschnitten. Erst ein vollständiges Verstecken (Toolbar verlassen) und
+Neuerscheinen erzwingt ein frisches Popup mit korrekter Größe.
+
+Alle bisherigen Fixes (Abschnitt 16.4, 17.1) haben ausschließlich die
+**Statusleiste** angefasst (`statusBar()->showMessage()` bzw. später
+`hoverHintLabel`) — mit dem tatsächlich sichtbaren Fehler hatten sie damit
+nie etwas zu tun. Video-Analyse (`ffmpeg`-Einzelbilder, 1 fps Quellmaterial)
+bestätigt das indirekt: alle 25 extrahierten Sekunden-Frames zeigen in der
+Statusleiste ausschließlich vollständigen, sauberen Text (u.a. auch das
+mit 30 Zeichen längste `"Show raw RX/TX bytes as hex"`) — nirgends
+abgeschnitten. Die Statusleiste war also nie das Problem; das Video konnte
+nur schlicht den Sekundenbruchteil des defekten *nativen Popups* nicht
+einfangen (1 fps Aufnahme, keine höhere zeitliche Auflösung verfügbar).
+
+### 18.1 Fix: natives Tooltip-Popup für Toolbar-Icons komplett unterdrückt
+
+`hoverHintLabel` bleibt bestehen (funktioniert und ist strukturell robust,
+schadet nicht) — zusätzlich wird das native Popup für die Toolbar-Buttons
+jetzt vollständig unterdrückt, damit der fehlerhafte Mechanismus gar nicht
+mehr zur Anzeige kommt:
+
+- In `initToolBar()`: für jede Aktion mit gesetztem `statusTip()` wird
+  zusätzlich zur bestehenden `hovered()`-Verbindung ein Event-Filter auf
+  dem zugehörigen Button-Widget installiert
+  (`mainToolBar->widgetForAction(action)->installEventFilter(this)`).
+- `KomportApp::eventFilter()`: fängt `QEvent::ToolTip` ab und gibt `true`
+  zurück (Event konsumiert, kein natives Popup) — sicher unconditional,
+  da dieser Filter ausschließlich auf `mainToolBar` selbst und dessen
+  Icon-Buttons installiert ist, nirgends sonst.
+- `hoverHintLabel` bleibt die einzige verbleibende Hover-Hinweis-Anzeige
+  für diese Buttons.
+
+### 18.2 Verifikation
+
+- Build mit `-Wall -Wextra`: 0 Warnungen, 0 Fehler (voller Clean-Rebuild).
+- Offscreen-Smoke-Test: startet weiterhin fehlerfrei.
+- **Ehrlicher Hinweis:** auch dieser Fix konnte in der Sandbox nicht visuell
+  gegen das Original-Video-Muster verifiziert werden (kein echtes Display,
+  und `QEvent::ToolTip`-Timing/Popup-Wiederverwendung ist ohnehin ein
+  reines Rendering-/Fensterverwaltungs-Verhalten, das sich nicht sinnvoll
+  automatisiert nachstellen lässt) — dafür ist die Diagnose diesmal deutlich
+  besser durch das tatsächliche Reproduktionsmuster des Nutzers gestützt
+  als die vorherigen zwei Versuche. Bitte erneut auf echter Hardware
+  gegenprüfen; falls das native Popup selbst (nicht die Statusleiste)
+  weiterhin irgendwo auftaucht, ist das ein klares Zeichen, dass die
+  Unterdrückung an der falschen Stelle ansetzt (z.B. weil ein anderes
+  Widget als der `QToolButton` das Popup zeigt) und weiter eingegrenzt
+  werden muss.
