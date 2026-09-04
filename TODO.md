@@ -21,6 +21,24 @@ Unten stehen nur die bewusst offen gelassenen/verschobenen Punkte.
   (Linien-Grafikzeichen) und Insert-Mode (`CSI 4h`) sind nicht implementiert.
   Details siehe `TODO-ARCHIVE.md` Abschnitt 8.2.
 
+## 6.1 Restpunkt: natives Toolbar-Tooltip verschwindet gelegentlich statt zu wechseln
+
+Stand nach `TODO-ARCHIVE.md` Abschnitt 18.2 (`QToolTip::hideText()` direkt
+vor `QToolTip::showText()`, um die Qt-Popup-Geometrie-Wiederverwendung zu
+umgehen): die Abschneide-Truncation ist behoben, aber laut Nutzer-Test
+"fast korrekt" — beim Wechsel zwischen zwei Icons blendet sich das native
+Tooltip inzwischen manchmal komplett aus, statt sofort mit dem neuen Text
+wieder zu erscheinen (vermutlich `hideText()` gefolgt zu schnell von
+`showText()` wird von Qt intern nicht immer als "neu zeigen", sondern als
+"kommentarlos verwerfen" behandelt). Nutzer stuft das ausdrücklich als
+tolerierbar ein ("ist aber erst mal ok") — bewusst zurückgestellt statt
+sofort weiter zu patchen. `hoverHintLabel` in der Statusleiste zeigt den
+Hover-Text in der Zwischenzeit ohnehin zuverlässig an. Falls das später
+angegangen wird: evtl. mit einem kurzen `QTimer::singleShot(0, ...)`
+zwischen `hideText()` und `showText()` experimentieren, oder ganz auf ein
+eigenes, immer neu erzeugtes Tooltip-Widget umsteigen statt den
+`QToolTip`-Singleton zu nutzen.
+
 ## 7. Wunschliste / mögliche nächste Schritte
 
 Ursprünglich aus der alten `TODO`-Datei des Original-Autors (2003) übernommen,
