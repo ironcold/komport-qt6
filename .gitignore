@@ -3,3 +3,5 @@
 *.obj
 CMakeCache.txt
 CMakeFiles/
+# Lokaler Arbeitsordner für KI-Prompts und Screenshots
+helper/

@@ -402,3 +402,88 @@ als **Komport-Qt6** weiter:
 - [x] `cmake --build build` nach der Umbenennung neu verifiziert: sauber mit
       `-Wall -Wextra` (0 Warnungen), Binary heißt jetzt `build/komport-qt6`,
       Offscreen-Smoke-Test läuft weiterhin fehlerfrei.
+
+## 11. Statusleisten-Fix + Geräteprofile (erste Rückmeldung nach echtem Hardware-Test)
+
+Erster Praxistest mit einem HPE 1920 lief erfolgreich. Zwei Punkte daraus:
+
+### 11.1 "Tooltips im Menü werden abgeschnitten" — Ursache gefunden und gefixt
+
+War kein echter `QToolTip`-Bug, sondern zu lange `QAction::setStatusTip()`-Texte:
+die werden beim Hovern über einen Menüeintrag unten in der Statusleiste
+angezeigt, und `QStatusBar` bricht nicht um, sondern schneidet einfach ab —
+besonders sichtbar, weil das Fenster durch das feste 80×25-Zeichenraster der
+`KomportView` recht schmal ist. Alle `setStatusTip()`-Texte in
+`komport.cpp::initActions()` auf kurze, prägnante Phrasen gekürzt (z.B.
+"Prints out the whole screen or selected section" → "Print the screen").
+
+### 11.2 Geräteprofile (`komport.h/.cpp`, neu)
+
+Vollständige Profilverwaltung über eine `QComboBox` in der Haupt-Toolbar:
+
+- Ein Profil bündelt die komplette Session-Konfiguration: serielle Parameter
+  (Device, Baudrate, Databits, Stopbits, Parity, Flow-Control, RX-Queue,
+  Flush-Rate, Emulation, Scroll-Buffer), das Zeilenende ("Enter sends" —
+  CR/LF/CR+LF) und die komplette Makro-Bar-Belegung (Label + Befehl aller
+  8 Slots).
+- Storage: `QSettings`-Gruppe `Profiles/<Name>/...`, mit `KomportMacroBar`s
+  eigener `Macros`-Gruppe einfach mitgenistet (`beginGroup()`-Verschachtelung
+  — `KomportMacroBar` selbst weiß nichts von Profilen, schreibt/liest einfach
+  die gerade offene Gruppe). Zusätzlich ein globaler Schlüssel `LastProfile`
+  außerhalb der `Profiles`-Gruppe (bewusst nicht `Profiles/LastProfile`, um
+  eine Namenskollision mit einem eventuellen Profil namens "LastProfile" zu
+  vermeiden).
+- UI: `profileCombo` (editierbar) + zwei `QAction`s "Save Profile"/"Delete
+  Profile" daneben in der Toolbar. Auswahl eines vorhandenen Eintrags aus dem
+  Dropdown lädt ihn sofort (`QComboBox::textActivated`, feuert bewusst nur bei
+  echter Nutzerauswahl, nicht beim Tippen eines neuen Namens oder bei
+  programmatischem `setCurrentText()`/`setCurrentIndex()`). Tippen + Enter im
+  Textfeld speichert genau wie der Save-Button.
+- Verhalten beim Profilwechsel (`KomportApp::loadProfile()`): serielle
+  Verbindung wird sauber getrennt (`serial->close()`), alle Hardware-Parameter
+  neu angewendet, Port neu geöffnet, Zeilenende-Dropdown aktualisiert (löst
+  `slotLineEndingChanged()` aus), Makro-Leiste per `macroBar->loadSettings()`
+  sofort mit den Befehlen des neuen Profils neu befüllt.
+  `applyConnectionSettings()` bündelt die eigentliche Seriell-Anwendung, von
+  `loadProfile()` und `initProfiles()` gemeinsam genutzt (nicht von
+  `slotShowPreferences()` — das behält bewusst sein bisheriges, sanfteres
+  Verhalten: nur neu verbinden, wenn sich das Gerät tatsächlich geändert hat).
+- Migration: `readOptions()`/`saveOptions()` verwalten nur noch die
+  allgemeinen Fenster-Optionen (Geometrie, Toolbar/Statusbar/Hex-Monitor
+  sichtbar, zuletzt genutzte Dateien) — die alten flachen
+  `Connection`/`Macros`/`LineEnding`-Schlüssel werden nicht mehr geschrieben.
+  Existiert beim ersten Start unter dem neuen Feature noch kein Profil, liest
+  `initProfiles()` einmalig die alten flachen Schlüssel (falls vorhanden,
+  sonst die eingebauten Defaults) und legt daraus automatisch ein
+  `"Default"`-Profil an — bestehende Konfigurationen aus der Zeit vor den
+  Profilen gehen dadurch nicht verloren.
+- `slotShowPreferences()` (Connection-Settings-Dialog) schreibt eine dort
+  vorgenommene Änderung jetzt zusätzlich sofort ins aktive Profil zurück
+  (`saveProfile(mCurrentProfile)`), damit sie nicht beim nächsten
+  Profilwechsel/Neustart wieder verschwindet.
+- `README.md`s Hinweis "not yet implemented: per-connection settings
+  profiles" ist damit überholt und wurde entfernt/durch eine echte
+  Feature-Beschreibung ersetzt.
+
+### 11.3 Verifikation
+
+- Build mit `-Wall -Wextra`: weiterhin 0 Warnungen, 0 Fehler.
+- Offscreen-Smoke-Test gegen ein frisches `XDG_CONFIG_HOME`: Erststart legt
+  korrekt ein `"Default"`-Profil mit allen erwarteten Schlüsseln
+  (Seriell-Parameter, `LineEnding`, 8 Makro-Slots) an, zweiter Start lädt es
+  ohne erneute Migration.
+- Zusätzlich ein temporärer, nicht ausgelieferter Integrationstest
+  (`komport_profiletest`, provisorisches CMake-Target wie zuvor bei den
+  Selbsttests, danach wieder entfernt): zwei echte `pty`-Geräte
+  (`python3 pty.openpty()`), zwei vorab per `QSettings` gesetzte Profile mit
+  unterschiedlichem Device/Baudrate/Framing/Makro. Eine echte `KomportApp`-
+  Instanz gebaut, `loadProfile()` zwischen beiden Profilen hin- und
+  hergeschaltet. 10 Prüfungen, alle grün: korrektes Gerät nach Start (aus
+  `LastProfile` aufgelöst, nicht das automatisch angelegte `"Default"`),
+  Verbindung tatsächlich offen, Baudrate angewendet, `LastProfile` nach
+  Wechsel aktualisiert, Wechsel zurück zum ersten Profil funktioniert
+  ebenso. (Framing-Werte wie 7 Databits/EVEN-Parity/RTS-CTS auf einem
+  virtuellen `pty` liefern erwartungsgemäß "ungültiges Argument"-Warnungen
+  von `QSerialPort`, da ein Pseudo-Terminal keine echte UART-Framing-Hardware
+  hat — sauber über `settingsFailed()`/`qWarning()` abgefangen, kein Absturz,
+  bestätigt den bereits vorhandenen Fehlerpfad.)

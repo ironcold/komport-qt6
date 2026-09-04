@@ -38,6 +38,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QLabel>
+#include <QLineEdit>
 
 // application specific includes
 #include "komport.h"
@@ -76,6 +77,7 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   connect( view->getSerial(), &KomportSerial::receivedChar, sessionLogger, &KomportSessionLogger::logChar );
 
   readOptions();
+  initProfiles();
 }
 
 KomportApp::~KomportApp()
@@ -85,9 +87,15 @@ KomportApp::~KomportApp()
 
 void KomportApp::initActions()
 {
+  // Status-bar hint texts (setStatusTip) are shown at the bottom while
+  // hovering a menu item - kept short and to the point on purpose: the
+  // status bar sits below a window that's only as wide as the terminal's
+  // fixed character grid, and QStatusBar clips rather than wraps overflow,
+  // so a full sentence there just gets cut off (this is what "tooltips get
+  // cut off in the menu" actually was).
   fileNewWindow = new QAction( tr("New &Window"), this );
   connect( fileNewWindow, &QAction::triggered, this, &KomportApp::slotFileNewWindow );
-  fileNewWindow->setStatusTip( tr("Opens a new application window") );
+  fileNewWindow->setStatusTip( tr("Open a new window") );
 
   fileOpen = new QAction( QIcon::fromTheme(QStringLiteral("document-open")), tr("&Upload..."), this );
   fileOpen->setShortcut( QKeySequence::Open );
@@ -102,52 +110,52 @@ void KomportApp::initActions()
   fileClose = new QAction( tr("&Close"), this );
   fileClose->setShortcut( QKeySequence::Close );
   connect( fileClose, &QAction::triggered, this, &KomportApp::slotFileClose );
-  fileClose->setStatusTip( tr("Closes the actual document") );
+  fileClose->setStatusTip( tr("Close the window") );
 
   filePrint = new QAction( QIcon::fromTheme(QStringLiteral("document-print")), tr("&Print..."), this );
   filePrint->setShortcut( QKeySequence::Print );
   connect( filePrint, &QAction::triggered, this, &KomportApp::slotFilePrint );
-  filePrint->setStatusTip( tr("Prints out the whole screen or selected section") );
+  filePrint->setStatusTip( tr("Print the screen") );
 
   fileQuit = new QAction( QIcon::fromTheme(QStringLiteral("application-exit")), tr("&Quit"), this );
   fileQuit->setShortcut( QKeySequence::Quit );
   connect( fileQuit, &QAction::triggered, this, &KomportApp::slotFileQuit );
-  fileQuit->setStatusTip( tr("Quits the application") );
+  fileQuit->setStatusTip( tr("Quit") );
 
   editCut = new QAction( QIcon::fromTheme(QStringLiteral("edit-cut")), tr("Cu&t"), this );
   editCut->setShortcut( QKeySequence::Cut );
   connect( editCut, &QAction::triggered, this, &KomportApp::slotEditCut );
-  editCut->setStatusTip( tr("Cuts the selected section and puts it to the clipboard") );
+  editCut->setStatusTip( tr("Cut selection") );
   editCut->setEnabled( false );
 
   editCopy = new QAction( QIcon::fromTheme(QStringLiteral("edit-copy")), tr("&Copy"), this );
   editCopy->setShortcut( QKeySequence::Copy );
   connect( editCopy, &QAction::triggered, this, &KomportApp::slotEditCopy );
-  editCopy->setStatusTip( tr("Copies the selected section to the clipboard") );
+  editCopy->setStatusTip( tr("Copy selection") );
   editCopy->setEnabled( false );
 
   editPaste = new QAction( QIcon::fromTheme(QStringLiteral("edit-paste")), tr("&Paste"), this );
   editPaste->setShortcut( QKeySequence::Paste );
   connect( editPaste, &QAction::triggered, this, &KomportApp::slotEditPaste );
-  editPaste->setStatusTip( tr("Pastes the clipboard contents") );
+  editPaste->setStatusTip( tr("Paste") );
   editPaste->setEnabled( false );
 
   viewToolBar = new QAction( tr("Show &Toolbar"), this );
   viewToolBar->setCheckable( true );
   viewToolBar->setChecked( true );
   connect( viewToolBar, &QAction::triggered, this, &KomportApp::slotViewToolBar );
-  viewToolBar->setStatusTip( tr("Enables/disables the toolbar") );
+  viewToolBar->setStatusTip( tr("Show/hide the toolbar") );
 
   viewStatusBar = new QAction( tr("Show &Statusbar"), this );
   viewStatusBar->setCheckable( true );
   viewStatusBar->setChecked( true );
   connect( viewStatusBar, &QAction::triggered, this, &KomportApp::slotViewStatusBar );
-  viewStatusBar->setStatusTip( tr("Enables/disables the statusbar") );
+  viewStatusBar->setStatusTip( tr("Show/hide the status bar") );
 
   showPreferences = new QAction( QIcon::fromTheme(QStringLiteral("preferences-system")), tr("&Connection Settings..."), this );
   showPreferences->setShortcut( QKeySequence::Preferences );
   connect( showPreferences, &QAction::triggered, this, &KomportApp::slotShowPreferences );
-  showPreferences->setStatusTip( tr("Connection Settings") );
+  showPreferences->setStatusTip( tr("Connection settings") );
 
   viewHexMonitor = new QAction( QIcon::fromTheme(QStringLiteral("format-text-code")), tr("&Hex Monitor"), this );
   viewHexMonitor->setCheckable( true );
@@ -157,12 +165,20 @@ void KomportApp::initActions()
   // explicitly anyway) - toggled would fire from both, applying the same
   // visibility twice.
   connect( viewHexMonitor, &QAction::triggered, this, &KomportApp::slotViewHexMonitor );
-  viewHexMonitor->setStatusTip( tr("Show raw sent/received bytes as a hex dump, next to the terminal") );
+  viewHexMonitor->setStatusTip( tr("Show raw RX/TX bytes as hex") );
 
   recordSession = new QAction( QIcon::fromTheme(QStringLiteral("media-record")), tr("&Record Session..."), this );
   recordSession->setCheckable( true );
   connect( recordSession, &QAction::toggled, this, &KomportApp::slotToggleRecording );
-  recordSession->setStatusTip( tr("Log everything received to a timestamped text file") );
+  recordSession->setStatusTip( tr("Log the session to a file") );
+
+  profileSave = new QAction( QIcon::fromTheme(QStringLiteral("document-save")), tr("Save Profile"), this );
+  connect( profileSave, &QAction::triggered, this, &KomportApp::slotSaveProfile );
+  profileSave->setStatusTip( tr("Save as this profile") );
+
+  profileDelete = new QAction( QIcon::fromTheme(QStringLiteral("edit-delete")), tr("Delete Profile"), this );
+  connect( profileDelete, &QAction::triggered, this, &KomportApp::slotDeleteProfile );
+  profileDelete->setStatusTip( tr("Delete this profile") );
 }
 
 void KomportApp::initMenus()
@@ -213,6 +229,25 @@ void KomportApp::initToolBar()
   mainToolBar->addSeparator();
   mainToolBar->addAction( viewHexMonitor );
   mainToolBar->addAction( recordSession );
+  mainToolBar->addSeparator();
+
+  mainToolBar->addWidget( new QLabel( tr(" Profile: "), mainToolBar ) );
+  profileCombo = new QComboBox( mainToolBar );
+  profileCombo->setEditable( true );
+  profileCombo->setInsertPolicy( QComboBox::NoInsert ); // typing a name doesn't add it to the list - Save does
+  profileCombo->setMinimumContentsLength( 14 );
+  profileCombo->setToolTip( tr("Device profile: pick one to load it, or type a new\n"
+                                "name and click Save to create it.") );
+  // textActivated (not currentTextChanged/currentIndexChanged): only fires
+  // on an actual user pick from the dropdown, never while typing a new
+  // name or from the setCurrentIndex()/setCurrentText() calls this class
+  // makes itself while populating/selecting programmatically.
+  connect( profileCombo, &QComboBox::textActivated, this, &KomportApp::loadProfile );
+  // typing a new name and pressing Enter saves it, same as clicking profileSave
+  connect( profileCombo->lineEdit(), &QLineEdit::returnPressed, this, &KomportApp::slotSaveProfile );
+  mainToolBar->addWidget( profileCombo );
+  mainToolBar->addAction( profileSave );
+  mainToolBar->addAction( profileDelete );
   mainToolBar->addSeparator();
 
   mainToolBar->addWidget( new QLabel( tr(" Enter sends: "), mainToolBar ) );
@@ -276,6 +311,193 @@ void KomportApp::initMacroBar()
   addToolBar( Qt::BottomToolBarArea, macroToolBar );
 }
 
+/////////////////////////////////////////////////////////////////////
+// DEVICE PROFILES
+//
+// A profile bundles everything a "session" needs to reconnect to a given
+// device the same way every time: the serial parameters, the line-ending
+// choice, and the macro bar's quick commands. Stored under QSettings group
+// "Profiles/<name>/...", with macroBar's own "Macros" group nested inside
+// it (KomportMacroBar doesn't need to know about profiles at all - it just
+// reads/writes whatever group is currently open on the QSettings object).
+/////////////////////////////////////////////////////////////////////
+
+void KomportApp::initProfiles()
+{
+  QStringList names = profileNames();
+  if ( names.isEmpty() ) {
+    // First run under the profile feature (or a genuinely fresh install):
+    // seed a "Default" profile from whatever flat, pre-profile settings
+    // exist under the old "Connection"/"Macros"/"LineEnding" keys (or
+    // their built-in defaults, for a fresh install), so nothing from an
+    // older config is lost and there is always at least one profile to
+    // fall back to.
+    config->beginGroup( QStringLiteral("Connection") );
+    strDevice = config->value( QStringLiteral("Device"), QStringLiteral("/dev/ttyS0") ).toString();
+    strBaudRate = config->value( QStringLiteral("BaudRate"), QStringLiteral("9600") ).toString();
+    strFlowControl = config->value( QStringLiteral("FlowControl"), QStringLiteral("NONE") ).toString();
+    strRxQueue = config->value( QStringLiteral("RXQueue"), QStringLiteral("1024") ).toString();
+    strFlushRate = config->value( QStringLiteral("FlushRate"), QStringLiteral("256") ).toString();
+    strStartBits = config->value( QStringLiteral("StartBits"), QStringLiteral("1") ).toString();
+    strDataBits = config->value( QStringLiteral("DataBits"), QStringLiteral("8") ).toString();
+    strStopBits = config->value( QStringLiteral("StopBits"), QStringLiteral("1") ).toString();
+    strParity = config->value( QStringLiteral("Parity"), QStringLiteral("NONE") ).toString();
+    strEmulation = config->value( QStringLiteral("Emulation"), QStringLiteral("VT102") ).toString();
+    strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") ).toString();
+    strLineEnding = config->value( QStringLiteral("LineEnding"), QStringLiteral("CR") ).toString();
+    config->endGroup();
+    macroBar->loadSettings(config); // reads the old flat top-level "Macros" group, if any
+
+    saveProfile( QStringLiteral("Default") );
+    names << QStringLiteral("Default");
+  }
+
+  QString last = config->value( QStringLiteral("LastProfile") ).toString();
+  if ( last.isEmpty() || !names.contains(last) ) last = names.first();
+
+  refreshProfileCombo( last );
+  loadProfile( last );
+}
+
+QStringList KomportApp::profileNames() const
+{
+  config->beginGroup( QStringLiteral("Profiles") );
+  QStringList names = config->childGroups();
+  config->endGroup();
+  names.sort( Qt::CaseInsensitive );
+  return names;
+}
+
+void KomportApp::refreshProfileCombo(const QString &_selectName)
+{
+  const QStringList names = profileNames();
+  profileCombo->blockSignals(true);
+  profileCombo->clear();
+  profileCombo->addItems(names);
+  if ( !_selectName.isEmpty() ) {
+    int idx = profileCombo->findText(_selectName);
+    if ( idx >= 0 ) profileCombo->setCurrentIndex(idx);
+    else profileCombo->setCurrentText(_selectName);
+  }
+  profileCombo->blockSignals(false);
+}
+
+void KomportApp::saveProfile(const QString &_name)
+{
+  config->beginGroup( QStringLiteral("Profiles") );
+  config->beginGroup( _name );
+  config->setValue( QStringLiteral("Device"), strDevice );
+  config->setValue( QStringLiteral("BaudRate"), strBaudRate );
+  config->setValue( QStringLiteral("FlowControl"), strFlowControl );
+  config->setValue( QStringLiteral("RXQueue"), strRxQueue );
+  config->setValue( QStringLiteral("FlushRate"), strFlushRate );
+  config->setValue( QStringLiteral("StartBits"), strStartBits );
+  config->setValue( QStringLiteral("DataBits"), strDataBits );
+  config->setValue( QStringLiteral("StopBits"), strStopBits );
+  config->setValue( QStringLiteral("Parity"), strParity );
+  config->setValue( QStringLiteral("Emulation"), strEmulation );
+  config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
+  config->setValue( QStringLiteral("LineEnding"), strLineEnding );
+  macroBar->saveSettings(config); // ends up nested under Profiles/<name>/Macros
+  config->endGroup();
+  config->endGroup();
+
+  config->setValue( QStringLiteral("LastProfile"), _name );
+  config->sync();
+  mCurrentProfile = _name;
+}
+
+void KomportApp::applyConnectionSettings()
+{
+  view->setScrollBuffer( strScrollBuffer.toInt() );
+  KomportSerial* serial = view->getSerial();
+  // Cleanly disconnect first: a profile switch commonly means switching to
+  // a completely different device, so always close/reapply/reopen rather
+  // than relying on setDeviceName()'s "only reconnect if it actually
+  // changed" shortcut (that one's still used by slotShowPreferences() for
+  // in-place tweaks, where preserving the connection is nicer).
+  serial->close();
+  serial->setDeviceName( strDevice );
+  serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
+  serial->setFlowControl( strFlowControl );
+  serial->setBaudRate( strBaudRate );
+  serial->setRxQueue( strRxQueue.toInt() );
+  serial->setFlushRate( strFlushRate.toInt() );
+  serial->open();
+}
+
+void KomportApp::loadProfile(const QString &_name)
+{
+  if ( _name.isEmpty() ) return;
+  config->beginGroup( QStringLiteral("Profiles") );
+  config->beginGroup( _name );
+  if ( config->childKeys().isEmpty() && config->childGroups().isEmpty() ) {
+    // nothing actually stored under this name (e.g. stale combo entry) -
+    // bail out rather than applying empty/default-constructed settings
+    config->endGroup();
+    config->endGroup();
+    return;
+  }
+  strDevice = config->value( QStringLiteral("Device"), strDevice ).toString();
+  strBaudRate = config->value( QStringLiteral("BaudRate"), strBaudRate ).toString();
+  strFlowControl = config->value( QStringLiteral("FlowControl"), strFlowControl ).toString();
+  strRxQueue = config->value( QStringLiteral("RXQueue"), strRxQueue ).toString();
+  strFlushRate = config->value( QStringLiteral("FlushRate"), strFlushRate ).toString();
+  strStartBits = config->value( QStringLiteral("StartBits"), strStartBits ).toString();
+  strDataBits = config->value( QStringLiteral("DataBits"), strDataBits ).toString();
+  strStopBits = config->value( QStringLiteral("StopBits"), strStopBits ).toString();
+  strParity = config->value( QStringLiteral("Parity"), strParity ).toString();
+  strEmulation = config->value( QStringLiteral("Emulation"), strEmulation ).toString();
+  strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), strScrollBuffer ).toString();
+  strLineEnding = config->value( QStringLiteral("LineEnding"), strLineEnding ).toString();
+  macroBar->loadSettings(config); // reads Profiles/<name>/Macros
+  config->endGroup();
+  config->endGroup();
+
+  mCurrentProfile = _name;
+  config->setValue( QStringLiteral("LastProfile"), _name );
+
+  applyConnectionSettings();
+  lineEndingCombo->setCurrentText( strLineEnding ); // triggers slotLineEndingChanged() if it actually changed
+
+  refreshProfileCombo( _name );
+  slotStatusMsg( tr("Loaded profile \"%1\"").arg(_name) );
+}
+
+void KomportApp::slotSaveProfile()
+{
+  const QString name = profileCombo->currentText().trimmed();
+  if ( name.isEmpty() ) {
+    QMessageBox::warning( this, tr("Save Profile"), tr("Please enter a profile name first.") );
+    return;
+  }
+  saveProfile(name);
+  refreshProfileCombo(name);
+  slotStatusMsg( tr("Saved profile \"%1\"").arg(name) );
+}
+
+void KomportApp::slotDeleteProfile()
+{
+  const QString name = profileCombo->currentText().trimmed();
+  if ( name.isEmpty() || !profileNames().contains(name) ) {
+    QMessageBox::information( this, tr("Delete Profile"), tr("\"%1\" is not a saved profile.").arg(name) );
+    return;
+  }
+  if ( QMessageBox::question( this, tr("Delete Profile"), tr("Delete profile \"%1\"? This cannot be undone.").arg(name) )
+       != QMessageBox::Yes ) {
+    return;
+  }
+
+  config->beginGroup( QStringLiteral("Profiles") );
+  config->remove( name );
+  config->endGroup();
+  config->sync();
+
+  if ( mCurrentProfile == name ) mCurrentProfile.clear();
+  refreshProfileCombo();
+  slotStatusMsg( tr("Deleted profile \"%1\"").arg(name) );
+}
+
 void KomportApp::openDocumentFile(const QUrl& url)
 {
   slotStatusMsg(tr("Opening file..."));
@@ -311,6 +533,10 @@ void KomportApp::rebuildRecentFilesMenu()
 
 void KomportApp::saveOptions()
 {
+  // Connection/framing/line-ending/macro settings are no longer saved here
+  // - they live per-profile now (see saveProfile()/loadProfile()) and are
+  // only ever written when the user explicitly saves a profile, not
+  // silently on every window close.
   config->beginGroup( QStringLiteral("General Options") );
   config->setValue( QStringLiteral("Geometry"), size() );
   config->setValue( QStringLiteral("Show Toolbar"), viewToolBar->isChecked() );
@@ -320,23 +546,6 @@ void KomportApp::saveOptions()
   for ( const QUrl &url : std::as_const(mRecentFiles) ) recent << url.toString();
   config->setValue( QStringLiteral("Recent Files"), recent );
   config->endGroup();
-
-  config->beginGroup( QStringLiteral("Connection") );
-  config->setValue( QStringLiteral("Device"), strDevice );
-  config->setValue( QStringLiteral("BaudRate"), strBaudRate );
-  config->setValue( QStringLiteral("FlowControl"), strFlowControl );
-  config->setValue( QStringLiteral("RXQueue"), strRxQueue );
-  config->setValue( QStringLiteral("FlushRate"), strFlushRate );
-  config->setValue( QStringLiteral("StartBits"), strStartBits );
-  config->setValue( QStringLiteral("DataBits"), strDataBits );
-  config->setValue( QStringLiteral("StopBits"), strStopBits );
-  config->setValue( QStringLiteral("Parity"), strParity );
-  config->setValue( QStringLiteral("Emulation"), strEmulation );
-  config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
-  config->setValue( QStringLiteral("LineEnding"), strLineEnding );
-  config->endGroup();
-
-  macroBar->saveSettings(config);
   config->sync();
 }
 
@@ -369,35 +578,8 @@ void KomportApp::readOptions()
     resize(sz);
   }
 
-  config->beginGroup( QStringLiteral("Connection") );
-  strDevice = config->value( QStringLiteral("Device"), QStringLiteral("/dev/ttyS0") ).toString();
-  strBaudRate = config->value( QStringLiteral("BaudRate"), QStringLiteral("9600") ).toString();
-  strFlowControl = config->value( QStringLiteral("FlowControl"), QStringLiteral("NONE") ).toString();
-  strRxQueue = config->value( QStringLiteral("RXQueue"), QStringLiteral("1024") ).toString();
-  strFlushRate = config->value( QStringLiteral("FlushRate"), QStringLiteral("256") ).toString();
-  strStartBits = config->value( QStringLiteral("StartBits"), QStringLiteral("1") ).toString();
-  strDataBits = config->value( QStringLiteral("DataBits"), QStringLiteral("8") ).toString();
-  strStopBits = config->value( QStringLiteral("StopBits"), QStringLiteral("1") ).toString();
-  strParity = config->value( QStringLiteral("Parity"), QStringLiteral("NONE") ).toString();
-  strEmulation = config->value( QStringLiteral("Emulation"), QStringLiteral("VT102") ).toString();
-  strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") ).toString();
-  strLineEnding = config->value( QStringLiteral("LineEnding"), QStringLiteral("CR") ).toString();
-  config->endGroup();
-
-  macroBar->loadSettings(config);
-
-  view->setScrollBuffer( strScrollBuffer.toInt() );
-  KomportSerial* serial = view->getSerial();
-  serial->setDeviceName( strDevice );
-  serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
-  serial->setFlowControl( strFlowControl );
-  serial->setBaudRate( strBaudRate );
-  serial->setRxQueue( strRxQueue.toInt() );
-  serial->setFlushRate( strFlushRate.toInt() );
-  serial->open();
-
-  lineEndingCombo->setCurrentText( strLineEnding );
-  slotLineEndingChanged( strLineEnding );
+  // Connection/framing/line-ending/macro settings are handled by
+  // initProfiles() (called right after this), not here anymore.
 }
 
 void KomportApp::closeEvent(QCloseEvent *event)
@@ -613,6 +795,10 @@ void KomportApp::slotShowPreferences()
       serial->setRxQueue( strRxQueue.toInt() );
       serial->setFlushRate( strFlushRate.toInt() );
       if ( !serial->isOpen() ) serial->open();
+
+      // Persist the tweak into the active profile, so it isn't silently
+      // lost the next time this profile is (re)loaded or the app restarts.
+      if ( !mCurrentProfile.isEmpty() ) saveProfile( mCurrentProfile );
   }
 
   slotStatusMsg(tr("Ready."));

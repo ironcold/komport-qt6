@@ -22,6 +22,7 @@
 #include <QMainWindow>
 #include <QUrl>
 #include <QString>
+#include <QStringList>
 #include <QList>
 
 class QSettings;
@@ -96,7 +97,30 @@ class KomportApp : public QMainWindow
     /** asks to save modifications, then accepts/rejects the close */
     void closeEvent(QCloseEvent *event) override;
 
+    /** resolves which device profile to start with (migrating pre-profile
+     *  flat settings into a "Default" profile on first run under this
+     *  feature, if none exist yet), populates profileCombo and loads it */
+    void initProfiles();
+    /** names of all profiles currently stored under the "Profiles" group */
+    QStringList profileNames() const;
+    /** repopulates profileCombo from profileNames(), optionally selecting _selectName */
+    void refreshProfileCombo(const QString &_selectName = QString());
+    /** writes the current strDevice.../strLineEnding/macroBar state into
+     *  Profiles/_name, and remembers it as the last-used profile */
+    void saveProfile(const QString &_name);
+    /** applies strDevice.../strLineEnding to the serial port, view and
+     *  line-ending combo - shared by initProfiles() and loadProfile() */
+    void applyConnectionSettings();
+
   public slots:
+    /** loads Profiles/_name into strDevice... and macroBar, then applies it
+     *  (cleanly closing/reopening the serial port) - also usable as a
+     *  direct slot target for profileCombo's textActivated signal */
+    void loadProfile(const QString &_name);
+    /** saves the current settings under profileCombo's current text */
+    void slotSaveProfile();
+    /** deletes the profile currently selected in profileCombo (asks to confirm) */
+    void slotDeleteProfile();
     /** open a new application window by creating a new instance of KomportApp */
     void slotFileNewWindow();
     /** clears the document in the actual view to reuse it as the new document */
@@ -157,6 +181,9 @@ class KomportApp : public QMainWindow
     QString strEmulation;
     QString strScrollBuffer;
     QString strLineEnding;
+    /** name of the currently active device profile, or empty if none
+     *  (e.g. it was just deleted) - see initProfiles()/loadProfile() */
+    QString mCurrentProfile;
     KomportView *view;
     /** doc represents your actual document and is created only once. */
     KomportDoc *doc;
@@ -180,12 +207,19 @@ class KomportApp : public QMainWindow
     QAction* viewHexMonitor;
     /** toggles session logging */
     QAction* recordSession;
+    /** saves the current settings under profileCombo's current text */
+    QAction* profileSave;
+    /** deletes the profile selected in profileCombo */
+    QAction* profileDelete;
 
     // Menus/toolbar
     QMenu* fileOpenRecentMenu;
     QToolBar* mainToolBar;
     /** CR/LF/CR+LF chooser for the Return key and macro commands */
     QComboBox* lineEndingCombo;
+    /** device profile picker - select an existing entry to load it, or
+     *  type a new name and click profileSave to create one */
+    QComboBox* profileCombo;
 
     // Hex monitor / macro bar / session logging (new in the Qt6 port)
     QSplitter* centralSplitter;

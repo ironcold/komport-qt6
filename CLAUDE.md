@@ -122,6 +122,12 @@ Soll ersetzt werden durch:
 - `KomportApp` (`komport.h/.cpp`) — Hauptfenster, Menüs/Toolbar/Statusbar, Dateiverwaltung,
   verdrahtet auch die neueren Panels/Leisten unten (Hex-Monitor, Makro-Bar, Recording, s.u.).
   Zentralwidget ist ein `QSplitter` mit `KomportView` und `KomportHexView`.
+  Trägt außerdem die **Geräteprofil-Verwaltung** (`initProfiles()`/`loadProfile()`/
+  `saveProfile()`, Toolbar-`profileCombo`): ein Profil bündelt serielle Parameter,
+  Zeilenende und die Makro-Bar-Belegung unter `QSettings`-Gruppe `Profiles/<Name>`;
+  `readOptions()`/`saveOptions()` kümmern sich nur noch um Fenster-Chrome
+  (Geometrie, Bar-Sichtbarkeit, zuletzt genutzte Dateien), nicht mehr um
+  Verbindungseinstellungen. Details in `TODO-ARCHIVE.md` Abschnitt 11.2.
 - `KomportDoc` (`komportdoc.h/.cpp`) — hält `KomportSerial`-Instanz, Document-View-Pattern
   (aus KDevelop-Boilerplate; für ein Terminal eigentlich zu schwergewichtig, aber wird
   strukturell übernommen statt neu designt).

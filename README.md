@@ -13,6 +13,7 @@ This project strips away all legacy KDE Frameworks and Qt3/4/5 dependencies, mig
 ### Core Enhancements (Beyond the Original)
 * **Modern Serial Backend:** Powered entirely by `QSerialPort` and `QSerialPortInfo`. Features automatic hardware device detection (no more guessing if it's `/dev/ttyUSB0` or `/dev/ttyS1`).
 * **Hardware-Level Framing:** Proper application of data bits, stop bits, parity, and flow control (XON/XOFF, RTS/CTS) directly to the hardware—fixing long-standing bugs in the 2004 upstream codebase.
+* **Device Profiles:** Save, load, and delete named connection profiles from a dropdown in the toolbar. Each profile bundles the full session: serial parameters, the line-ending choice, and the macro bar's quick commands—switching profiles cleanly disconnects, re-applies the new hardware settings, and reloads the macro bar in one step.
 
 ### Admin & Diagnosis Power-Tools
 * **Toggleable Hex Monitor:** View raw RX/TX streams in a toggleable split-screen panel featuring the classic `[Offset] [Hex-Bytes] [ASCII]` layout—ideal for debugging invisible control characters.
@@ -21,7 +22,7 @@ This project strips away all legacy KDE Frameworks and Qt3/4/5 dependencies, mig
 * **Line-Ending Selection:** Quick-switch options for the Return key and macros to send `CR`, `LF`, or `CR+LF`, for compatibility with varied enterprise network switches and embedded devices.
 * **Expanded Terminal Emulation:** Broader VT100/VT102 coverage, including full support for ANSI SGR colors (including bright variants), multi-parameter cursor movement, insert/delete line/character, DECCKM/DECTCEM mode handling, and device status reports.
 
-> Not yet implemented: per-connection settings profiles (save/switch between named device configs), VT100 scroll regions, and VT52 mode. See `TODO.md` for the current, honest list of open items and known gaps.
+> Not yet implemented: VT100 scroll regions and VT52 mode. See `TODO.md` for the current, honest list of open items and known gaps.
 
 ---
 

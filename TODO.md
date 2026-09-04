@@ -26,12 +26,13 @@ Unten stehen nur die bewusst offen gelassenen/verschobenen Punkte.
 Ursprünglich aus der alten `TODO`-Datei des Original-Autors (2003) übernommen,
 seither ergänzt:
 
-- Pro-Verbindung eigene Settings-Datei (aktuell: eine gemeinsame `QSettings`-
-  Instanz je Prozess/Fenster).
 - VT100-Emulation weiter finalisieren, insbesondere die oben unter Abschnitt 6
   genannten Lücken (Scroll-Regionen wären der aufwändigste Brocken — bräuchte
   eine scroll-region-fähige `scrollUp()`/neue `scrollDown()` in
   `KomportCellArray`).
+- Mögliche Erweiterungen der Profilverwaltung (Abschnitt 11 in
+  `TODO-ARCHIVE.md`), falls gewünscht: Umbenennen bestehender Profile,
+  Import/Export als Datei, ein "Profil wechseln" ohne den Kombinationsfeld-Text
+  erst manuell zu tippen bei sehr vielen Profilen (z.B. Sortierung/Filter).
 - Ideen aus der `README.md`, die (noch) nicht umgesetzt sind, bei Bedarf hier
-  eintragen, bevor sie als Feature versprochen werden (siehe Review-Hinweis
-  zu "Connection Profiles" in der Commit-Historie).
+  eintragen, bevor sie als Feature versprochen werden.
