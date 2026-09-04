@@ -46,6 +46,24 @@ Kernfunktionen, die erhalten bleiben müssen:
   funktional erweitern, nur lauffähig halten.
 - Settings-Dialog (`settingsdialog.ui`/`.cpp`/`.h`) für Verbindungsparameter.
 
+## Produktvision / Daseinsberechtigung
+
+Komport-Qt6 soll bewusst kein weiteres generisches Terminal fuer normale Shell-Arbeit werden. Die Daseinsberechtigung liegt in den Spezialfaellen, bei denen man heute oft mehrere halb passende Tools ausprobiert und am Ende trotzdem unzufrieden ist: serielle Konsolen von Netzwerk- und Industriegeraeten, historische Rechner, ungewoehnliche Zeilenenden, rohe Steuerzeichen, Diagnose-Mitschnitte, Makros, Geraeteprofile und Zeichensatz- oder Grafikzeichen-Eigenheiten.
+
+Die Retroidee ist dabei kein Selbstzweck, sondern ein guter Produktanker: ein modernes Qt6-Werkzeug, das alte und widerspenstige serielle Welten ernst nimmt. Komfortfeatures duerfen ruhig an KDE Konsole, Kate oder klassische Terminalprogramme erinnern, muessen aber immer dem seriellen Spezialfall dienen. Wiederverwendung ist willkommen, solange sie diese Ziele nicht verdeckt oder das Projekt in unnoetige Framework-Abhaengigkeiten zieht.
+
+## Terminal-Engine-Leitlinie
+
+Die eigene `QSerialPort`-Pipeline bleibt vorerst die Referenzarchitektur, weil Hex-Monitor, Logging, Makros, Profile, Line-Endings und die geplante Zeichensatz-Uebersetzung direkt am seriellen Rohdatenstrom ansetzen. Eine fremde Terminal-Engine darf nur hinter einer klaren Bridge sitzen:
+
+`QSerialPort -> RX/TX-Diagnose/Logging -> Zeichensatz-Uebersetzung -> Terminal-Backend`
+
+und in Gegenrichtung:
+
+`Terminal-Backend -> Zeichensatz-Uebersetzung/Line-Ending/Makros -> QSerialPort`
+
+KDE `KonsolePart` ist technisch interessant, aber langfristig wahrscheinlich zu schwer fuer dieses Projekt: KF6/KParts/XmlGui-Abhaengigkeiten, PTY-/Shell-Fokus und zusaetzliche Bridge-Komplexitaet passen nur schlecht zu einem schlanken, reinen Qt6-Serial-Tool. `QTermWidget` ist der sinnvollere Wiederverwendungs-Kandidat fuer einen Spike, weil es als Qt-Widget einbettbar ist und weniger KDE-Ballast mitbringt. Trotzdem gilt: Wenn Spezialfeatures wie Zeichensatz-Tabellen, Hex-Sicht, Profile oder Rohdatenkontrolle dadurch schlechter werden, bleibt die eigene Emulation die bessere Wahl.
+
 ## Ziel dieser Migration
 
 1. **KDE-Klassen raus, Standard-Qt6-Klassen rein.** Es soll am Ende ein reines Qt6-Programm
@@ -177,8 +195,11 @@ Abschnitt 3 für die vollständige Liste). Bauen: `cmake -B build && cmake --bui
 
 ## Was NICHT im Scope ist (sofern nicht anders vom Nutzer gewünscht)
 
-- Keine neue Terminal-Emulation (kein xterm/VT220/256-Farben-Ausbau) — nur VT100/VT102
-  wie bisher, nur die Infrastruktur drumherum wird modernisiert.
+- Kein unkontrollierter Wechsel auf eine fremde Terminal-Engine. Terminal-Engine-Arbeit
+  muss als eigener Spike/ADR entschieden werden; `QTermWidget` ist der bevorzugte
+  Kandidat fuer Wiederverwendung, `KonsolePart` nur als bewusst dokumentierte
+  Gegenprobe. Bis dahin bleibt die eigene VT100/VT102-nahe Emulation der
+  stabile Pfad.
   **Explizit vom Nutzer gewünschte Ausnahme:** die hellen ANSI-Farbcodes `90–97`/`100–107`
   (`komportemulation.cpp`, `doGraphics()`) sind aixterm/xterm-Herkunft, nicht Teil der
   originalen VT102-Doku im Kopfkommentar dieser Datei — sie wurden bewusst mit

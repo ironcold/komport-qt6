@@ -2,6 +2,8 @@
 
 A lightweight, native serial port communicator and VT100/VT102 terminal emulator for the Linux desktop, built on **Qt6** and **QSerialPort**.
 
+Komport-Qt6 exists for the awkward real-world serial-console cases where the usual tools are always almost right, but never quite satisfying: odd line endings, invisible control bytes, legacy character sets, industrial devices, old computers, network gear and ad-hoc diagnosis sessions. The goal is not to become a generic shell terminal. It is a deliberate special-purpose serial workbench with a practical retro-computing streak.
+
 *Komport-Qt6* is a modernized, standalone continuation of the classic **"Komport"** application by Mike Sharkey (2003/2004). The original project was deeply tied to KDE 2/3 and Qt3 and has been abandoned for over 15 years.
 
 This project strips away all legacy KDE Frameworks and Qt3/4/5 dependencies, migrating the application to **pure, native Qt6**. While the robust terminal emulation, character-grid rendering, and general lightweight structure are carried forward, the entire under-the-hood architecture has been rewritten for modern Linux systems.
@@ -20,6 +22,7 @@ This project strips away all legacy KDE Frameworks and Qt3/4/5 dependencies, mig
 * **One-Click Session Logging:** A dedicated "Record" button in the toolbar to live-log the received terminal output to a timestamped text file.
 * **Programmable Macro Bar:** A customizable row of quick-command buttons at the bottom of the window for firing off repetitive admin commands (e.g., `show running-config`, `wr mem`) with a single click.
 * **Line-Ending Selection:** Quick-switch options for the Return key and macros to send `CR`, `LF`, or `CR+LF`, for compatibility with varied enterprise network switches and embedded devices.
+* **Special-Case Serial Workbench:** The long-term niche is the stuff where generic terminals get annoying: raw byte inspection, profile-bound quirks, retro/industry character-set translation, device-specific macros, and repeatable logging.
 * **Expanded Terminal Emulation:** Broader VT100/VT102 coverage, including full support for ANSI SGR colors (including bright variants), multi-parameter cursor movement, insert/delete line/character, DECCKM/DECTCEM mode handling, and device status reports.
 
 > Not yet implemented: VT100 scroll regions and VT52 mode. See `TODO.md` for the current, honest list of open items and known gaps.

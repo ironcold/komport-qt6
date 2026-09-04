@@ -9,6 +9,42 @@ Stand: alle bisherigen Aufträge (Basis-Portierung, Admin-Tool-Features,
 Code-Review-Fixes, Umbenennung) sind abgearbeitet — siehe `TODO-ARCHIVE.md`.
 Unten stehen nur die bewusst offen gelassenen/verschobenen Punkte.
 
+## 0. Review-Gate vor weiterer Feature-Arbeit
+
+- [ ] Vor neuen funktionalen Meilensteinen einen kompletten Codex-/Adversarial-Review
+  des aktuellen Stands durchfuehren. Hintergrund: Die Qt6-Portierung und die
+  Admin-Tool-Features sind auf einem anderen Rechner entstanden und noch nicht
+  nach den strengeren Template-Vorgaben dieses Arbeitsbereichs gesteuert
+  worden. Review-Fokus: serielle I/O mit `QSerialPort`, VT100/VT102-
+  Emulation, Scrollback/Minimap, Hex-Monitor/Session-Logging, Profil-
+  Persistenz, UI-Lifetime/Signal-Slot-Verbindungen, Build-/Install-Pfade,
+  Lizenz-/Header-Konsistenz und fehlende Tests/Smoke-Checks. Findings vor
+  Meilenstein 4/5/6/7 priorisieren und als konkrete TODOs schneiden.
+
+
+## 1. Produktvision und Architektur-Gate
+
+- [ ] Produktvision festhalten und bei kuenftigen Features gegenpruefen: Komport-Qt6
+  soll ein spezialisiertes serielles Werkstatt-Terminal werden, nicht noch ein
+  allgemeines Shell-Terminal. Kernnutzen: die schwierigen Faelle, fuer die man
+  sonst mehrere halb passende Tools sucht: Netzwerk-/Industriegeraete, alte
+  Rechner, ungewoehnliche Zeilenenden, rohe Steuerzeichen, Hex-Diagnose,
+  Mitschnitte, Makros, Profile und Retro-/Industrie-Zeichensaetze.
+- [ ] Terminal-Engine-ADR vor Meilenstein 4 finalisieren: eigene Emulation weiter
+  ausbauen vs. `QTermWidget` als optionales Backend. Entwurf liegt in
+  `docs/architecture-decisions/ADR-001-terminal-engine-strategy.md`.
+  Entscheidungsfrage ist nicht "koennen wir etwas wiederverwenden?", sondern
+  ob Wiederverwendung die
+  seriellen Spezialfeatures einfacher, stabiler und wartbarer macht.
+- [ ] Kleinen Spike fuer `QTermWidget` planen, bevor VT220/xterm-Komfort tief in
+  die eigene Emulation eingebaut wird: RX/TX-Bridge, Tastatureingaben,
+  Scrollback, Farbschemata, Cursor, Copy/Paste und Performance pruefen. Die
+  Zeichensatz-Uebersetzung muss dabei weiterhin vor der Terminal-Interpretation
+  auf Byte-Ebene moeglich bleiben.
+- [ ] `KonsolePart` nur als dokumentierte Gegenprobe aufnehmen, nicht als
+  bevorzugten Pfad: zu viele KDE-/KF6-Abhaengigkeiten und PTY-/Shell-Fokus fuer
+  ein schlankes Qt6-Serial-Tool.
+
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 
 - `KomportDoc::openDocument/saveDocument` waren im Original bereits reine
@@ -180,10 +216,7 @@ wiederverwendbar bleibt:
 
 ## Sonstiges
 
-- Remote-Repository: `git.txt` (mittlerweile gelöscht) enthielt die vom
-  Nutzer bereits selbst ausgeführten `git remote add`/`git push`-Befehle für
-  Codeberg (`https://codeberg.org/ironcold/komport-qt6.git`) bzw. GitHub
-  (`https://github.com/ironcold/komport-qt6.git`) — dieses lokale Repo hat
-  aktuell aber (Stand hier) noch kein `origin` konfiguriert, siehe
-  `git remote -v`. Vor dem ersten echten Push: Historie/Commits nochmal
-  durchsehen, dann Remote setzen und pushen.
+- Remote-Repositories: `origin` zeigt auf Codeberg
+  (`ssh://git@codeberg.org/ironcold/komport-qt6.git`), `github` zeigt auf
+  GitHub (`git@github.com:ironcold/komport-qt6.git`). Vor Pushes bewusst
+  entscheiden, ob nur Codeberg oder Codeberg plus GitHub bedient werden soll.
