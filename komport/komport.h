@@ -31,6 +31,7 @@ class QMenu;
 class QToolBar;
 class QSplitter;
 class QComboBox;
+class QLabel;
 
 // forward declaration of the Komport classes
 class KomportDoc;
@@ -97,12 +98,14 @@ class KomportApp : public QMainWindow
     /** asks to save modifications, then accepts/rejects the close */
     void closeEvent(QCloseEvent *event) override;
 
-    /** one-time seed of a handful of vendor-preset profiles (Cisco, HP 1920,
+    /** seeds a handful of vendor-preset profiles (Cisco, HP 1920/1950,
      *  Aruba CX, ...) with well-known console defaults, so there's something
-     *  useful to pick from on a fresh install. Runs once (tracked via the
-     *  "BuiltinProfilesSeeded" setting) and never overwrites a same-named
-     *  profile the user already has (including one they deliberately
-     *  deleted after it was first seeded). */
+     *  useful to pick from on a fresh install. Tracked per preset *name* via
+     *  the "SeededProfileNames" setting (not a single one-shot flag) so a
+     *  later code update can add/fix a preset and have it actually reach an
+     *  install that already ran this before - while still never overwriting
+     *  a same-named profile the user already has, and never resurrecting
+     *  one they deliberately deleted. */
     void seedBuiltinProfiles();
     /** resolves which device profile to start with (migrating pre-profile
      *  flat settings into a "Default" profile on first run under this
@@ -118,6 +121,10 @@ class KomportApp : public QMainWindow
     /** applies strDevice.../strLineEnding to the serial port, view and
      *  line-ending combo - shared by initProfiles() and loadProfile() */
     void applyConnectionSettings();
+    /** refreshes the permanent "current settings" label in the status bar
+     *  footer from strDevice/strBaudRate/strDataBits/strParity/strStopBits/
+     *  strLineEnding - call after anything that changes them */
+    void updateConnectionStatusLabel();
 
   public slots:
     /** loads Profiles/_name into strDevice... and macroBar, then applies it
@@ -227,6 +234,8 @@ class KomportApp : public QMainWindow
     /** device profile picker - select an existing entry to load it, or
      *  type a new name and click profileSave to create one */
     QComboBox* profileCombo;
+    /** permanent status-bar label showing the active device/framing/line-ending */
+    QLabel* connectionStatusLabel;
 
     // Hex monitor / macro bar / session logging (new in the Qt6 port)
     QSplitter* centralSplitter;

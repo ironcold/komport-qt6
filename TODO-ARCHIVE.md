@@ -547,3 +547,67 @@ wieder entfernbar.
 - Zweiter Lauf nach simuliertem Löschen von "Cisco (9600 8N1)" aus der
   Konfigurationsdatei: Profil wird beim nächsten Start **nicht** erneut
   angelegt (Löschung wird respektiert), `BuiltinProfilesSeeded` bleibt `true`.
+
+## 13. Baudraten-Korrektur HP 1920/1950 + echter `QSettings`-Bug gefunden
+
+Rückmeldung direkt von echter Hardware: der HP 1920 (und 1950) läuft mit
+**38400**, nicht mit den ursprünglich angenommenen 9600 — Profil korrigiert,
+umbenannt zu `"HP 1920 & 1950 (38400 8N1)"` (deckt beide Modelle ab, die
+sich dasselbe Comware/H3C-CLI teilen).
+
+### 13.1 Seeding von einem Flag auf Pro-Name-Historie umgestellt
+
+Das ursprüngliche einzelne `BuiltinProfilesSeeded`-Flag hätte diese Korrektur
+bei jedem Nutzer blockiert, der die App vorher schon einmal gestartet hatte
+(Seeding lief dann ja schon "einmalig" und nie wieder). Umgebaut auf eine
+Liste `SeededProfileNames`, die verfolgt, welche *Preset-Namen* schon einmal
+angeboten wurden: ein neuer/umbenannter Preset-Name erreicht damit auch
+Installationen, die schon einmal gesät haben, während ein vom Nutzer bewusst
+gelöschtes Preset (weiterhin, per Name geprüft) nicht zurückkommt.
+
+### 13.2 Echter Bug gefunden: `/` im Profilnamen zerlegt die QSettings-Gruppe
+
+Beim Testen der Umbenennung fiel auf: `QSettings::beginGroup()` behandelt `/`
+als Pfadtrenner — *auch innerhalb eines einzelnen Aufrufs*. Der ursprünglich
+geplante Name `"HP 1920/1950 (38400 8N1)"` hätte `beginGroup("Profiles")` +
+`beginGroup("HP 1920/1950 (38400 8N1)")` intern in **zwei** verschachtelte
+Gruppen aufgespalten (`Profiles/HP 1920/1950 (38400 8N1)/...` statt
+`Profiles/<ein Name>/...`). Mit einem kleinen Test-Programm gegen die echte
+Konfigurationsdatei verifiziert: `childGroups()` unter `"Profiles"` zeigte nur
+`"HP 1920"` (abgeschnitten), `loadProfile("HP 1920")` hätte die eigentlichen
+Werte (eine Ebene tiefer unter `"1950 (38400 8N1)"`) gar nicht gefunden.
+
+Betrifft nicht nur dieses eine Preset, sondern die gesamte Profilfunktion:
+jeder Nutzer, der selbst einen Profilnamen mit `/` eintippt, hätte denselben
+stillen Defekt ausgelöst. Zwei Fixes:
+- Preset umbenannt auf `"HP 1920 & 1950 (38400 8N1)"` (kein `/`).
+- `slotSaveProfile()` weist Namen mit `/` jetzt explizit mit einer Meldung
+  zurück, statt sie still zu zerlegen (analog zum bereits vorhandenen
+  Leerstring-Check).
+
+### 13.3 Verifikation
+
+- Build mit `-Wall -Wextra`: weiterhin 0 Warnungen, 0 Fehler.
+- Kleines Standalone-`QSettings`-Testprogramm gegen die echte Konfigurations-
+  datei bestätigt: `"HP 1920 & 1950 (38400 8N1)"` erscheint jetzt korrekt als
+  **ein** Eintrag in `childGroups()` unter `"Profiles"`, nicht mehr aufgespalten.
+- Smoke-Test gegen frisches `XDG_CONFIG_HOME`: alle drei Presets korrekt
+  angelegt, `SeededProfileNames` enthält alle drei aktuellen Namen.
+
+## 14. Statusleisten-Fußzeile mit aktuellen Verbindungseinstellungen
+
+Permanentes `QLabel` rechts in der Statusleiste (`statusBar()->
+addPermanentWidget()`, bleibt unabhängig von den kurzlebigen
+`slotStatusMsg()`-Texten links sichtbar), zeigt kompakt Gerät, Baudrate,
+Framing (`8N1`-Notation) und Zeilenende — z.B. `/dev/ttyUSB0  ·  38400 8N1  ·
+Enter: CR`. Tooltip beim Hovern zeigt zusätzlich Profilname und Flow-Control
+aus.
+
+Aktualisiert von `updateConnectionStatusLabel()`, aufgerufen aus
+`applyConnectionSettings()` (deckt `loadProfile()`/`initProfiles()` ab),
+`slotShowPreferences()` (nach angenommenen Änderungen) und
+`slotLineEndingChanged()` (Toolbar-Dropdown). Bewusst kurz gehalten — gleiche
+Begründung wie bei den gekürzten `setStatusTip()`-Texten (Abschnitt 11.1):
+das Fenster ist durch das feste Zeichenraster schmal, ein `QLabel` würde zwar
+nicht wie die Statusleisten-Message abgeschnitten (eigenes Tooltip wickelt
+korrekt um), aber unnötig lang macht die Fußzeile trotzdem unübersichtlich.

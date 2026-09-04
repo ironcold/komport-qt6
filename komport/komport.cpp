@@ -265,6 +265,14 @@ void KomportApp::initStatusBar()
   ///////////////////////////////////////////////////////////////////
   // STATUSBAR
   statusBar()->showMessage( tr("Ready.") );
+
+  // Permanent widget (right-aligned, stays put regardless of the transient
+  // showMessage() text on the left) showing the active connection at a
+  // glance. Kept short on purpose - same reasoning as the shortened
+  // setStatusTip() texts above: this window is only as wide as the
+  // terminal's fixed character grid.
+  connectionStatusLabel = new QLabel( statusBar() );
+  statusBar()->addPermanentWidget( connectionStatusLabel );
 }
 
 void KomportApp::initDocument()
@@ -325,8 +333,6 @@ void KomportApp::initMacroBar()
 
 void KomportApp::seedBuiltinProfiles()
 {
-  if ( config->value( QStringLiteral("BuiltinProfilesSeeded"), false ).toBool() ) return;
-
   struct BuiltinMacro { QString label; QString command; };
   struct BuiltinProfile {
     QString name;
@@ -352,10 +358,19 @@ void KomportApp::seedBuiltinProfiles()
       }
     },
     {
-      // HP 1920 and the wider HPE Comware/H3C-derived switch line (e.g.
-      // older 5130/5510) share this CLI dialect and console default.
-      QStringLiteral("HP 1920 (9600 8N1)"),
-      QStringLiteral("9600"), QStringLiteral("8"), QStringLiteral("1"), QStringLiteral("NONE"), QStringLiteral("NONE"),
+      // HP 1920 & 1950 (confirmed 38400 by the user on real 1920 hardware -
+      // NOT the more common 9600 default most other vendors/lines use).
+      // The wider HPE Comware/H3C-derived switch line (older 5130/5510
+      // etc.) shares this CLI dialect but may use a different baud rate -
+      // check the specific model.
+      // NOTE: no '/' in this name - QSettings treats '/' as a group-path
+      // separator even inside a single beginGroup() argument, which would
+      // silently split "1920/1950" into two nested groups instead of one
+      // profile (profileNames()/loadProfile()/etc. all assume one flat
+      // group level per profile name). Same restriction applies to any
+      // profile name a user types in profileCombo - see slotSaveProfile().
+      QStringLiteral("HP 1920 & 1950 (38400 8N1)"),
+      QStringLiteral("38400"), QStringLiteral("8"), QStringLiteral("1"), QStringLiteral("NONE"), QStringLiteral("NONE"),
       {
         { tr("Show Config"), QStringLiteral("display current-configuration") },
         { tr("Show Version"), QStringLiteral("display version") },
@@ -380,9 +395,19 @@ void KomportApp::seedBuiltinProfiles()
     },
   };
 
+  // Tracked per preset *name* (not a single "already seeded" flag): lets a
+  // later code update fix/rename/add a preset and have it actually reach
+  // installs that already ran seeding once, without resurrecting presets
+  // the user deliberately deleted. A name only gets skipped if it's either
+  // a profile the user already has (own or previously-seeded-and-kept), or
+  // one that was seeded before and is gone now (i.e. deleted on purpose).
+  QStringList everSeeded = config->value( QStringLiteral("SeededProfileNames") ).toStringList();
   const QStringList existing = profileNames();
+  bool changed = false;
+
   for ( const BuiltinProfile &bp : builtins ) {
-    if ( existing.contains(bp.name) ) continue; // never clobber a same-named profile the user already has
+    if ( existing.contains(bp.name) ) continue;   // already have a profile by this name
+    if ( everSeeded.contains(bp.name) ) continue;  // was offered before and is gone now - respect that
 
     config->beginGroup( QStringLiteral("Profiles") );
     config->beginGroup( bp.name );
@@ -407,10 +432,15 @@ void KomportApp::seedBuiltinProfiles()
     config->endGroup(); // Macros
     config->endGroup(); // <profile name>
     config->endGroup(); // Profiles
+
+    everSeeded << bp.name;
+    changed = true;
   }
 
-  config->setValue( QStringLiteral("BuiltinProfilesSeeded"), true );
-  config->sync();
+  if ( changed ) {
+    config->setValue( QStringLiteral("SeededProfileNames"), everSeeded );
+    config->sync();
+  }
 }
 
 void KomportApp::initProfiles()
@@ -515,6 +545,27 @@ void KomportApp::applyConnectionSettings()
   serial->setRxQueue( strRxQueue.toInt() );
   serial->setFlushRate( strFlushRate.toInt() );
   serial->open();
+
+  updateConnectionStatusLabel();
+}
+
+/** one-letter parity code for the "8N1"-style summary in the status bar */
+static QChar parityLetter(const QString &_parity)
+{
+  if ( _parity.compare( QLatin1String("EVEN"), Qt::CaseInsensitive ) == 0 ) return QLatin1Char('E');
+  if ( _parity.compare( QLatin1String("ODD"), Qt::CaseInsensitive ) == 0 ) return QLatin1Char('O');
+  return QLatin1Char('N');
+}
+
+void KomportApp::updateConnectionStatusLabel()
+{
+  const QString framing = strDataBits + parityLetter(strParity) + strStopBits; // e.g. "8N1"
+  connectionStatusLabel->setText(
+      QStringLiteral("%1  ·  %2 %3  ·  Enter: %4")
+          .arg( strDevice.isEmpty() ? tr("(no device)") : strDevice, strBaudRate, framing, strLineEnding ) );
+  connectionStatusLabel->setToolTip(
+      tr("Profile: %1\nDevice: %2\nBaud rate: %3\nFraming: %4 (data bits/parity/stop bits)\nFlow control: %5\nEnter sends: %6")
+          .arg( mCurrentProfile.isEmpty() ? tr("(none)") : mCurrentProfile, strDevice, strBaudRate, framing, strFlowControl, strLineEnding ) );
 }
 
 void KomportApp::loadProfile(const QString &_name)
@@ -560,6 +611,14 @@ void KomportApp::slotSaveProfile()
   const QString name = profileCombo->currentText().trimmed();
   if ( name.isEmpty() ) {
     QMessageBox::warning( this, tr("Save Profile"), tr("Please enter a profile name first.") );
+    return;
+  }
+  if ( name.contains(QLatin1Char('/')) ) {
+    // QSettings treats '/' as a group-path separator even inside a single
+    // beginGroup() argument, which would silently split the profile across
+    // two nested groups instead of storing it as one - reject rather than
+    // silently mangling it.
+    QMessageBox::warning( this, tr("Save Profile"), tr("Profile names can't contain \"/\" - please remove it.") );
     return;
   }
   saveProfile(name);
@@ -890,6 +949,8 @@ void KomportApp::slotShowPreferences()
       // Persist the tweak into the active profile, so it isn't silently
       // lost the next time this profile is (re)loaded or the app restarts.
       if ( !mCurrentProfile.isEmpty() ) saveProfile( mCurrentProfile );
+
+      updateConnectionStatusLabel();
   }
 
   slotStatusMsg(tr("Ready."));
@@ -960,4 +1021,5 @@ void KomportApp::slotLineEndingChanged(const QString &text)
   if ( text == QLatin1String("LF") ) le = KomportEmulation::LineEnding::LF;
   else if ( text == QLatin1String("CR+LF") ) le = KomportEmulation::LineEnding::CRLF;
   view->mEmulation->setLineEnding(le);
+  updateConnectionStatusLabel();
 }
