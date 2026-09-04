@@ -1,9 +1,10 @@
 /***************************************************************************
                           main.cpp  -  Komport Serial Port Communicator
                              -------------------
-    begin                : Mon Feb 17 00:05:54 EST 2003
+    begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -15,57 +16,41 @@
  *                                                                         *
  ***************************************************************************/
 
-#include <kcmdlineargs.h>
-#include <kaboutdata.h>
-#include <klocale.h>
+#include <QApplication>
+#include <QCommandLineParser>
+#include <QCommandLineOption>
+#include <QUrl>
 
 #include "komport.h"
 
-static const char *description =
-	I18N_NOOP("Komport - Serial port communication\nand terminal emulator.");
-// INSERT A DESCRIPTION FOR YOUR APPLICATION HERE
-	
-	
-static KCmdLineOptions options[] =
-{
-  { "+[File]", I18N_NOOP("file to open"), 0 },
-  { 0, 0, 0 }
-  // INSERT YOUR COMMANDLINE OPTIONS HERE
-};
-
 int main(int argc, char *argv[])
 {
+  QApplication app(argc, argv);
 
-	KAboutData aboutData( "komport", I18N_NOOP("Komport"),
-		VERSION, description, KAboutData::License_GPL,
-		"(c) 2003, Mike Sharkey", 0, "http://sharkey.servebeer.com/~michael/komport", "michael@sharkey.servebeer.com");
-	aboutData.addAuthor("Mike Sharkey",0, "michael@sharkey.servebeer.com");
-	KCmdLineArgs::init( argc, argv, &aboutData );
-	KCmdLineArgs::addCmdLineOptions( options ); // Add our own options.
+  QCoreApplication::setOrganizationName( QStringLiteral("Komport") );
+  QCoreApplication::setApplicationName( QStringLiteral("Komport") );
+  QCoreApplication::setApplicationVersion( QStringLiteral(KOMPORT_VERSION) );
 
-  KApplication app;
- 
-  if (app.isRestored())
+  QCommandLineParser parser;
+  parser.setApplicationDescription(
+      QObject::tr("Komport - Serial port communication and terminal emulator.") );
+  parser.addHelpOption();
+  parser.addVersionOption();
+  parser.addPositionalArgument( QStringLiteral("file"), QObject::tr("file to open"), QStringLiteral("[file]") );
+  parser.process(app);
+
+  KomportApp *komport = new KomportApp();
+  komport->show();
+
+  const QStringList args = parser.positionalArguments();
+  if ( !args.isEmpty() )
   {
-    RESTORE(KomportApp);
+    komport->openDocumentFile( QUrl::fromUserInput(args.at(0)) );
   }
-  else 
+  else
   {
-    KomportApp *komport = new KomportApp();
-    komport->show();
-
-    KCmdLineArgs *args = KCmdLineArgs::parsedArgs();
-		
-		if (args->count())
-		{
-        komport->openDocumentFile(args->arg(0));
-		}
-		else
-		{
-		  komport->openDocumentFile();
-		}
-		args->clear();
+    komport->openDocumentFile();
   }
 
   return app.exec();
-}  
+}

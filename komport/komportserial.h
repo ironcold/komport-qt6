@@ -4,6 +4,7 @@
     begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6/QSerialPort : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,54 +19,58 @@
 #ifndef KOMPORTSERIAL_H
 #define KOMPORTSERIAL_H
 
-#include <qobject.h>
-#include <errno.h>
+#include <QObject>
+#include <QString>
+#include <QByteArray>
+#include <QTimer>
+#include <QSerialPort>
 
-#include <qsocketnotifier.h>
-
-#include  "komportqueue.h"
-/**Encapsulates the TTY (serial port).
-  *@author Mike Sharkey
+/**Encapsulates the TTY (serial port), backed by QSerialPort/QSerialPortInfo.
+  *
+  * This replaces the original raw POSIX/termios + QSocketNotifier
+  * implementation. The public slot/signal surface (putChar/putStr,
+  * receivedChar, settingsChanged/settingsFailed) is kept close to the
+  * original so KomportView/KomportEmulation/KomportTransfer did not need to
+  * be restructured, only the internals changed.
+  *
+  *@author Mike Sharkey (original), ported to QSerialPort for Qt6
   */
-
 class KomportSerial : public QObject  {
 Q_OBJECT
-public: 
-  typedef enum {
-    b0, b50, b75, b110, b134, b150, b200, b300, b600, b1200, b1800, b2400, b4800,
-    b9600, b19200, b38400, b57600, b115200, b230400
-  } Baud;
-  KomportSerial();
-	~KomportSerial();
+public:
+  explicit KomportSerial(QObject *parent = nullptr);
+  ~KomportSerial() override;
+
   /** Open the serial port for communication. */
   bool open();
   /** Close the port. */
   void close();
-  /** In the serial port open? */
-  bool isOpen();
-  /** Return the name of the serial port device (e.g. /dev/ttyxx). */
-  QCString deviceName();
+  /** Is the serial port open? */
+  bool isOpen() const;
+  /** Return the name of the serial port device (e.g. /dev/ttyUSB0). */
+  QString deviceName() const;
   /** return the current baud rate setting. */
-  Baud baudRate();
-  /** set size of RX queue */
+  qint32 baudRate() const;
+  /** set size of the internal RX buffer high-water mark (see setFlushRate()) */
   int setRxQueue(int _i);
-  /** set the rate at which the Tx/Rx queue(s) are flushed */
+  /** set the rate (ms) at which the Rx buffer is flushed into receivedChar() signals */
   void setFlushRate(int _i);
-  /** set the character framing */
-  void setFraming( QString _startbits="1", QString _databits="8", QString _stopbits="1", QString _parity="NONE" );
+  /** set the character framing. Start bits is kept for UI/config compatibility
+   *  only - a UART always uses a single start bit, QSerialPort has no such
+   *  setting, so it is not applied to the hardware (same as the original,
+   *  which parsed but never actually used it either). */
+  void setFraming( const QString &_startbits = "1", const QString &_databits = "8",
+                    const QString &_stopbits = "1", const QString &_parity = "NONE" );
+  /** set flow control ("XON/XOFF", "RTS/CTS" or "NONE"). New in the Qt6 port:
+   *  the original settings dialog offered this but never actually applied it. */
+  void setFlowControl( const QString &_flowControl );
 private: // Private attributes
-  /** The name of the serial port (/dev/ttyxx). */
-  QCString mDeviceName;
-  /** Stores file number (handle). */
-  int mFileNo;
+  /** the underlying Qt serial port */
+  QSerialPort mPort;
+  /** The name of the serial port (/dev/ttyUSB0, COM3, ...). */
+  QString mDeviceName;
   /** Stores baud rate property. */
-  Baud mBaudRate;
-  /** timer id */
-  int mTimerId;
-  /** round Rx queue */
-  KomportQueue mRxQueue;
-  /** socket notifier */
-  QSocketNotifier *mSocketNotifier;
+  qint32 mBaudRate;
   /**  */
   QString mStrStartBits;
   /**  */
@@ -74,24 +79,28 @@ private: // Private attributes
   QString mStrStopBits;
   /**  */
   QString mStrParity;
-  /** rate at which the Tx/Rx queue(s) are flushed */
+  /** flow control */
+  QString mStrFlowControl;
+  /** rate (ms) at which the Rx buffer is flushed */
   int mFlushRate;
+  /** buffer of bytes received but not yet emitted via receivedChar() */
+  QByteArray mRxBuffer;
+  /** high-water mark for mRxBuffer, kept for config/API compatibility */
+  int mRxQueueMax;
+  /** drives periodic flushing of mRxBuffer */
+  QTimer mFlushTimer;
 protected: // Protected methods
-  /** Return the file number (handle). */
-  int handle();
-  /** timer event */
-  void timerEvent(QTimerEvent* _e);
+  /** apply the currently stored framing/parity/flow-control settings to the open port */
+  void applyPortSettings();
 public slots: // Public slots
   /** Commits settings changes to the serial port. */
   void slotSettingsChanged();
-  /** Set the name of the serial port device (e.g. /dev/ttyxx). */
-  void setDeviceName(QCString _dn);
-  /** Set the name of the serial port device (e.g. /dev/ttyxx). */
-  void setDeviceName(QString _dn);
-  /** Set the baud rate to one of the predevied enums. */
-  void setBaudRate(Baud _baud=b9600);
-  /** Set the baud rate to one of the predevied enums. */
-  void setBaudRate(QString _baud);
+  /** Set the name of the serial port device (e.g. /dev/ttyUSB0). */
+  void setDeviceName(const QString &_dn);
+  /** Set the baud rate. */
+  void setBaudRate(qint32 _baud);
+  /** Set the baud rate, parsed from a string (as used by the settings dialog / config file). */
+  void setBaudRate(const QString &_baud);
   /** put a character */
   void putChar(char _ch);
   /** transmit a string */
@@ -99,13 +108,17 @@ public slots: // Public slots
 signals: // Signals
   /** Whenever a communications port setting is changed such as baud rate, etc. */
   void settingsChanged();
-  /** No descriptions */
+  /** could not apply the current settings to the open port */
   void settingsFailed();
   /** received a char */
   void receivedChar(char _ch);
-protected slots: // Protected slots
-  /** socket notifier has detected data */
+private slots: // Private slots
+  /** QSerialPort has data available */
   void slotDataAvailable();
+  /** QSerialPort reported an error */
+  void slotPortError(QSerialPort::SerialPortError error);
+  /** periodic flush of mRxBuffer into receivedChar() signals */
+  void slotFlushRxBuffer();
 };
 
 #endif

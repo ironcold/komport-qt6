@@ -18,9 +18,10 @@
 #ifndef KOMPORTEMULATION_H
 #define KOMPORTEMULATION_H
 
-#include <qobject.h>
-#include <qevent.h>
-#include <qcstring.h>
+#include <QObject>
+#include <QKeyEvent>
+#include <QByteArray>
+#include <QPoint>
 
 #include "komportcell.h"
 #include "komportcellarray.h"
@@ -471,7 +472,7 @@ Pc
 ESC[PL;PcH
     Cursor Position: Moves the cursor to the specified position
     (coordinates). If you do not specify a position, the cursor moves to the
-    home positionÄÄthe upper-left corner of the screen (line 0, column
+    home positionï¿½ï¿½the upper-left corner of the screen (line 0, column
     0). This escape sequence works the same way as the following Cursor
     Position escape sequence.
 
@@ -557,9 +558,9 @@ ESC[Ps;...;Psm
 
 class KomportEmulation : public QObject  {
 Q_OBJECT
-public: 
+public:
 	KomportEmulation(KomportSerial* _serial, KomportCellArray* _cellArray);
-	~KomportEmulation();
+	~KomportEmulation() override;
   /** get the character cell array */
   inline KomportCellArray* cellArray() {return mCellArray;}
   /** get a pointer to the serial object */
@@ -598,7 +599,7 @@ private:
   /** cell array  */
   KomportCellArray* mCellArray;
   /** terminal control sequence  */
-  QCString  mCtlSequence;
+  QByteArray  mCtlSequence;
   /** did we see an ESC? */
   bool mSawESC;
   /** are we in a terminal control sequence? */

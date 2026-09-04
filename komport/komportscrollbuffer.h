@@ -4,6 +4,7 @@
     begin                : Thu Sep 25 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,23 +19,23 @@
 #ifndef KOMPORTSCROLLBUFFER_H
 #define KOMPORTSCROLLBUFFER_H
 
-#include <komportcellarray.h>
+#include "komportcellarray.h"
 
 /**Impliments a scroll buffer
   *@author Mike Sharkey
   */
 
 class KomportScrollBuffer : public KomportCellArray  {
-public: 
+public:
 	KomportScrollBuffer();
-	~KomportScrollBuffer();
+	~KomportScrollBuffer() override;
   /** scroll up one line */
-  virtual void scrollUp();
+  void scrollUp() override;
   /** scroll depth in lines */
   virtual int depth() { return mDepth; }
   /** set the cell array size .
  */
-  virtual void setArraySize(QSize _sz);
+  void setArraySize(QSize _sz) override;
 protected:
     /** scroll depth in lines */
     int mDepth;

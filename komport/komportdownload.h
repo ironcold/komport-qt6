@@ -4,6 +4,7 @@
     begin                : Tue Oct 7 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,16 +19,21 @@
 #ifndef KOMPORTDOWNLOAD_H
 #define KOMPORTDOWNLOAD_H
 
-#include <komporttransfer.h>
+#include "komporttransfer.h"
 
 /**baseclass for file download
+  *
+  * NOTE: see the comment in komportupload.h - same situation (unused,
+  * previously non-compiling stub; ported and made buildable for
+  * completeness only).
+  *
   *@author Mike Sharkey
   */
 
 class KomportDownload : public KomportTransfer  {
-public: 
-	KomportDownload();
-	~KomportDownload();
+public:
+	KomportDownload(KomportSerial* _serial, QWidget* _parent = nullptr);
+	~KomportDownload() override;
 };
 
 #endif

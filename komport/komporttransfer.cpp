@@ -4,6 +4,7 @@
     begin                : Tue Oct 7 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -17,9 +18,9 @@
 
 #include "komporttransfer.h"
 
-#include <qapplication.h>
-#include <qeventloop.h>
-#include <unistd.h>
+#include <QApplication>
+#include <QProgressDialog>
+#include <QThread>
 
 KomportTransfer::KomportTransfer(KomportSerial *_serial,QWidget *_parent)
 : mSerial(_serial)
@@ -28,32 +29,30 @@ KomportTransfer::KomportTransfer(KomportSerial *_serial,QWidget *_parent)
 }
 KomportTransfer::~KomportTransfer(){
     mFile.close();
-   KIO::NetAccess::removeTempFile( mFileName );  
 }
-/** provide a file dialog for selecting a local file */
-bool KomportTransfer::setURL(KURL _url){
-  KIO::NetAccess::download( _url, mFileName );
-  mFile.setName( mFileName );
+/** set the local file used for the transfer */
+bool KomportTransfer::setFileName(const QString &_fileName){
+  mFile.setFileName( _fileName );
   return true;
 }
 /** run the upload file transfer */
 bool KomportTransfer::upload(){
-    mFile.open(IO_ReadOnly);
-    long int size = mFile.size();
-    long int sent=0;
-    int ch=0;
-    QEventLoop* eventLoop = QApplication::eventLoop();
-    KProgressDialog progress( mParent, "upload_progress", i18n("Upload Progress"), i18n("Upload Progress"), true );
-    progress.progressBar()->setTotalSteps( size );
+    mFile.open(QIODevice::ReadOnly);
+    qint64 size = mFile.size();
+    qint64 sent=0;
+    QProgressDialog progress( tr("Upload Progress"), tr("Cancel"), 0, static_cast<int>(size), mParent );
+    progress.setWindowTitle( tr("Upload Progress") );
+    progress.setWindowModality( Qt::WindowModal );
     progress.show();
     progress.raise();
-    while( (ch = mFile.getch()) != -1 && !progress.wasCancelled() ) {
+    char ch=0;
+    while( mFile.getChar(&ch) && !progress.wasCanceled() ) {
        mSerial->putChar(ch);
        sent++;
-       progress.progressBar()->setProgress( sent );
-       eventLoop->processEvents( QEventLoop::AllEvents );
+       progress.setValue( static_cast<int>(sent) );
+       QCoreApplication::processEvents( QEventLoop::AllEvents );
        if ( ch == '\n' ) {
-           usleep( 1000*250 );
+           QThread::msleep( 250 );
        }
     }
     mFile.close();
@@ -61,29 +60,31 @@ bool KomportTransfer::upload(){
 }
 /** run the download file transfer */
 bool KomportTransfer::download(){
-    mFile.open(IO_WriteOnly);
-    QObject::connect(mSerial,SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(unsigned char)));
-    long int received=0;
-    QEventLoop* eventLoop = QApplication::eventLoop();
-    KProgressDialog progress(mParent, "download_progress", i18n("Download Progress"), i18n("Download Progress"), true );
+    mFile.open(QIODevice::WriteOnly);
+    QObject::connect(mSerial,SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(char)));
+    qint64 received=0;
+    QProgressDialog progress( tr("Download Progress"), tr("Cancel"), 0, 0, mParent );
+    progress.setWindowTitle( tr("Download Progress") );
+    progress.setWindowModality( Qt::WindowModal );
     progress.show();
     progress.raise();
-    while( mFile.isOpen() && !progress.wasCancelled() ) {
-        received = mFile.size();   
-        progress.progressBar()->setTotalSteps( received+1 );
-        progress.progressBar()->setProgress( received );
-        eventLoop->processEvents( QEventLoop::AllEvents );
+    while( mFile.isOpen() && !progress.wasCanceled() ) {
+        received = mFile.size();
+        progress.setMaximum( static_cast<int>(received+1) );
+        progress.setValue( static_cast<int>(received) );
+        QCoreApplication::processEvents( QEventLoop::AllEvents );
     }
     mFile.close();
+    QObject::disconnect(mSerial,SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(char)));
     return true;
 }
 /** No descriptions */
-void KomportTransfer::slotReceivedChar(unsigned char _ch){
+void KomportTransfer::slotReceivedChar(char _ch){
     if ( mFile.isOpen() )  {
-        if ( _ch == ('D'-0x40) )  { // end of text
+        if ( _ch == ('D'-0x40) )  { // end of text (Ctrl-D)
             mFile.close();
         } else {
-            mFile.putch( _ch );
+            mFile.putChar( _ch );
         }
     }
 }

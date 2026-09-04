@@ -1,90 +1,77 @@
-/****************************************************************************
-** Form interface generated from reading ui file './settingsdialog.ui'
-**
-** Created: Sun Oct 12 05:41:36 2003
-**      by: The User Interface Compiler ($Id: qt/main.cpp   3.1.1   edited Nov 21 17:40 $)
-**
-** WARNING! All changes made in this file will be lost!
-****************************************************************************/
+/***************************************************************************
+                          settingsdialog.h  -  Komport Serial Port Communicator
+                             -------------------
+    Serial port settings form
+    original author      : Mike Sharkey <michael@sharkey.servebeer.com>
+    ported to Qt6         : 2026, hand-written to replace the Qt3-Designer
+                             .ui file (settingsdialog.ui), which uic in Qt6
+                             cannot read.
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
 
 #ifndef SETTINGSDIALOG_H
 #define SETTINGSDIALOG_H
 
-#include <qvariant.h>
-#include <qdialog.h>
+#include <QDialog>
 
-class QVBoxLayout;
-class QHBoxLayout;
-class QGridLayout;
-class KURLRequester;
-class QButtonGroup;
-class QCheckBox;
 class QComboBox;
-class QFrame;
-class QGroupBox;
-class QLabel;
-class QPushButton;
-class QRadioButton;
 class QSpinBox;
-class QTabWidget;
-class QWidget;
+class QCheckBox;
+class QRadioButton;
+class QGroupBox;
 
+/** Connection/terminal settings dialog.
+ *
+ * Same fields as the original KDE3 dialog (Device tab: device/baud rate/
+ * RX queue/framing/flow control; Terminal tab: history buffer/emulation/
+ * bell/echo), rebuilt with Qt6 layouts instead of the original's fixed
+ * pixel coordinates. The device combo box is now populated from
+ * QSerialPortInfo::availablePorts() instead of a hard-coded ttyS0..3 list.
+ * The KURLRequester-based "file buffer" path picker is gone - the file
+ * scroll buffer feature it configured was never functional to begin with
+ * (see komportfilescrollbuffer.cpp), so its path field is now a plain,
+ * disabled-by-default QLineEdit kept only so the layout/behavior otherwise
+ * matches the original.
+ */
 class SettingsDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    SettingsDialog( QWidget* parent = 0, const char* name = 0, bool modal = FALSE, WFlags fl = 0 );
-    ~SettingsDialog();
+    explicit SettingsDialog( QWidget* parent = nullptr );
+    ~SettingsDialog() override;
 
-    QTabWidget* tabWidget;
-    QWidget* Widget2;
-    QLabel* BaudRateLabel;
-    QLabel* textLabel1;
-    QComboBox* BaudRateComboBox;
+    // Device tab
     QComboBox* DeviceComboBox;
-    QGroupBox* RXQueueGroupBox;
+    QComboBox* BaudRateComboBox;
     QSpinBox* RxQueueSpinBox;
     QSpinBox* FlushRateSpinBox;
-    QLabel* textLabel2;
-    QLabel* textLabel1_2;
-    QLabel* textLabel1_3;
-    QLabel* textLabel2_2;
     QComboBox* FlowControlComboBox;
-    QGroupBox* groupBox4;
     QComboBox* StartBitsComboBox;
     QComboBox* DataBitsComboBox;
     QComboBox* StopBitsComboBox;
     QComboBox* ParityComboBox;
-    QLabel* textLabel3;
-    QLabel* textLabel2_3;
-    QLabel* textLabel1_4;
-    QLabel* textLabel4_2;
-    QLabel* textLabel4;
-    QWidget* Widget3;
-    QButtonGroup* buttonGroup1;
-    KURLRequester* FileBufferURLRequeste;
-    QRadioButton* FileBufferRadioButton;
-    QFrame* line1;
+
+    // Terminal tab
     QRadioButton* MemoryBufferRadioButton;
+    QRadioButton* FileBufferRadioButton;
     QSpinBox* ScrollBufferSpinBox;
-    QLabel* textLines1;
-    QLabel* textLines2;
     QSpinBox* FileBufferSizeSpinBox;
-    QGroupBox* groupBox3;
     QComboBox* EmulationComboBox;
     QCheckBox* VisualBellCheckBox;
     QCheckBox* LocalEchoCheckBox;
-    QPushButton* buttonHelp;
-    QPushButton* buttonOk;
-    QPushButton* buttonCancel;
 
-protected:
-    QGridLayout* SettingsDialogLayout;
-    QHBoxLayout* Layout1;
-
-protected slots:
-    virtual void languageChange();
+private:
+    QWidget* createDeviceTab();
+    QWidget* createTerminalTab();
 };
 
 #endif // SETTINGSDIALOG_H

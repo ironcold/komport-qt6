@@ -4,6 +4,7 @@
     begin                : Thu Feb 20 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -17,7 +18,7 @@
 
 #include "komportscript.h"
 
-KomportScript::KomportScript(){
+KomportScript::KomportScript(QObject *parent) : QObject(parent){
 }
 KomportScript::~KomportScript(){
 }

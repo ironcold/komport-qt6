@@ -1,9 +1,10 @@
 /***************************************************************************
                           komportdoc.cpp  -  Komport Serial Port Communicator
                              -------------------
-    begin                : Mon Feb 17 00:05:54 EST 2003
+    begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -16,30 +17,29 @@
  ***************************************************************************/
 
 // include files for Qt
-#include <qdir.h>
-#include <qwidget.h>
-
-// include files for KDE
-#include <klocale.h>
-#include <kmessagebox.h>
-#include <kio/job.h>
-#include <kio/netaccess.h>
+#include <QDir>
+#include <QWidget>
+#include <QMessageBox>
+#include <QFileInfo>
 
 // application specific includes
 #include "komportdoc.h"
 #include "komport.h"
 #include "komportview.h"
 
-QList<KomportView> *KomportDoc::pViewList = 0L;
+QList<KomportView*> *KomportDoc::pViewList = nullptr;
 
-KomportDoc::KomportDoc(QWidget *parent, const char *name) : QObject(parent, name)
+KomportDoc::KomportDoc(QObject *parent) : QObject(parent)
+, modified(false)
 {
   if(!pViewList)
   {
-    pViewList = new QList<KomportView>();
+    pViewList = new QList<KomportView*>();
   }
-
-  pViewList->setAutoDelete(true);
+  // Note: unlike the original Qt3 QPtrList, this list does not own/delete
+  // the views it tracks - it is only used to broadcast repaints across all
+  // open windows (see slotUpdateAllViews()). Views are owned as normal
+  // QWidget children and destroyed with their window.
 }
 
 KomportDoc::~KomportDoc()
@@ -54,24 +54,30 @@ void KomportDoc::addView(KomportView *view)
 
 void KomportDoc::removeView(KomportView *view)
 {
-  pViewList->remove(view);
+  pViewList->removeAll(view);
 }
-void KomportDoc::setURL(const KURL &url)
+void KomportDoc::setURL(const QUrl &url)
 {
   doc_url=url;
 }
 
-const KURL& KomportDoc::URL() const
+const QUrl& KomportDoc::URL() const
 {
   return doc_url;
 }
 
+/** display name of the document */
+QString KomportDoc::fileName() const
+{
+  QString name = QFileInfo( doc_url.toLocalFile() ).fileName();
+  return name.isEmpty() ? QStringLiteral("Untitled") : name;
+}
+
 void KomportDoc::slotUpdateAllViews(KomportView *sender)
 {
-  KomportView *w;
   if(pViewList)
   {
-    for(w=pViewList->first(); w!=0; w=pViewList->next())
+    for( KomportView *w : std::as_const(*pViewList) )
     {
       if(w!=sender)
         w->repaint();
@@ -86,15 +92,16 @@ bool KomportDoc::saveModified()
 
   if(modified)
   {
-    KomportApp *win=(KomportApp *) parent();
-    int want_save = KMessageBox::warningYesNoCancel(win,
-                                         i18n("The current file has been modified.\n"
+    KomportApp *win = qobject_cast<KomportApp *>(parent());
+    QMessageBox::StandardButton want_save = QMessageBox::warning(win,
+                                         tr("Warning"),
+                                         tr("The current file has been modified.\n"
                                               "Do you want to save it?"),
-                                         i18n("Warning"));
+                                         QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
     switch(want_save)
     {
-      case KMessageBox::Yes:
-           if (doc_url.fileName() == i18n("untitled.kom"))
+      case QMessageBox::Yes:
+           if (fileName() == QLatin1String("untitled.kom"))
            {
              win->slotFileSaveAs();
            }
@@ -107,14 +114,10 @@ bool KomportDoc::saveModified()
            completed=true;
            break;
 
-      case KMessageBox::No:
+      case QMessageBox::No:
            setModified(false);
            deleteContents();
            completed=true;
-           break;
-
-      case KMessageBox::Cancel:
-           completed=false;
            break;
 
       default:
@@ -137,29 +140,30 @@ bool KomportDoc::newDocument()
   // TODO: Add your document initialization code here
   /////////////////////////////////////////////////
   modified=false;
-  doc_url.setFileName(i18n("untitled.kom"));
+  doc_url = QUrl::fromLocalFile( QStringLiteral("untitled.kom") );
 
   setModified(true);
-  
+
   return true;
 }
 
-bool KomportDoc::openDocument(const KURL& url, const char *format /*=0*/)
+bool KomportDoc::openDocument(const QUrl& url)
 {
-  QString tmpfile;
-  KIO::NetAccess::download( url, tmpfile );
+  Q_UNUSED(url);
   /////////////////////////////////////////////////
   // TODO: Add your document opening code here
+  // (this was already an empty stub in the original KDE3 version - no file
+  // content was ever actually read here, so nothing was lost by dropping
+  // the KIO::NetAccess remote-download plumbing that used to wrap it)
   /////////////////////////////////////////////////
-
-  KIO::NetAccess::removeTempFile( tmpfile );
 
   modified=false;
   return true;
 }
 
-bool KomportDoc::saveDocument(const KURL& url, const char *format /*=0*/)
+bool KomportDoc::saveDocument(const QUrl& url)
 {
+  Q_UNUSED(url);
   /////////////////////////////////////////////////
   // TODO: Add your document saving code here
   /////////////////////////////////////////////////

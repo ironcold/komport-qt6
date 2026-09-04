@@ -4,6 +4,7 @@
     begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,10 +19,12 @@
 #ifndef KOMPORTCELLARRAY_H
 #define KOMPORTCELLARRAY_H
 
-#include <qobject.h>
-#include <qptrlist.h>
-#include <qstring.h>
-#include <qpoint.h>
+#include <QObject>
+#include <QList>
+#include <QString>
+#include <QPoint>
+#include <QSize>
+#include <QColor>
 
 #include "komportcell.h"
 
@@ -33,7 +36,7 @@ class KomportCellArray : public QObject  {
 Q_OBJECT
 public:
   KomportCellArray();
-	~KomportCellArray();
+	~KomportCellArray() override;
 
   /** retrieve blink property */
   inline bool blink()                 {return mBlink;}
@@ -131,8 +134,8 @@ public:
   /** clear cell */
   void clear(int _x, int _y);
 private: // Private attributes
-  /** cell list */
-  QPtrList<KomportCell> mCells;
+  /** cell list (owning: array deletes the cells it holds) */
+  QList<KomportCell*> mCells;
   /** size of cell in pixels*/
   QSize mCellSize;
   /** cusror position */

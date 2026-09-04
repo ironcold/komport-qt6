@@ -1,9 +1,10 @@
 /***************************************************************************
                           komport.cpp  -  Komport Serial Port Communicator
                              -------------------
-    begin                : Mon Feb 17 00:05:54 EST 2003
+    begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -15,56 +16,52 @@
  *                                                                         *
  ***************************************************************************/
 
-// include files for QT
-#include <qdir.h>
-#include <qprinter.h>
-#include <qpainter.h>
-
-// include files for KDE
-#include <kiconloader.h>
-#include <kmessagebox.h>
-#include <kfiledialog.h>
-#include <kmenubar.h>
-#include <kstatusbar.h>
-#include <klocale.h>
-#include <kconfig.h>
-#include <kstdaction.h>
+// include files for Qt
+#include <QDir>
+#include <QPrinter>
+#include <QPrintDialog>
+#include <QPainter>
+#include <QSettings>
+#include <QMessageBox>
+#include <QFileDialog>
+#include <QMenuBar>
+#include <QMenu>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QAction>
+#include <QApplication>
+#include <QClipboard>
+#include <QCloseEvent>
+#include <QIcon>
+#include <QFileInfo>
+#include <QComboBox>
+#include <QSpinBox>
 
 // application specific includes
 #include "komport.h"
 #include "komportview.h"
 #include "komportdoc.h"
 #include "komporttransfer.h"
-#include "komportupload.h"
-#include "komportdownload.h"
 #include "settingsdialog.h"
 
-#define ID_STATUS_MSG 1
+static const int MAX_RECENT_FILES = 10;
 
-KomportApp::KomportApp(QWidget* , const char* name):KMainWindow(0, name)
+KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
 {
-  config=kapp->config();
+  setWindowIcon( QIcon(QStringLiteral(":/icons/lo32-app-komport.png")) );
+
+  config = new QSettings(this);
 
   ///////////////////////////////////////////////////////////////////
   // call inits to invoke all other construction parts
   initStatusBar();
   initActions();
+  initMenus();
+  initToolBar();
   initDocument();
   initView();
-	
-  readOptions();
 
-  ///////////////////////////////////////////////////////////////////
-  // disable actions at startup
-  //fileNew->setEnabled(false);
-  fileOpenRecent->setEnabled(false);
-  fileOpen->setEnabled(true);
-  fileSave->setEnabled(true);
-  //fileSaveAs->setEnabled(false);
-  filePrint->setEnabled(true);
-  editCut->setEnabled(false);
-  editCopy->setEnabled(false);
-  editPaste->setEnabled(false);
+  readOptions();
 }
 
 KomportApp::~KomportApp()
@@ -74,54 +71,118 @@ KomportApp::~KomportApp()
 
 void KomportApp::initActions()
 {
-  fileNewWindow = new KAction(i18n("New &Window"), 0, 0, this, SLOT(slotFileNewWindow()), actionCollection(),"file_new_window");
-  //fileNew = KStdAction::openNew(this, SLOT(slotFileNew()), actionCollection());
-  fileOpen = KStdAction::open(this, SLOT(slotFileOpen()), actionCollection());
-  fileOpen->setText(i18n("Upload"));
-  fileOpenRecent = KStdAction::openRecent(this, SLOT(slotFileOpenRecent(const KURL&)), actionCollection());
-  fileOpenRecent->setText(i18n("Upload recent file..."));
-  fileSave = KStdAction::save(this, SLOT(slotFileSave()), actionCollection());
-  fileSave->setText(i18n("Download"));
-  //fileSaveAs = KStdAction::saveAs(this, SLOT(slotFileSaveAs()), actionCollection());
-  //fileSaveAs->setText(i18n("Download As..."));
-  fileClose = KStdAction::close(this, SLOT(slotFileClose()), actionCollection());
-  filePrint = KStdAction::print(this, SLOT(slotFilePrint()), actionCollection());
-  fileQuit = KStdAction::quit(this, SLOT(slotFileQuit()), actionCollection());
-  editCut = KStdAction::cut(this, SLOT(slotEditCut()), actionCollection());
-  editCopy = KStdAction::copy(this, SLOT(slotEditCopy()), actionCollection());
-  editPaste = KStdAction::paste(this, SLOT(slotEditPaste()), actionCollection());
-  viewToolBar = KStdAction::showToolbar(this, SLOT(slotViewToolBar()), actionCollection());
-  viewStatusBar = KStdAction::showStatusbar(this, SLOT(slotViewStatusBar()), actionCollection());
-  showPreferences = KStdAction::preferences(this, SLOT(slotShowPreferences()), actionCollection());
-  
-  fileNewWindow->setStatusText(i18n("Opens a new application window"));
-  //fileNew->setStatusText(i18n("Creates a new document"));
-  fileOpen->setStatusText(i18n("Upload a file"));
-  fileOpenRecent->setStatusText(i18n("Opens a recently used file"));
-  fileSave->setStatusText(i18n("Download a file"));
-  //fileSaveAs->setStatusText(i18n("Download a file as..."));
-  fileClose->setStatusText(i18n("Closes the actual document"));
-  filePrint ->setStatusText(i18n("Prints out the whole screen or selected section"));
-  fileQuit->setStatusText(i18n("Quits the application"));
-  editCut->setStatusText(i18n("Cuts the selected section and puts it to the clipboard"));
-  editCopy->setStatusText(i18n("Copies the selected section to the clipboard"));
-  editPaste->setStatusText(i18n("Pastes the clipboard contents"));
-  viewToolBar->setStatusText(i18n("Enables/disables the toolbar"));
-  viewStatusBar->setStatusText(i18n("Enables/disables the statusbar"));
-  showPreferences->setStatusText(i18n("Connection Settings"));
+  fileNewWindow = new QAction( tr("New &Window"), this );
+  connect( fileNewWindow, &QAction::triggered, this, &KomportApp::slotFileNewWindow );
+  fileNewWindow->setStatusTip( tr("Opens a new application window") );
 
-  // use the absolute path to your komportui.rc file for testing purpose in createGUI();
-  createGUI();
+  fileOpen = new QAction( QIcon::fromTheme(QStringLiteral("document-open")), tr("&Upload..."), this );
+  fileOpen->setShortcut( QKeySequence::Open );
+  connect( fileOpen, &QAction::triggered, this, &KomportApp::slotFileOpen );
+  fileOpen->setStatusTip( tr("Upload a file") );
 
+  fileSave = new QAction( QIcon::fromTheme(QStringLiteral("document-save")), tr("&Download..."), this );
+  fileSave->setShortcut( QKeySequence::Save );
+  connect( fileSave, &QAction::triggered, this, &KomportApp::slotFileSave );
+  fileSave->setStatusTip( tr("Download a file") );
+
+  fileClose = new QAction( tr("&Close"), this );
+  fileClose->setShortcut( QKeySequence::Close );
+  connect( fileClose, &QAction::triggered, this, &KomportApp::slotFileClose );
+  fileClose->setStatusTip( tr("Closes the actual document") );
+
+  filePrint = new QAction( QIcon::fromTheme(QStringLiteral("document-print")), tr("&Print..."), this );
+  filePrint->setShortcut( QKeySequence::Print );
+  connect( filePrint, &QAction::triggered, this, &KomportApp::slotFilePrint );
+  filePrint->setStatusTip( tr("Prints out the whole screen or selected section") );
+
+  fileQuit = new QAction( QIcon::fromTheme(QStringLiteral("application-exit")), tr("&Quit"), this );
+  fileQuit->setShortcut( QKeySequence::Quit );
+  connect( fileQuit, &QAction::triggered, this, &KomportApp::slotFileQuit );
+  fileQuit->setStatusTip( tr("Quits the application") );
+
+  editCut = new QAction( QIcon::fromTheme(QStringLiteral("edit-cut")), tr("Cu&t"), this );
+  editCut->setShortcut( QKeySequence::Cut );
+  connect( editCut, &QAction::triggered, this, &KomportApp::slotEditCut );
+  editCut->setStatusTip( tr("Cuts the selected section and puts it to the clipboard") );
+  editCut->setEnabled( false );
+
+  editCopy = new QAction( QIcon::fromTheme(QStringLiteral("edit-copy")), tr("&Copy"), this );
+  editCopy->setShortcut( QKeySequence::Copy );
+  connect( editCopy, &QAction::triggered, this, &KomportApp::slotEditCopy );
+  editCopy->setStatusTip( tr("Copies the selected section to the clipboard") );
+  editCopy->setEnabled( false );
+
+  editPaste = new QAction( QIcon::fromTheme(QStringLiteral("edit-paste")), tr("&Paste"), this );
+  editPaste->setShortcut( QKeySequence::Paste );
+  connect( editPaste, &QAction::triggered, this, &KomportApp::slotEditPaste );
+  editPaste->setStatusTip( tr("Pastes the clipboard contents") );
+  editPaste->setEnabled( false );
+
+  viewToolBar = new QAction( tr("Show &Toolbar"), this );
+  viewToolBar->setCheckable( true );
+  viewToolBar->setChecked( true );
+  connect( viewToolBar, &QAction::triggered, this, &KomportApp::slotViewToolBar );
+  viewToolBar->setStatusTip( tr("Enables/disables the toolbar") );
+
+  viewStatusBar = new QAction( tr("Show &Statusbar"), this );
+  viewStatusBar->setCheckable( true );
+  viewStatusBar->setChecked( true );
+  connect( viewStatusBar, &QAction::triggered, this, &KomportApp::slotViewStatusBar );
+  viewStatusBar->setStatusTip( tr("Enables/disables the statusbar") );
+
+  showPreferences = new QAction( QIcon::fromTheme(QStringLiteral("preferences-system")), tr("&Connection Settings..."), this );
+  showPreferences->setShortcut( QKeySequence::Preferences );
+  connect( showPreferences, &QAction::triggered, this, &KomportApp::slotShowPreferences );
+  showPreferences->setStatusTip( tr("Connection Settings") );
 }
 
+void KomportApp::initMenus()
+{
+  QMenu *fileMenu = menuBar()->addMenu( tr("&File") );
+  fileMenu->addAction( fileNewWindow );
+  fileMenu->addSeparator();
+  fileMenu->addAction( fileOpen );
+  fileOpenRecentMenu = fileMenu->addMenu( tr("Upload &recent file") );
+  fileMenu->addAction( fileSave );
+  fileMenu->addSeparator();
+  fileMenu->addAction( fileClose );
+  fileMenu->addAction( filePrint );
+  fileMenu->addSeparator();
+  fileMenu->addAction( fileQuit );
+
+  QMenu *editMenu = menuBar()->addMenu( tr("&Edit") );
+  editMenu->addAction( editCut );
+  editMenu->addAction( editCopy );
+  editMenu->addAction( editPaste );
+
+  QMenu *viewMenu = menuBar()->addMenu( tr("&View") );
+  viewMenu->addAction( viewToolBar );
+  viewMenu->addAction( viewStatusBar );
+
+  QMenu *settingsMenu = menuBar()->addMenu( tr("&Settings") );
+  settingsMenu->addAction( showPreferences );
+
+  rebuildRecentFilesMenu();
+}
+
+void KomportApp::initToolBar()
+{
+  mainToolBar = addToolBar( tr("Main Toolbar") );
+  mainToolBar->setObjectName( QStringLiteral("mainToolBar") );
+  mainToolBar->addAction( fileOpen );
+  mainToolBar->addAction( fileSave );
+  mainToolBar->addAction( filePrint );
+  mainToolBar->addSeparator();
+  mainToolBar->addAction( editCut );
+  mainToolBar->addAction( editCopy );
+  mainToolBar->addAction( editPaste );
+}
 
 void KomportApp::initStatusBar()
 {
   ///////////////////////////////////////////////////////////////////
   // STATUSBAR
-  // TODO: add your own items you need for displaying current application status.
-  statusBar()->insertItem(i18n("Ready."), ID_STATUS_MSG);
+  statusBar()->showMessage( tr("Ready.") );
 }
 
 void KomportApp::initDocument()
@@ -133,25 +194,24 @@ void KomportApp::initDocument()
 }
 
 void KomportApp::initView()
-{ 
+{
   ////////////////////////////////////////////////////////////////////
-  // create the main widget here that is managed by KTMainWindow's view-region and
+  // create the main widget here that is managed by the main window's view-region and
   // connect the widget to your document to display document contents.
 
   view = new KomportView(this);
   doc->addView(view);
-  setCentralWidget(view);	
-  setCaption(doc->URL().fileName(),false);
-
+  setCentralWidget(view);
+  setWindowTitle( doc->fileName() );
 }
 
-void KomportApp::openDocumentFile(const KURL& url)
+void KomportApp::openDocumentFile(const QUrl& url)
 {
-  slotStatusMsg(i18n("Opening file..."));
+  slotStatusMsg(tr("Opening file..."));
 
-  doc->openDocument( url);
-  fileOpenRecent->addURL( url );
-  slotStatusMsg(i18n("Ready."));
+  doc->openDocument( url );
+  if ( !url.isEmpty() ) addRecentFile( url );
+  slotStatusMsg(tr("Ready."));
 }
 
 
@@ -160,142 +220,109 @@ KomportDoc *KomportApp::getDocument() const
   return doc;
 }
 
-void KomportApp::saveOptions()
-{	
-  config->setGroup("General Options");
-  config->writeEntry("Geometry", size());
-  config->writeEntry("Show Toolbar", viewToolBar->isChecked());
-  config->writeEntry("Show Statusbar",viewStatusBar->isChecked());
-  config->writeEntry("ToolBarPos", (int) toolBar("mainToolBar")->barPos());
-  fileOpenRecent->saveEntries(config,"Recent Files");
+void KomportApp::addRecentFile(const QUrl& url)
+{
+  mRecentFiles.removeAll(url);
+  mRecentFiles.prepend(url);
+  while ( mRecentFiles.size() > MAX_RECENT_FILES ) mRecentFiles.removeLast();
+  rebuildRecentFilesMenu();
+}
 
-  saveProperties( config );
+void KomportApp::rebuildRecentFilesMenu()
+{
+  fileOpenRecentMenu->clear();
+  fileOpenRecentMenu->setEnabled( !mRecentFiles.isEmpty() );
+  for ( const QUrl &url : std::as_const(mRecentFiles) ) {
+    QAction *action = fileOpenRecentMenu->addAction( url.toDisplayString() );
+    connect( action, &QAction::triggered, this, [this, url]() { slotFileOpenRecent(url); } );
+  }
+}
+
+void KomportApp::saveOptions()
+{
+  config->beginGroup( QStringLiteral("General Options") );
+  config->setValue( QStringLiteral("Geometry"), size() );
+  config->setValue( QStringLiteral("Show Toolbar"), viewToolBar->isChecked() );
+  config->setValue( QStringLiteral("Show Statusbar"), viewStatusBar->isChecked() );
+  QStringList recent;
+  for ( const QUrl &url : std::as_const(mRecentFiles) ) recent << url.toString();
+  config->setValue( QStringLiteral("Recent Files"), recent );
+  config->endGroup();
+
+  config->beginGroup( QStringLiteral("Connection") );
+  config->setValue( QStringLiteral("Device"), strDevice );
+  config->setValue( QStringLiteral("BaudRate"), strBaudRate );
+  config->setValue( QStringLiteral("FlowControl"), strFlowControl );
+  config->setValue( QStringLiteral("RXQueue"), strRxQueue );
+  config->setValue( QStringLiteral("FlushRate"), strFlushRate );
+  config->setValue( QStringLiteral("StartBits"), strStartBits );
+  config->setValue( QStringLiteral("DataBits"), strDataBits );
+  config->setValue( QStringLiteral("StopBits"), strStopBits );
+  config->setValue( QStringLiteral("Parity"), strParity );
+  config->setValue( QStringLiteral("Emulation"), strEmulation );
+  config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
+  config->endGroup();
+  config->sync();
 }
 
 
 void KomportApp::readOptions()
 {
-	
-  config->setGroup("General Options");
+  config->beginGroup( QStringLiteral("General Options") );
 
-  // bar status settings
-  bool bViewToolbar = config->readBoolEntry("Show Toolbar", true);
+  bool bViewToolbar = config->value( QStringLiteral("Show Toolbar"), true ).toBool();
   viewToolBar->setChecked(bViewToolbar);
   slotViewToolBar();
 
-  bool bViewStatusbar = config->readBoolEntry("Show Statusbar", true);
+  bool bViewStatusbar = config->value( QStringLiteral("Show Statusbar"), true ).toBool();
   viewStatusBar->setChecked(bViewStatusbar);
   slotViewStatusBar();
 
+  mRecentFiles.clear();
+  const QStringList recent = config->value( QStringLiteral("Recent Files") ).toStringList();
+  for ( const QString &s : recent ) mRecentFiles << QUrl(s);
+  rebuildRecentFilesMenu();
 
-  // bar position settings
-  KToolBar::BarPosition toolBarPos;
-  toolBarPos=(KToolBar::BarPosition) config->readNumEntry("ToolBarPos", KToolBar::Top);
-  toolBar("mainToolBar")->setBarPos(toolBarPos);
-	
-  // initialize the recent file list
-  fileOpenRecent->loadEntries(config,"Recent Files");
-
-  QSize size=config->readSizeEntry("Geometry");
-  if(!size.isEmpty())
+  QSize sz = config->value( QStringLiteral("Geometry") ).toSize();
+  config->endGroup();
+  if ( sz.isValid() && !sz.isEmpty() )
   {
-    resize(size);
+    resize(sz);
   }
 
-  readProperties( config );
-}
+  config->beginGroup( QStringLiteral("Connection") );
+  strDevice = config->value( QStringLiteral("Device"), QStringLiteral("/dev/ttyS0") ).toString();
+  strBaudRate = config->value( QStringLiteral("BaudRate"), QStringLiteral("9600") ).toString();
+  strFlowControl = config->value( QStringLiteral("FlowControl"), QStringLiteral("NONE") ).toString();
+  strRxQueue = config->value( QStringLiteral("RXQueue"), QStringLiteral("1024") ).toString();
+  strFlushRate = config->value( QStringLiteral("FlushRate"), QStringLiteral("256") ).toString();
+  strStartBits = config->value( QStringLiteral("StartBits"), QStringLiteral("1") ).toString();
+  strDataBits = config->value( QStringLiteral("DataBits"), QStringLiteral("8") ).toString();
+  strStopBits = config->value( QStringLiteral("StopBits"), QStringLiteral("1") ).toString();
+  strParity = config->value( QStringLiteral("Parity"), QStringLiteral("NONE") ).toString();
+  strEmulation = config->value( QStringLiteral("Emulation"), QStringLiteral("VT102") ).toString();
+  strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") ).toString();
+  config->endGroup();
 
-void KomportApp::saveProperties(KConfig *_cfg)
-{
-  if(doc->URL().fileName()!=i18n("Untitled") && !doc->isModified())
-  {
-    // saving to tempfile not necessary
-
-  }
-  else
-  {
-    KURL url=doc->URL();	
-    _cfg->writeEntry("filename", url.url());
-    _cfg->writeEntry("modified", doc->isModified());
-    QString tempname = kapp->tempSaveName(url.url());
-    QString tempurl= KURL::encode_string(tempname);
-    KURL _url(tempurl);
-    doc->saveDocument(_url);
-  }
-  if ( !strDevice.isEmpty() ) {
-    _cfg->writeEntry("Device", strDevice );
-    _cfg->writeEntry("BaudRate", strBaudRate);
-    _cfg->writeEntry("FlowControl", strFlowControl );
-    _cfg->writeEntry("RXQueue", strRxQueue );
-    _cfg->writeEntry("FlushRate", strFlushRate );
-    _cfg->writeEntry("StartBits", strStartBits );
-    _cfg->writeEntry("DataBits", strDataBits );
-    _cfg->writeEntry( "StopBits", strStopBits );
-    _cfg->writeEntry( "Parity", strParity );
-    _cfg->writeEntry("Emulation", strEmulation );
-    _cfg->writeEntry("ScrollBuffer",strScrollBuffer );
-    _cfg->sync();
-  }
-}
-
-
-void KomportApp::readProperties(KConfig* _cfg)
-{
-  QString filename = _cfg->readEntry("filename", "");
-  KURL url(filename);
-  bool modified = _cfg->readBoolEntry("modified", false);
-  if(modified)
-  {
-    bool canRecover;
-    QString tempname = kapp->checkRecoverFile(filename, canRecover);
-    KURL _url(tempname);
-  	
-    if(canRecover)
-    {
-      doc->openDocument(_url);
-      doc->setModified();
-      setCaption(_url.fileName(),true);
-      QFile::remove(tempname);
-    }
-  }
-  else
-  {
-    if(!filename.isEmpty())
-    {
-      doc->openDocument(url);
-      setCaption(url.fileName(),false);
-    }
-  }
-  strDevice = _cfg->readEntry("Device", "/dev/ttyS0");
-  strBaudRate = _cfg->readEntry("BaudRate", "9600");
-  strFlowControl = _cfg->readEntry("FlowControl", "XON/XOFF");
-  strRxQueue = _cfg->readEntry("RXQueue","1024");
-  strFlushRate = _cfg->readEntry("FlushRate","256");
-  strStartBits = _cfg->readEntry("StartBits","1");
-  strDataBits = _cfg->readEntry("DataBits","8");
-  strStopBits = _cfg->readEntry("StopBits","1");
-  strParity = _cfg->readEntry("Parity","NONE");
-  strEmulation = _cfg->readEntry("Emulation", "VT102");
-  strScrollBuffer = _cfg->readEntry("ScrollBuffer","1024");
-  view->setScrollBuffer( strScrollBuffer.toInt()  );
+  view->setScrollBuffer( strScrollBuffer.toInt() );
   KomportSerial* serial = view->getSerial();
   serial->setDeviceName( strDevice );
   serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
+  serial->setFlowControl( strFlowControl );
   serial->setBaudRate( strBaudRate );
   serial->setRxQueue( strRxQueue.toInt() );
   serial->setFlushRate( strFlushRate.toInt() );
   serial->open();
 }
 
-bool KomportApp::queryClose()
+void KomportApp::closeEvent(QCloseEvent *event)
 {
-  return doc->saveModified();
-}
-
-bool KomportApp::queryExit()
-{
-  saveOptions();
-  return true;
+  if ( doc->saveModified() ) {
+    saveOptions();
+    event->accept();
+  } else {
+    event->ignore();
+  }
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -304,17 +331,17 @@ bool KomportApp::queryExit()
 
 void KomportApp::slotFileNewWindow()
 {
-  slotStatusMsg(i18n("Opening a new application window..."));
-	
+  slotStatusMsg(tr("Opening a new application window..."));
+
   KomportApp *new_window= new KomportApp();
   new_window->show();
 
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotFileNew()
 {
-  slotStatusMsg(i18n("Creating new document..."));
+  slotStatusMsg(tr("Creating new document..."));
 
   if(!doc->saveModified())
   {
@@ -322,39 +349,39 @@ void KomportApp::slotFileNew()
 
   }
   else
-  {	
-    doc->newDocument();		
-    setCaption(doc->URL().fileName(), false);
+  {
+    doc->newDocument();
+    setWindowTitle( doc->fileName() );
   }
 
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotFileOpen()
 {
-  slotStatusMsg(i18n("Uploading file..."));
-  KURL url=KFileDialog::getOpenURL(QString::null,  i18n("*"), this, i18n("Upload File..."));
-  if(!url.isEmpty())
+  slotStatusMsg(tr("Uploading file..."));
+  QString fileName = QFileDialog::getOpenFileName( this, tr("Upload File...") );
+  if ( !fileName.isEmpty() )
     {
       KomportTransfer transfer( view->getSerial(), view );
-      transfer.setURL(url);
+      transfer.setFileName(fileName);
       transfer.upload();
-      fileOpenRecent->addURL( url );
+      addRecentFile( QUrl::fromLocalFile(fileName) );
     }
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
-void KomportApp::slotFileOpenRecent(const KURL& url)
+void KomportApp::slotFileOpenRecent(const QUrl& url)
 {
-  slotStatusMsg(i18n("Uploading file..."));
+  slotStatusMsg(tr("Uploading file..."));
   if(!url.isEmpty())
     {
       KomportTransfer transfer( view->getSerial(), view );
-      transfer.setURL(url);
+      transfer.setFileName( url.toLocalFile() );
       transfer.upload();
-      fileOpenRecent->addURL( url );
+      addRecentFile( url );
     }
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotFileSave()
@@ -364,175 +391,157 @@ void KomportApp::slotFileSave()
 
 void KomportApp::slotFileSaveAs()
 {
-  slotStatusMsg(i18n("Downloading a file..."));
-  KURL url=KFileDialog::getSaveURL(QDir::currentDirPath(),i18n("*|All files"), this, i18n("Save as..."));
-  if(!url.isEmpty())
+  slotStatusMsg(tr("Downloading a file..."));
+  QString fileName = QFileDialog::getSaveFileName( this, tr("Save as..."), QDir::currentPath() );
+  if ( !fileName.isEmpty() )
     {
       KomportTransfer transfer( view->getSerial(), view );
-      transfer.setURL(url);
+      transfer.setFileName(fileName);
       transfer.download();
-      fileOpenRecent->addURL( url );
+      addRecentFile( QUrl::fromLocalFile(fileName) );
     }
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotFileClose()
 {
-  slotStatusMsg(i18n("Closing file..."));
-	
+  slotStatusMsg(tr("Closing file..."));
+
   view->getSerial()->close();
   close();
 
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotFilePrint()
 {
-  slotStatusMsg(i18n("Printing..."));
+  slotStatusMsg(tr("Printing..."));
 
   QPrinter printer;
-  if (printer.setup(this))
+  QPrintDialog dlg(&printer, this);
+  if (dlg.exec() == QDialog::Accepted)
   {
     view->print(&printer);
   }
 
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotFileQuit()
 {
-  slotStatusMsg(i18n("Exiting..."));
-  saveOptions();
-  // close the first window, the list makes the next one the first again.
-  // This ensures that queryClose() is called on each window to ask for closing
-  KMainWindow* w;
-  if(memberList)
+  slotStatusMsg(tr("Exiting..."));
+  // close each top-level window; the closeEvent()/saveModified() flow on
+  // each one decides whether the close (and thus the overall quit) can go
+  // ahead. Mirrors the original KMainWindow::memberList walk.
+  const QWidgetList windows = QApplication::topLevelWidgets();
+  for ( QWidget *w : windows )
   {
-    for(w=memberList->first(); w!=0; w=memberList->first())
+    if ( auto *win = qobject_cast<KomportApp*>(w) )
     {
-      // only close the window if the closeEvent is accepted. If the user presses Cancel on the saveModified() dialog,
-      // the window and the application stay open.
-      if(!w->close())
-	break;
+      if ( !win->close() )
+        break;
     }
-  }	
+  }
 }
 
 void KomportApp::slotEditCut()
 {
-  slotStatusMsg(i18n("Cutting selection..."));
+  slotStatusMsg(tr("Cutting selection..."));
 
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotEditCopy()
 {
-  slotStatusMsg(i18n("Copying selection to clipboard..."));
+  slotStatusMsg(tr("Copying selection to clipboard..."));
   if ( view->hasSelection() ) {
       QClipboard* cb = QApplication::clipboard();
       QString str= cb->text( QClipboard::Selection );
       cb->setText(  str, QClipboard::Clipboard );
   }
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotEditPaste()
 {
-  slotStatusMsg(i18n("Inserting clipboard contents..."));
+  slotStatusMsg(tr("Inserting clipboard contents..."));
   QClipboard* cb = QApplication::clipboard();
   QString str = cb->text( QClipboard::Clipboard );
   for ( int i=0; i < str.length(); i++ ) {
-      //kapp->processEvents();
       view->slotSimKeyPressed( str[ i ] );
   }
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotViewToolBar()
 {
-  slotStatusMsg(i18n("Toggling toolbar..."));
-  ///////////////////////////////////////////////////////////////////
-  // turn Toolbar on or off
-  if(!viewToolBar->isChecked())
-  {
-    toolBar("mainToolBar")->hide();
-  }
-  else
-  {
-    toolBar("mainToolBar")->show();
-  }		
-
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Toggling toolbar..."));
+  mainToolBar->setVisible( viewToolBar->isChecked() );
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotViewStatusBar()
 {
-  slotStatusMsg(i18n("Toggle the statusbar..."));
-  ///////////////////////////////////////////////////////////////////
-  //turn Statusbar on or off
-  if(!viewStatusBar->isChecked())
-  {
-    statusBar()->hide();
-  }
-  else
-  {
-    statusBar()->show();
-  }
-
-  slotStatusMsg(i18n("Ready."));
+  slotStatusMsg(tr("Toggle the statusbar..."));
+  statusBar()->setVisible( viewStatusBar->isChecked() );
+  slotStatusMsg(tr("Ready."));
 }
 
 
 void KomportApp::slotShowPreferences()
 {
-  slotStatusMsg(i18n("Open settings form..."));
+  slotStatusMsg(tr("Open settings form..."));
   ///////////////////////////////////////////////////////////////////
   // open the settings dialog...
-  SettingsDialog settingsDialog;
+  SettingsDialog settingsDialog(this);
 
-  readProperties( config );
-  settingsDialog.DeviceComboBox->setCurrentText(  strDevice );
-  settingsDialog.BaudRateComboBox->setCurrentText(  strBaudRate );
-  settingsDialog.FlowControlComboBox->setCurrentText(  strFlowControl );
+  settingsDialog.DeviceComboBox->setCurrentText( strDevice );
+  settingsDialog.BaudRateComboBox->setCurrentText( strBaudRate );
+  settingsDialog.FlowControlComboBox->setCurrentText( strFlowControl );
   settingsDialog.RxQueueSpinBox->setValue( strRxQueue.toInt() );
   settingsDialog.FlushRateSpinBox->setValue( strFlushRate.toInt() );
   settingsDialog.StartBitsComboBox->setCurrentText( strStartBits );
   settingsDialog.DataBitsComboBox->setCurrentText( strDataBits );
   settingsDialog.StopBitsComboBox->setCurrentText( strStopBits );
   settingsDialog.ParityComboBox->setCurrentText( strParity );
-  settingsDialog.EmulationComboBox->setCurrentText(  strEmulation );  
+  settingsDialog.EmulationComboBox->setCurrentText( strEmulation );
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
   if ( settingsDialog.exec() == QDialog::Accepted ) {
       strDevice =  settingsDialog.DeviceComboBox->currentText();
       strBaudRate =  settingsDialog.BaudRateComboBox->currentText() ;
       strFlowControl = settingsDialog.FlowControlComboBox->currentText();
-      strRxQueue = settingsDialog.RxQueueSpinBox->text();
-      strFlushRate = settingsDialog.FlushRateSpinBox->text();
+      strRxQueue = QString::number( settingsDialog.RxQueueSpinBox->value() );
+      strFlushRate = QString::number( settingsDialog.FlushRateSpinBox->value() );
       strStartBits =  settingsDialog.StartBitsComboBox->currentText() ;
       strDataBits =  settingsDialog.DataBitsComboBox->currentText() ;
       strStopBits =  settingsDialog.StopBitsComboBox->currentText() ;
       strParity =  settingsDialog.ParityComboBox->currentText() ;
       strEmulation = settingsDialog.EmulationComboBox->currentText();
-      strScrollBuffer = settingsDialog.ScrollBufferSpinBox->text();
-      saveProperties( config );
-      readProperties( config );
-  } 
-  
-  slotStatusMsg(i18n("Ready."));
+      strScrollBuffer = QString::number( settingsDialog.ScrollBufferSpinBox->value() );
+
+      view->setScrollBuffer( strScrollBuffer.toInt() );
+      KomportSerial* serial = view->getSerial();
+      serial->setDeviceName( strDevice );
+      serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
+      serial->setFlowControl( strFlowControl );
+      serial->setBaudRate( strBaudRate );
+      serial->setRxQueue( strRxQueue.toInt() );
+      serial->setFlushRate( strFlushRate.toInt() );
+      if ( !serial->isOpen() ) serial->open();
+  }
+
+  slotStatusMsg(tr("Ready."));
 }
 
 void KomportApp::slotStatusMsg(const QString &text)
 {
   ///////////////////////////////////////////////////////////////////
   // change status message permanently
-  statusBar()->clear();
-  statusBar()->changeItem(text, ID_STATUS_MSG);
+  statusBar()->showMessage(text);
 }
 
 /** Document has changed.  */
 void KomportApp::slotDocumentModified(){
-  //fileSave->setEnabled(doc->isModified());
-  //fileSaveAs->setEnabled(doc->isModified());
 }
 /** No descriptions */
 void KomportApp::slotViewModified(KomportView* _v){
@@ -540,6 +549,6 @@ void KomportApp::slotViewModified(KomportView* _v){
     editPaste->setEnabled( !QApplication::clipboard()->text( QClipboard::Clipboard ).isEmpty() );
 }
 /** get configuration object */
-KConfig* KomportApp::getConfig(){
+QSettings* KomportApp::getConfig(){
     return config;
 }

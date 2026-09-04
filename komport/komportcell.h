@@ -4,6 +4,7 @@
     begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,17 +19,15 @@
 #ifndef KOMPORTCELL_H
 #define KOMPORTCELL_H
 
-
 /**Encapsulates a character cell.
   *@author Mike Sharkey
   */
 
-#include <qapplication.h>
-#include <qstring.h>
-#include <qcolor.h>
+#include <QChar>
+#include <QColor>
 
 class KomportCell {
-public: 
+public:
 	KomportCell();
 	~KomportCell();
 

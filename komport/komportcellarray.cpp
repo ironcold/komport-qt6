@@ -4,6 +4,7 @@
     begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -17,10 +18,11 @@
 
 #include "komportcellarray.h"
 
-#define inherited QWidget
+#include <QApplication>
+#include <QPalette>
 
-#define _DEFAULT_FOREGROUND_   QApplication::palette().active().foreground()
-#define _DEFAULT_BACKGROUND_   QApplication::palette().active().background()
+#define _DEFAULT_FOREGROUND_   QApplication::palette().color(QPalette::Text)
+#define _DEFAULT_BACKGROUND_   QApplication::palette().color(QPalette::Base)
 
 KomportCellArray::KomportCellArray()
 : mBlink(false)
@@ -31,11 +33,14 @@ KomportCellArray::KomportCellArray()
 , mBackgroundColor(_DEFAULT_BACKGROUND_)
 ,mNotify(true)
 {
-  mCells.setAutoDelete(true);
+  // Qt6's QList has no auto-delete like Qt3's QPtrList did - ownership of the
+  // cells is handled explicitly by this class (see setArraySize() and the
+  // destructor below).
   initSettings();
 }
 
 KomportCellArray::~KomportCellArray(){
+  qDeleteAll(mCells);
 }
 
 /** initialize default settings */
@@ -57,10 +62,10 @@ void KomportCellArray::setArraySize(QSize _sz){
           KomportCell *pCell = new KomportCell();
           mCells.append(pCell);
       }
-  } else  if ( curcnt > newcnt ) { 
+  } else  if ( curcnt > newcnt ) {
       int diff = curcnt - newcnt;
       for( index=0; index < diff; index++ )
-          mCells.removeFirst();
+          delete mCells.takeFirst();
   } else if ( curcnt < newcnt  ) {
       int diff = newcnt - curcnt;
       for( index=0; index < diff; index++ )  {
@@ -122,11 +127,11 @@ int KomportCellArray::cellHeight(){
 
 /** get a pointer to the cell from location (x,y) */
 KomportCell* KomportCellArray::cell(int _x,int _y){
-  unsigned int index = (arrayWidth()*_y)+_x;
-  if ( index < mCells.count() ) {
+  int index = (arrayWidth()*_y)+_x;
+  if ( index >= 0 && index < mCells.count() ) {
     return mCells.at( index );
   } else {
-    return NULL;
+    return nullptr;
   }
 }
 

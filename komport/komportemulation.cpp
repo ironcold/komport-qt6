@@ -453,7 +453,7 @@ Pc
 ESC[PL;PcH
     Cursor Position: Moves the cursor to the specified position
     (coordinates). If you do not specify a position, the cursor moves to the
-    home positionÄÄthe upper-left corner of the screen (line 0, column
+    home positionï¿½ï¿½the upper-left corner of the screen (line 0, column
     0). This escape sequence works the same way as the following Cursor
     Position escape sequence.
 
@@ -539,6 +539,9 @@ ESC[Ps;...;Psm
 
 #include "komportemulation.h"
 
+#include <QApplication>
+#include <cstdio>
+
 #define ASCII_BEL   0x07
 #define ASCII_BS    0x08
 #define ASCII_LF    0x0A
@@ -563,20 +566,27 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
   KomportSerial* s = serial();
   if ( s->isOpen() ) {
     switch( _e->key() ) {
-      case Key_Insert: s->putChar(ASCII_ESC); s->putStr("[1~");  break;
-      case Key_Delete: s->putChar(ASCII_ESC); s->putStr("[4~"); break;
-      case Key_Home:  s->putChar(ASCII_ESC); s->putStr("[2~"); break;
-      case Key_End:  s->putChar(ASCII_ESC); s->putStr("[5~"); break;
-      case Key_PageUp: s->putChar(ASCII_ESC); s->putStr("[3~"); break;
-      case Key_PageDown: s->putChar(ASCII_ESC); s->putStr("[6~"); break;
-      case Key_Left: s->putChar(ASCII_ESC); s->putStr("[D"); break;
-      case Key_Up: s->putChar(ASCII_ESC); s->putStr("[A"); break;
-      case Key_Right: s->putChar(ASCII_ESC); s->putStr("[C"); break;
-      case Key_Down : s->putChar(ASCII_ESC); s->putStr("[B"); break;
+      case Qt::Key_Insert: s->putChar(ASCII_ESC); s->putStr("[1~");  break;
+      case Qt::Key_Delete: s->putChar(ASCII_ESC); s->putStr("[4~"); break;
+      case Qt::Key_Home:  s->putChar(ASCII_ESC); s->putStr("[2~"); break;
+      case Qt::Key_End:  s->putChar(ASCII_ESC); s->putStr("[5~"); break;
+      case Qt::Key_PageUp: s->putChar(ASCII_ESC); s->putStr("[3~"); break;
+      case Qt::Key_PageDown: s->putChar(ASCII_ESC); s->putStr("[6~"); break;
+      case Qt::Key_Left: s->putChar(ASCII_ESC); s->putStr("[D"); break;
+      case Qt::Key_Up: s->putChar(ASCII_ESC); s->putStr("[A"); break;
+      case Qt::Key_Right: s->putChar(ASCII_ESC); s->putStr("[C"); break;
+      case Qt::Key_Down : s->putChar(ASCII_ESC); s->putStr("[B"); break;
       default:
       {
-        int ch = _e->ascii();
-        s->putChar(ch);
+        // QKeyEvent::ascii() was removed in Qt6 - text() carries the same
+        // information (the ASCII/Latin-1 char this key press produces, if
+        // any) for the plain-ASCII dumb-terminal input this emulation
+        // targets.
+        const QString text = _e->text();
+        if ( !text.isEmpty() ) {
+          char ch = text.at(0).toLatin1();
+          s->putChar(ch);
+        }
         break;
         }
     }
@@ -586,11 +596,11 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
 /** move cursor to x,y */
 void KomportEmulation::doCursorTo()
 {
-  int sep = mCtlSequence.find( ';' );
+  int sep = mCtlSequence.indexOf( ';' );
   if ( sep >= 0 ) {
-    QCString rowStr = mCtlSequence.left( sep );
+    QByteArray rowStr = mCtlSequence.left( sep );
     ++sep;
-    QCString colStr = mCtlSequence.right( mCtlSequence.length()-sep );
+    QByteArray colStr = mCtlSequence.right( mCtlSequence.length()-sep );
     int row = rowStr.toInt()-1;
     int col = colStr.toInt()-1;
     cellArray()->setCursor(QPoint(col>=0?col:0,row>=0?row:0));
@@ -718,10 +728,10 @@ void KomportEmulation::doGraphics(){
   if ( mCtlSequence.isEmpty() )
     mCtlSequence = "0";
   do {
-    sep = mCtlSequence.find( ';', index );
+    sep = mCtlSequence.indexOf( ';', index );
     if ( sep < 0 )
       sep = mCtlSequence.length();
-    QCString attrStr = mCtlSequence.mid( index, mCtlSequence.find(';',index)-index );
+    QByteArray attrStr = mCtlSequence.mid( index, sep-index );
     index = sep+1;
     if ( !attrStr.isEmpty() ) {
       int attr = attrStr.toInt();
@@ -794,7 +804,7 @@ void KomportEmulation::doGraphics(){
           break;
       }
     }
-  } while( sep < (unsigned int)mCtlSequence.length() );
+  } while( sep < mCtlSequence.length() );
 }
 
 // received part of an escape sequence
@@ -905,6 +915,6 @@ void KomportEmulation::slotReceivedChar(char _ch)
 void KomportEmulation::slotSimKeyPressed(QChar _c){
    KomportSerial* s = serial();
    if ( s->isOpen() ) {
-      s->putChar(_c);
+      s->putChar(_c.toLatin1());
    }
 }

@@ -4,6 +4,7 @@
     begin                : Wed Oct 8 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -17,7 +18,7 @@
 
 #include "komportfilescrollbuffer.h"
 
-KomportFileScrollBuffer::KomportFileScrollBuffer(QString _name)
+KomportFileScrollBuffer::KomportFileScrollBuffer(const QString &_name)
 {
     setName(_name);
 }
@@ -25,7 +26,9 @@ KomportFileScrollBuffer::~KomportFileScrollBuffer(){
 }
 /** get a pointer to the cell from location (x,y) */
 KomportCell* KomportFileScrollBuffer::cell(int _x,int _y){
-  return NULL;
+  Q_UNUSED(_x);
+  Q_UNUSED(_y);
+  return nullptr;
 }
 
 /** get a pointer to the cell from location (x,y) */
@@ -34,8 +37,8 @@ KomportCell* KomportFileScrollBuffer::cell(QPoint _p){
 }
 
 /** set file name */
-void KomportFileScrollBuffer::setName(QString _name){
-    mFile.setName(_name);
+void KomportFileScrollBuffer::setName(const QString &_name){
+    mFile.setFileName(_name);
 }
 /** scroll up */
 void KomportFileScrollBuffer::scrollUp(){

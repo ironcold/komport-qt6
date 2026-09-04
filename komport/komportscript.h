@@ -4,6 +4,7 @@
     begin                : Thu Feb 20 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,16 +19,16 @@
 #ifndef KOMPORTSCRIPT_H
 #define KOMPORTSCRIPT_H
 
-#include <qobject.h>
+#include <QObject>
 
 /**impliments scripting
   *@author Mike Sharkey
   */
 
 class KomportScript : public QObject  {
-public: 
-	KomportScript();
-	~KomportScript();
+public:
+	explicit KomportScript(QObject *parent = nullptr);
+	~KomportScript() override;
 };
 
 #endif

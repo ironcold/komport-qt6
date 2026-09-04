@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file>lo16-app-komport.png</file>
+    <file>lo32-app-komport.png</file>
+  </qresource>
+</RCC>

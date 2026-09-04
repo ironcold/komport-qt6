@@ -1,9 +1,10 @@
 /***************************************************************************
                           komportview.cpp  -  Komport Serial Port Communicator
                              -------------------
-    begin                : Mon Feb 17 00:05:54 EST 2003
+    begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -16,11 +17,13 @@
  ***************************************************************************/
 
 // include files for Qt
-#include <qprinter.h>
-#include <qpainter.h>
-#include <qrect.h>
-#include <qfont.h>
-#include <qfontmetrics.h>
+#include <QPrinter>
+#include <QPainter>
+#include <QRect>
+#include <QFont>
+#include <QFontMetrics>
+#include <QKeyEvent>
+#include <QMouseEvent>
 
 // application specific includes
 #include "komportview.h"
@@ -30,19 +33,26 @@
 #define min(x,y) (x<y?x:y)
 #define max(x,y) (x<y?y:x)
 
-KomportView::KomportView(QWidget *parent, const char *name)
-: QWidget(parent, name)
+KomportView::KomportView(QWidget *parent)
+: QWidget(parent)
 , mCursorState(false)
 , mBlinkState(false)
 , mInSelection(false)
 , mHasSelection(false)
 {
-  mScrollBar = new QScrollBar( Qt::Vertical, parent,"scroll_bar");
-  mScrollBar->setMinValue(0);
-  mScrollBar->setMaxValue(0);
+  // The scroll bar is deliberately a sibling (child of this view's parent,
+  // not of the view itself) and manually positioned in resizeEvent()/
+  // moveEvent() - this odd layout comes straight from the original Qt3
+  // code and is kept as-is rather than redesigned.
+  mScrollBar = new QScrollBar( Qt::Vertical, parent );
+  mScrollBar->setObjectName( QStringLiteral("scroll_bar") );
+  mScrollBar->setRange(0, 0);
   QObject::connect(mScrollBar,SIGNAL(valueChanged(int)),this,SLOT(slotScroll(int)));
-  
-  setBackgroundMode(PaletteBase);
+
+  // We always redraw the full cell area from mPixmap in paintEvent(), so
+  // avoid Qt erasing the background first (replaces Qt3's
+  // setBackgroundMode(PaletteBase)).
+  setAttribute(Qt::WA_OpaquePaintEvent, true);
 
   QObject::connect(cellArray(),SIGNAL(cursorChanged(QPoint,QPoint)),this,SLOT(slotCursorChanged(QPoint,QPoint)));
   QObject::connect(cellArray(),SIGNAL(cellChanged(QPoint)),this,SLOT(slotCellChanged(QPoint)));
@@ -54,10 +64,10 @@ KomportView::KomportView(QWidget *parent, const char *name)
   mCursorTimer = startTimer( 500 );
   mBlinkTimer = startTimer( 1000 );
   mAutoScrollTimer = startTimer( 250 );
-  
+
   setCellSize();
   setEnabled(true);
-  setFocusPolicy(StrongFocus);
+  setFocusPolicy(Qt::StrongFocus);
 
   mEmulation = new KomportEmulation( getSerial(), cellArray() );
   QObject::connect(this,SIGNAL(keyPressed(QKeyEvent*)),mEmulation,SLOT(slotKeyPressed(QKeyEvent*)));
@@ -68,8 +78,7 @@ KomportView::KomportView(QWidget *parent, const char *name)
 
 KomportView::~KomportView()
 {
- delete mScrollBar;
-  //getSerial()->close();
+  delete mScrollBar;
 }
 
 KomportDoc *KomportView::getDocument() const
@@ -81,28 +90,26 @@ KomportDoc *KomportView::getDocument() const
 
 void KomportView::print(QPrinter *pPrinter)
 {
-  for ( int copies=0; copies < pPrinter->numCopies(); copies++ ) {
-      QPainter paint;
-      paint.begin(pPrinter);
-      QRect bounds = paint.viewport();
-      QString str="";
-      if ( hasSelection() ) {
-          // draw the contents of the mouse clipboard...
-          str = QApplication::clipboard()->text( QClipboard::Clipboard );
-      } else {
-          // draw the contents of the screen...
-          for( int y=0; y < cellArray()->arrayHeight(); y++ ) {
-              for( int x=0; x < cellArray()->arrayWidth(); x++ ) {
-                  KomportCell* cell = cellArray()->cell(x,y);
-                  str += cell->character();
-              }
-              str += QChar( '\n' );
+  QPainter paint;
+  paint.begin(pPrinter);
+  QRect bounds = paint.viewport();
+  QString str="";
+  if ( hasSelection() ) {
+      // draw the contents of the mouse clipboard...
+      str = QApplication::clipboard()->text( QClipboard::Clipboard );
+  } else {
+      // draw the contents of the screen...
+      for( int y=0; y < cellArray()->arrayHeight(); y++ ) {
+          for( int x=0; x < cellArray()->arrayWidth(); x++ ) {
+              KomportCell* cell = cellArray()->cell(x,y);
+              str += cell->character();
           }
+          str += QChar( '\n' );
       }
-      paint.drawText( bounds, AlignAuto|PlainText, str );
-      // eject the page...
-      paint.end();
   }
+  paint.drawText( bounds, Qt::TextExpandTabs | Qt::AlignLeft | Qt::AlignTop, str );
+  // eject the page...
+  paint.end();
 }
 
 /** return cell array object */
@@ -113,7 +120,7 @@ KomportCellArray* KomportView::cellArray(){
 /** draw a cell */
 void KomportView::paintCell( QPainter* _paint, int _x, int _y, QRect _bounds ) {
   KomportCell* cell = getCell(_x,_y);
-  if ( cell != NULL ) {
+  if ( cell != nullptr ) {
     QString str( cell->character() );
     bool cursorCellOn = (cellArray()->cursor() == QPoint( _x, _y ) && mCursorState);
     QColor fillColor;
@@ -123,8 +130,8 @@ void KomportView::paintCell( QPainter* _paint, int _x, int _y, QRect _bounds ) {
 
     // determine forground and background color...
     if ( cell->select() ) {
-        fillColor =  QApplication::palette().active().highlight();
-        textColor = QApplication::palette().active().highlightedText();
+        fillColor =  QApplication::palette().color(QPalette::Highlight);
+        textColor = QApplication::palette().color(QPalette::HighlightedText);
     } else  if ( cursorCellOn && hasFocus() ) {
       fillColor = cell->reverse() ? cellBackground: cellForeground;
       textColor = cell->reverse() ? cellForeground:cellBackground;
@@ -171,7 +178,7 @@ void KomportView::updateCell(QPoint _p){
 
 /** key press event */
 void KomportView::keyPressEvent(QKeyEvent* _e){
-    if ( mScrollBar->value() != mScrollBar->maxValue() ) {
+    if ( mScrollBar->value() != mScrollBar->maximum() ) {
         resetScroll();
         slotScroll( mScrollBar->value() );
     }
@@ -180,12 +187,14 @@ void KomportView::keyPressEvent(QKeyEvent* _e){
 
 /** key release event */
 void KomportView::keyReleaseEvent(QKeyEvent* _e){
+  Q_UNUSED(_e);
 }
 
 /** paint event */
 void KomportView::paintEvent(QPaintEvent* _e){
   QRect rect = _e->rect();
-  bitBlt(this,rect.topLeft(),&mPixmap,rect,Qt::CopyROP);
+  QPainter p(this);
+  p.drawPixmap(rect.topLeft(), mPixmap, rect);
 }
 
 /** timer event */
@@ -211,7 +220,7 @@ void KomportView::timerEvent(QTimerEvent* _e) {
             mScrollBar->setValue( mScrollBar->value()-amount );
             slotScroll( mScrollBar->value() );
         }
-        else if ( mMousePos.y() > height() && mScrollBar->value() < mScrollBar->maxValue() ) { // scroll up (out of scroll buffer)...
+        else if ( mMousePos.y() > height() && mScrollBar->value() < mScrollBar->maximum() ) { // scroll up (out of scroll buffer)...
             int amount = 1+((mMousePos.y()-height() )/10); // calculate acceleration.
             mScrollBar->setValue( mScrollBar->value()+amount );
             slotScroll( mScrollBar->value() );
@@ -223,8 +232,8 @@ void KomportView::timerEvent(QTimerEvent* _e) {
 /** get a cell */
 KomportCell* KomportView::getCell(int _x, int _y){
   KomportCell* cell = cellArray()->cell(_x,_y);
-  if ( mScrollBar->value() < mScrollBar->maxValue() ) {
-        int scrolled = mScrollBar->maxValue() -  mScrollBar->value();
+  if ( mScrollBar->value() < mScrollBar->maximum() ) {
+        int scrolled = mScrollBar->maximum() -  mScrollBar->value();
         if ( scrolled < cellArray()->arrayHeight() ) { // not a complete screen of scroll back...
             if ( _y < scrolled ) { // is it the scroll buffer portion?
                 cell = mScrollBuffer.cell(_x, ((mScrollBuffer.arrayHeight()-1)-scrolled)+_y);
@@ -241,7 +250,7 @@ KomportCell* KomportView::getCell(int _x, int _y){
 /** calculates cell size based on font. */
 void KomportView::setCellSize(){
   QFontMetrics fm = fontMetrics();
-  cellArray()->setCellSize(QSize(fm.width(QChar('H')),fm.height()));
+  cellArray()->setCellSize(QSize(fm.horizontalAdvance(QChar('H')),fm.height()));
   QSize sz(cellArray()->width(),cellArray()->height());
   setMinimumSize(sz);
   setMaximumSize(sz);
@@ -269,7 +278,8 @@ void KomportView::slotRowChanged(int _row){
 
 /** received a char */
 void KomportView::slotReceivedChar(char _ch){
-    if ( mScrollBar->value() != mScrollBar->maxValue() ) {
+    Q_UNUSED(_ch);
+    if ( mScrollBar->value() != mScrollBar->maximum() ) {
         resetScroll();
         slotScroll( mScrollBar->value() );
     }
@@ -284,17 +294,29 @@ void KomportView::resizeEvent(QResizeEvent* _e){
   mScrollBar->resize( mScrollBar->width(), height() );
   mScrollBar->move( width(), y() );
   mScrollBar->show();
-  mPixmap.resize( _e->size() );
+  // QPixmap has no in-place resize() in Qt6 - build a new one and copy the
+  // previous contents into its top-left corner, matching what Qt3's
+  // QPixmap::resize() did.
+  QPixmap resized( _e->size() );
+  resized.fill(cellArray()->defaultBackgroundColor());
+  QPainter p(&resized);
+  p.drawPixmap(0, 0, mPixmap);
+  p.end();
+  mPixmap = resized;
   cellArray()->update();
 }
 /** notification that the cell array has scrolled up so we need to scroll visually */
 void KomportView::slotScrolledUp(){
     int rowHeight = cellArray()->cellHeight();
-    // scroll the offscreen pixels up one row.....
-    bitBlt(&mPixmap,0,0,&mPixmap,0,rowHeight,mPixmap.width(),mPixmap.height()-rowHeight,Qt::CopyROP);
+    // scroll the offscreen pixels up one row: copy the pixmap's lower
+    // portion into a temporary buffer first, since painting a QPixmap onto
+    // itself with overlapping source/target regions is not supported.
+    QPixmap copy = mPixmap.copy(0, rowHeight, mPixmap.width(), mPixmap.height()-rowHeight);
+    QPainter p(&mPixmap);
+    p.drawPixmap(0, 0, copy);
+    p.end();
     // transfer the offscreen pixels to the screen....
-    //update();
-    repaint(false);
+    update();
 }
 /** before the actual scroll takes place */
 void KomportView::slotAboutToScrollUp(){
@@ -316,14 +338,14 @@ void KomportView::mousePressEvent( QMouseEvent* _e ){
         mSelectStart = QPoint( 0, 0 );
         mSelectEnd = mMousePos = mSelectStart;
         deselect();
-        selectStart( _e->pos() );
+        selectStart( _e->position().toPoint() );
         mInSelection = true;
     }
 }
 /** No descriptions */
 void KomportView::mouseReleaseEvent( QMouseEvent* _e ){
     if( _e->button() == Qt::LeftButton && mInSelection ) {
-        selectEnd( _e->pos() );
+        selectEnd( _e->position().toPoint() );
         select( mSelectStart, mSelectEnd, true );
         mSelectStart = QPoint( 0, 0 );
         mSelectEnd = mMousePos = mSelectStart;
@@ -333,12 +355,13 @@ void KomportView::mouseReleaseEvent( QMouseEvent* _e ){
 /** No descriptions */
 void KomportView::mouseMoveEvent( QMouseEvent* _e ){
      if ( mInSelection ) {
-         selectEnd( (mMousePos = _e->pos()) );
+         selectEnd( (mMousePos = _e->position().toPoint()) );
          select( mSelectStart, mSelectEnd );
      }
 }
 /** No descriptions */
 void KomportView::moveEvent( QMoveEvent* _e ){
+    Q_UNUSED(_e);
     mScrollBar->resize( mScrollBar->width(), height() );
     mScrollBar->move( width(), y() );
     mScrollBar->show();
@@ -351,19 +374,19 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
       int startY = min(start.y(),end.y());
       int endX = max(start.x(),end.x());
       int endY = max(start.y(),end.y());
-      KomportCell* cell=NULL;
+      KomportCell* cell=nullptr;
       QString str;
       for( int y=startY; y <= endY; y++ ) {
           for( int x=startX; x <= endX; x++ ) {
               cell = cellArray()->cell(x,y);
-              if ( cell != NULL ) {
-                  cellArray()->cell(x,y)->setSelect( true );;
+              if ( cell != nullptr ) {
+                  cellArray()->cell(x,y)->setSelect( true );
                   cellArray()->updateCell(x,y);
                   if ( clip )
                       str += cell->character();
               }
           }
-          if ( clip && cell != NULL ) {
+          if ( clip && cell != nullptr ) {
               str += QChar('\n');
           }
       }
@@ -410,7 +433,7 @@ bool KomportView::hasSelection(){
 }
 /** simulated key press for inserting from clipboard, etc... */
 void KomportView::slotSimKeyPressed(QChar _c){
-    if ( mScrollBar->value() != mScrollBar->maxValue() ) {
+    if ( mScrollBar->value() != mScrollBar->maximum() ) {
         resetScroll();
         slotScroll( mScrollBar->value() );
     }
@@ -418,6 +441,7 @@ void KomportView::slotSimKeyPressed(QChar _c){
 }
 /** scroll bar moved */
 void KomportView::slotScroll(int _value){
+    Q_UNUSED(_value);
     int cellWidth = cellArray()->cellWidth();
     int cellHeight = cellArray()->cellHeight();
     QPainter paint( &mPixmap );
@@ -428,11 +452,11 @@ void KomportView::slotScroll(int _value){
         }
     }
     paint.end();
-    repaint(false);
+    update();
 }
 /** reset scrollbar */
 void KomportView::resetScroll(){
-        mScrollBar->setMaxValue(mScrollBuffer.depth());
+        mScrollBar->setMaximum(mScrollBuffer.depth());
         mScrollBar->setValue(mScrollBuffer.depth());
 }
 /** set the number of lines in the scroll buffer */

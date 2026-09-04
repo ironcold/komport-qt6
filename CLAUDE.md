@@ -1,5 +1,10 @@
 # Komport — Modernisierung KDE3/Qt3 → Qt6
 
+> **Status:** Die Portierung ist durchgeführt und baut sauber mit CMake/Qt6
+> (`cmake -B build && cmake --build build`, auch mit `-Wall -Wextra` ohne Warnungen).
+> Details, was dabei gemacht/entschieden wurde, stehen in `TODO.md`. Dieses
+> Dokument bleibt als Ziel-/Architektur-Referenz für künftige Änderungen bestehen.
+
 ## Was ist Komport?
 
 Ein serielles Terminalprogramm (VT100/VT102-ähnliche Emulation) aus 2003, ursprünglich
@@ -112,13 +117,12 @@ Soll ersetzt werden durch:
 
 ## Build-System
 
-Aktuell: klassisches Autotools-Setup (`configure.in`, `acinclude.m4`, `admin/*`,
-generiert im KDevelop-1.2-Stil, KDE-2/3-typisch). Das passt nicht zu einer reinen
-Qt6-Anwendung. **Migration auf CMake** (Standard für moderne Qt6-Projekte, mit
-`find_package(Qt6 COMPONENTS Widgets SerialPort REQUIRED)`) ist Teil dieser Aufgabe,
-auch wenn nicht explizit zuerst genannt — ohne das lässt sich das Ergebnis nicht sinnvoll
-bauen/testen. Alte `admin/`-Verzeichnis, `Makefile.am`/`.in`, `configure*`,
-`acinclude.m4`, `stamp-h.in` können nach erfolgreicher CMake-Umstellung entfernt werden.
+**Erledigt:** das alte Autotools-Setup (`configure.in`, `acinclude.m4`, `admin/*`,
+KDevelop-1.2-generiert, KDE-2/3-typisch) wurde komplett durch ein Top-Level
+`CMakeLists.txt` ersetzt (`find_package(Qt6 COMPONENTS Widgets PrintSupport
+SerialPort REQUIRED)`, `CMAKE_AUTOMOC`/`CMAKE_AUTORCC`, C++17). Alle Autotools-
+Dateien und die KDevelop-1.x-Projektdateien sind entfernt (siehe `TODO.md` Abschnitt 3
+für die vollständige Liste). Bauen: `cmake -B build && cmake --build build`.
 
 ## Was NICHT im Scope ist (sofern nicht anders vom Nutzer gewünscht)
 

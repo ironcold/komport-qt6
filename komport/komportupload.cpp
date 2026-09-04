@@ -4,6 +4,7 @@
     begin                : Tue Oct 7 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -17,7 +18,9 @@
 
 #include "komportupload.h"
 
-KomportUpload::KomportUpload(){
+KomportUpload::KomportUpload(KomportSerial* _serial, QWidget* _parent)
+: KomportTransfer(_serial, _parent)
+{
 }
 KomportUpload::~KomportUpload(){
 }

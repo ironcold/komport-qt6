@@ -4,6 +4,7 @@
     begin                : Tue Oct 7 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -18,29 +19,30 @@
 #ifndef KOMPORTTRANSFER_H
 #define KOMPORTTRANSFER_H
 
-#include <qobject.h>
-#include <qwidget.h>
-#include <qstring.h>
-#include <qfile.h>
-
-#include <kurl.h>
-#include <kfiledialog.h>
-#include <klocale.h>
-#include <kio/netaccess.h>
-#include <kprogress.h>
+#include <QObject>
+#include <QWidget>
+#include <QString>
+#include <QFile>
 
 #include "komportserial.h"
 
 /**baseclass for file transfer objects
+  *
+  * Ported from KURL/KFileDialog/KIO::NetAccess to a plain local file path -
+  * file selection now goes through QFileDialog, which already hands back a
+  * local path, so the KIO remote-download indirection the KDE3 version used
+  * is no longer needed.
+  *
   *@author Mike Sharkey
   */
 
 class KomportTransfer : public QObject  {
-public: 
-	KomportTransfer(KomportSerial* _serial,QWidget* parent=0);
-	~KomportTransfer();
-  /** provide a file dialog for selecting a local file */
-  virtual bool setURL(KURL _url);
+Q_OBJECT
+public:
+	KomportTransfer(KomportSerial* _serial,QWidget* parent=nullptr);
+	~KomportTransfer() override;
+  /** set the local file used for the transfer */
+  virtual bool setFileName(const QString &_fileName);
   /** run the upload file transfer */
   virtual bool upload();
   /** run the download file transfer */
@@ -48,15 +50,19 @@ public:
 protected: // Private attributes
   /** local file */
   QFile mFile;
-  /** local file name */
-  QString mFileName;
   /**  */
   KomportSerial* mSerial;
   /** */
   QWidget* mParent;
 public slots: // Public slots
-  /** No descriptions */
-  void slotReceivedChar(unsigned char _ch);
+  /** No descriptions.
+   *  NOTE: takes the same 'char' type as KomportSerial::receivedChar(char) -
+   *  the original connected this to a mismatched 'unsigned char' overload,
+   *  which Qt's signal/slot type matching would in fact have silently
+   *  rejected at runtime (download() never actually received anything).
+   *  Matching the type here is what makes the connection - and thus
+   *  download() - actually work. */
+  void slotReceivedChar(char _ch);
 };
 
 #endif

@@ -4,6 +4,7 @@
     begin                : Mon Feb 17 2003
     copyright            : (C) 2003 by Mike Sharkey
     email                : michael@sharkey.servebeer.com
+    ported to Qt6         : 2026
  ***************************************************************************/
 
 /***************************************************************************
@@ -17,9 +18,16 @@
 
 #include "komportcell.h"
 
+#include <QApplication>
+#include <QPalette>
+
 #define _DEFAULT_CHAR_ ' '
-#define _DEFAULT_FOREGROUND_   QApplication::palette().active().foreground()
-#define _DEFAULT_BACKGROUND_   QApplication::palette().active().background()
+// Qt3's QPalette::active() has no Qt6 equivalent - the active palette's
+// foreground/background roles map onto QPalette::Text (terminal text) and
+// QPalette::Base (terminal background), which is what a text/edit widget
+// uses in Qt6.
+#define _DEFAULT_FOREGROUND_   QApplication::palette().color(QPalette::Text)
+#define _DEFAULT_BACKGROUND_   QApplication::palette().color(QPalette::Base)
 
 KomportCell::KomportCell()
 : mSelect(false)
@@ -74,4 +82,3 @@ void KomportCell::copy(KomportCell* _other){
   setForegroundColor( _other->foregroundColor() );
   setBackgroundColor( _other->backgroundColor() );
 }
-
