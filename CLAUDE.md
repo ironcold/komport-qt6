@@ -135,6 +135,13 @@ Soll ersetzt werden durch:
   Auswahl/Zwischenablage, hält `KomportCellArray`, `KomportScrollBuffer`, `KomportEmulation`.
   **Achtung:** sitzt im Zentral-`QSplitter`, nicht direkt unter `KomportApp` — `getDocument()`
   läuft deshalb über `window()`, nicht `parentWidget()` (siehe `TODO-ARCHIVE.md` 8.6).
+  Scrollbar ist ein echtes Kind-Widget (`KomportMinimapScrollBar`, s.u.), nicht mehr ein
+  manuell positioniertes Sibling — siehe `TODO-ARCHIVE.md` Abschnitt 15 für die Bug-Historie.
+- `KomportMinimapScrollBar` (`komportminimap.h/.cpp`, **neu**) — Kate-artige Minimap statt
+  einer normalen `QScrollBar`: Text-Dichte-Silhouette der kompletten Historie
+  (Scrollback + Live), Hover-Textvorschau, `QPalette`-basiert (folgt automatisch dem
+  System-Theme). API-kompatibel zur alten `QScrollBar` (`value`/`setValue`/`maximum`/
+  `setMaximum`/`valueChanged`), daher drop-in in `KomportView` integriert.
 - `KomportEmulation` (`komportemulation.h/.cpp`) — VT100/VT102-Escape-Sequenz-Interpreter.
   **Größtes und wichtigstes Modul.** Inzwischen recht vollständig (Cursor-Bewegung mit
   Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports, erweiterte
@@ -152,7 +159,8 @@ Soll ersetzt werden durch:
 - `SettingsDialog` (`settingsdialog.h/.cpp`) — Verbindungseinstellungen, handgeschrieben mit
   Qt6-Layouts (die alte Qt3-`.ui` ist entfernt, `uic` von Qt6 kann sie nicht lesen).
 - `KomportHexView` (`komporthexview.h/.cpp`, **neu**) — zuschaltbares Split-Screen-Hexdump-Panel
-  (RX/TX getrennt, 16 Byte/Zeile, roh vor jeder Emulations-Interpretation).
+  (RX/TX getrennt, 16 Byte/Zeile, roh vor jeder Emulations-Interpretation), mit zwei
+  RX/TX-Filter-Checkboxen im Panel-Header, deren Zustand pro Profil persistiert wird.
 - `KomportMacroBar` (`komportmacrobar.h/.cpp`, **neu**) — 8 programmierbare Quick-Command-Buttons,
   unten angedockt, editierbar per Klick/Rechtsklick, persistiert.
 - `KomportSessionLogger` (`komportsessionlogger.h/.cpp`, **neu**) — Ein-Klick-Mitschnitt des

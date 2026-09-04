@@ -36,3 +36,116 @@ seither ergänzt:
   erst manuell zu tippen bei sehr vielen Profilen (z.B. Sortierung/Filter).
 - Ideen aus der `README.md`, die (noch) nicht umgesetzt sind, bei Bedarf hier
   eintragen, bevor sie als Feature versprochen werden.
+
+## Meilensteine (Roadmap)
+
+Ursprünglich als einzelne Prompt-Textdateien im lokalen (gitignorten) `helper/`-
+Ordner gesammelt, hier dauerhaft dokumentiert. Nummerierung entspricht den
+Dateinamen dort (`2-scrollleiste.txt` usw.); die Rohdateien wurden nach dem
+Übertragen hierher gelöscht, zwei zugehörige Screenshots liegen archiviert in
+`docs/screenshots/` (zeigen den in Meilenstein 2 gefixten Scrollbar-Bug).
+
+### Meilenstein 2+3 — ✅ erledigt
+
+Layout-Fix, Kate-artige Minimap-Scrollbar und RX/TX-Diagnosefilter im
+Hex-Monitor. Vollständig umgesetzt und verifiziert — Details in
+`TODO-ARCHIVE.md` Abschnitt 15.
+
+### Meilenstein 4 — Terminal-Upgrade (VT220 / erweiterter xterm-Farbraum) — offen
+
+> Vollständige VT220-Kompatibilität sowie Integration moderner
+> xterm-Erweiterungen, damit komplexe CLI-Tools wie htop, tmux und farbige
+> Shell-Skripte perfekt gerendert werden. Im Einzelnen:
+> - 256-Farben-Protokoll: `CSI 38;5;Xm` (Vordergrund) / `CSI 48;5;Xm`
+>   (Hintergrund) korrekt parsen und im Zeichen-Grid darstellen. (Die
+>   16 erweiterten Farben `CSI 90–97m`/`100–107m` sind bereits umgesetzt,
+>   siehe `TODO-ARCHIVE.md` Abschnitt 8.2/9.5.)
+> - Scroll-Regionen (`DECSTBM`, `CSI Pt;Pb r`) vollständig anwenden, damit
+>   Bildschirmsplits (z.B. `vi`/`nano`) nicht den Rest des Terminal-Layouts
+>   zerreißen — bereits als Lücke in Abschnitt 6 oben notiert, hier
+>   konkretisiert: braucht eine scroll-region-fähige `scrollUp()`/neue
+>   `scrollDown()` in `KomportCellArray`.
+> - Reverse Index (`ESC M`) innerhalb der Scroll-Region rückwärts scrollen
+>   lassen (aktuell: stoppt einfach am oberen Rand, siehe Abschnitt 6).
+> - Insert-Mode (`CSI 4h` an, `CSI 4l` aus).
+> - Terminal-Identifikation: `CSI 0c`/`CSI ?6c`-Anfragen mit einem
+>   passenden VT220-String beantworten (aktuell antwortet
+>   `doDeviceAttributes()` immer als VT102, siehe `TODO-ARCHIVE.md` 8.2).
+> - Performance im Blick behalten, weiterhin 0 Warnungen bei `-Wall -Wextra`.
+
+Kein Automatismus, der ohne Weiteres "einfach mehr" macht — bewusst als
+eigener, noch nicht begonnener Auftrag stehen gelassen (größerer Eingriff in
+`komportemulation.cpp`, siehe auch die Scope-Diskussion zu VT100/VT102 vs.
+xterm-Erweiterungen in `CLAUDE.md`).
+
+### Meilenstein 5 — Konsolenkomfort (Aussehen-Tab, Farbschemata) — offen
+
+> Optische Konfiguration des Terminal-Ausgabefelds, angelehnt an KDE
+> Konsole-Profile:
+> - Neuer Tab "Aussehen"/"Appearance" im Settings-Dialog: Schriftart-Auswahl
+>   (Monospace-gefiltert) inkl. Spacing/Größe, Farbauswahl (Hintergrund,
+>   Standard-Schriftfarbe) über `QColorDialog`.
+> - Live-Anwendung im Terminal-Grid ohne Layout-Sprung.
+> - Vollständig in die Profilverwaltung integriert: Profil laden lädt auch
+>   Schriftgröße/Farbschema mit (analog zu Baudrate/Makros/Zeilenende, die
+>   das schon tun).
+> - Vorgefertigte, anpassbare Farbschema-Vorlagen wie in KDE Konsole,
+>   mindestens: "Breeze Light", "Breeze Dark", "Green on Black" (klassisches
+>   Retro-Terminal), "Black on Light Yellow" (augenschonend). Dropdown zur
+>   Auswahl, Farb-Buttons passen sich automatisch an, bleiben aber vor dem
+>   Speichern individuell überschreibbar.
+
+Baut direkt auf der bestehenden Profilverwaltung auf (Abschnitt 11 in
+`TODO-ARCHIVE.md`) — vermutlich der nächstliegende Kandidat nach Meilenstein 4,
+da die Profil-Infrastruktur dafür schon steht.
+
+### Meilenstein 6 — Internationalisierung (i18n) mit Qt6 Linguist — offen
+
+> Mehrsprachigkeit (mind. Englisch/Deutsch) für Menüs, Tooltips, Buttons,
+> Dialoge:
+> - Alle sichtbaren String-Literale im C++-Code durch `tr()` ersetzen
+>   (Quellcode bleibt englisch, z.B. `tr("Connect")`).
+> - `CMakeLists.txt`: Qt6-Modul `LinguistTools` einbinden, `qt_add_translations()`
+>   für automatische `.ts`/`.qm`-Generierung.
+> - `komport_de.ts` mit vollständiger deutscher Übersetzung (File→Datei,
+>   Edit→Bearbeiten, Settings→Einstellungen, ...).
+> - `main.cpp`: `QTranslator` einbinden, der beim Start automatisch per
+>   `QLocale` die Systemsprache abfragt und bei Bedarf die deutsche
+>   Übersetzung lädt.
+
+Größerer, mechanischer Umbau über sehr viele Dateien (praktisch jede `.cpp`
+mit sichtbarem Text) — eigener, in sich abgeschlossener Auftrag, am besten
+NACH den funktionalen Meilensteinen 4/5, damit nicht doppelt an neu
+hinzukommenden Strings gearbeitet werden muss.
+
+### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
+
+Architektonischer Leitfaden für später, explizit **nicht** für den aktuellen
+1.x-Sprint gedacht — nur als Hinweis, die bestehende Modularität
+(`KomportSerial`, `KomportEmulation`) so zu belassen, dass sie später
+wiederverwendbar bleibt:
+
+- **Modus A — abgesetzter Dienst (Serial-over-TCP / RFC 2217):** ein neues,
+  leichtgewichtiges Headless-`komport-daemon`-Target (systemd-Dienst auf
+  einem entfernten Linux-Knoten oder Arduino/ESP32), das serielle Rohdaten
+  transparent per RFC 2217 (Telnet Com Port Control Protocol) in TCP-Pakete
+  verpackt. GUI bekäme im Settings-Dialog neben lokalen Ports eine
+  "Remote TCP Connection"-Option (IP + Port); Profilverwaltung, Makros und
+  Hex-Monitor blieben dabei vollständig nutzbar, nur die Baudrate des
+  entfernten Geräts würde über RFC 2217 gesteuert.
+- **Modus B — Web-Terminal (HTTP/HTTPS + WebSocket):** derselbe Daemon,
+  erweitert um `QtHttpServer`/`QtWebSockets`, liefert eine minimale
+  HTML5/JS-Seite mit eingebettetem `xterm.js` als Terminal-Frontend;
+  WebSocket-Verbindung reicht Tastatureingaben an `QSerialPort` durch und
+  empfangene Bytes zurück in den Browser. Für später: HTTPS/WSS via
+  `QSslConfiguration`, einfaches HTTP-Basic-Auth/Token-Verfahren.
+
+## Sonstiges
+
+- Remote-Repository: `git.txt` (mittlerweile gelöscht) enthielt die vom
+  Nutzer bereits selbst ausgeführten `git remote add`/`git push`-Befehle für
+  Codeberg (`https://codeberg.org/ironcold/komport-qt6.git`) bzw. GitHub
+  (`https://github.com/ironcold/komport-qt6.git`) — dieses lokale Repo hat
+  aktuell aber (Stand hier) noch kein `origin` konfiguriert, siehe
+  `git remote -v`. Vor dem ersten echten Push: Historie/Commits nochmal
+  durchsehen, dann Remote setzen und pushen.

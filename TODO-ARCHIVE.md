@@ -611,3 +611,119 @@ Begründung wie bei den gekürzten `setStatusTip()`-Texten (Abschnitt 11.1):
 das Fenster ist durch das feste Zeichenraster schmal, ein `QLabel` würde zwar
 nicht wie die Statusleisten-Message abgeschnitten (eigenes Tooltip wickelt
 korrekt um), aber unnötig lang macht die Fußzeile trotzdem unübersichtlich.
+
+## 15. Meilenstein 2+3: Layout-Fix, Kate-Minimap, RX/TX-Diagnosefilter
+
+Aus zwei Prompts im lokalen `helper/`-Ordner (`2-scrollleiste.txt`,
+`3-tx-rx-checkbox.txt`, seither gelöscht, Inhalt in `TODO.md` "Meilensteine"
+archiviert), ausgelöst durch zwei Screenshots vom ersten echten Test am HPE
+1920 — jetzt archiviert unter `docs/screenshots/2026-09-04_scrollbar-layout-bug_*.png`.
+
+### 15.1 Ursache des Layout-Bugs gefunden
+
+Die Screenshots zeigten eine kaputte, breite, frei schwebende Leiste direkt
+über dem Hex-Monitor-Panel. Ursache: `KomportView`s Scrollbar wurde (noch aus
+der ursprünglichen Qt3-Portierung übernommen) absichtlich als **Sibling**
+angelegt — `new QScrollBar(Qt::Vertical, parent)`, wobei `parent` der
+ÄUSSERE Parent von `KomportView` war, nicht `KomportView` selbst — und in
+`resizeEvent()`/`moveEvent()` manuell anhand der VIEW-eigenen Breite/Höhe
+positioniert. Das funktionierte, solange `KomportView` direkt unter
+`KomportApp` saß. Seit dem zentralen `QSplitter` für den Hex-Monitor
+(Abschnitt 8.1) sitzt `KomportView` aber im Splitter, nicht mehr direkt
+unter `KomportApp` — die Scrollbar (weiterhin Kind von `KomportApp` direkt)
+wurde dadurch in einem völlig anderen Koordinatensystem positioniert als
+gedacht, sichtbar als die frei schwebende Leiste in den Screenshots.
+
+### 15.2 Fix: Scrollbar wird echtes Kind-Widget + Kate-artige Minimap (`komportminimap.h/.cpp`, neu)
+
+Statt die alte `QScrollBar`-Sibling-Konstruktion zu reparieren, wurde sie
+durch eine neue Klasse `KomportMinimapScrollBar` ersetzt, die als **echtes
+Kind-Widget von `KomportView` selbst** (`parent == this`) angelegt wird —
+dadurch ist ihre Position immer relativ zu ihrem direkten Parent korrekt,
+unabhängig davon, in wie vielen Containern `KomportView` von außen
+eingebettet ist (behebt die Ursache strukturell, nicht nur das Symptom).
+
+- Drop-in-kompatible API zur alten `QScrollBar` (`value()`/`setValue()`/
+  `maximum()`/`setMaximum()`/`setRange()`/Signal `valueChanged(int)`) —
+  der komplette umgebende Scroll-Code in `komportview.cpp` (`getCell()`,
+  `resetScroll()`, `slotScroll()`, Auto-Scroll im `timerEvent()`, Text-
+  Selektion) blieb dadurch unverändert.
+- Rendert die komplette Historie (Scrollback + Live-Bildschirm) als
+  geschrumpfte Text-Dichte-Silhouette: pro Pixelzeile eine gesampelte
+  Content-Zeile, pro nicht-leerer Spalte ein Punkt — kein 1:1-Rendering
+  echter Glyphen (das Zeichen-Grid ist nicht an ein `QTextDocument`
+  gebunden, das man dafür wiederverwenden könnte), aber ein echtes,
+  proportionales Silhouetten-Bild statt eines reinen Balkens.
+- Farben ausschließlich über `QPalette`-Rollen (`QPalette::Base`/`Text`/
+  `Highlight`) — folgt damit automatisch dem aktiven System-Theme (Breeze
+  Light/Dark o.ä.), kein Theme-spezifischer Code nötig.
+- Markiert den aktuell sichtbaren Bereich als hervorgehobenes Band
+  (`QPalette::Highlight`), mit derselben "scrolled"-Rechnung wie
+  `KomportView::getCell()`/`resetScroll()`.
+- Klick/Drag auf die Minimap scrollt direkt dorthin; Mausrad funktioniert
+  ebenfalls (neu — die alte `QScrollBar` bekam das automatisch vom Widget,
+  das musste hier extra nachgebaut werden).
+- Hover-Tooltip: `QEvent::ToolTip` abgefangen, zeigt die 7 Zeilen Klartext
+  um die Cursor-Position aus der Historie (via die zwei neuen `KomportView`-
+  Methoden unten).
+- Zwei neue `KomportView`-Methoden für den Zugriff auf die *gesamte*
+  Historie unabhängig von der aktuellen Scroll-Position (die alte
+  `getCell()` mischt Scrollback/Live nur relativ zur aktuellen
+  Scrollbar-Position, das reicht für die Minimap nicht):
+  `totalHistoryRows()` (Scrollback-Tiefe + Bildschirmzeilen) und
+  `cellAtHistoryRow(col, row)` (0 = älteste Scrollback-Zeile), beide mit
+  sauberer Bounds-Prüfung (negativ/zu groß → `nullptr`, kein Absturz).
+- `KomportView::resizeEvent()`/`paintEvent()`/`setCellSize()` angepasst:
+  das Zeichen-Grid-Pixmap ist jetzt nur noch so breit wie das Grid selbst
+  (Widget-Breite minus Minimap-Breite), `paintEvent()` clippt explizit auf
+  die Pixmap-Grenzen, damit es die Minimap (malt sich als Kind-Widget
+  selbst) nicht überschreibt. `moveEvent()` komplett entfernt — überflüssig,
+  da ein echtes Kind-Widget sich automatisch mit seinem Parent mitbewegt.
+- **Speicher-Bug vermieden:** da die Scrollbar jetzt ein echtes Kind-Widget
+  ist (Qt löscht Kinder automatisch beim Zerstören des Parents), musste das
+  bisherige manuelle `delete mScrollBar;` im Destruktor entfernt werden —
+  sonst Doppel-Free.
+- Toolbar-Politur (kleine Zusatzfrage des Nutzers zwischendurch, ob aktuelle
+  Widgets verwendet werden): explizite Icon-Größe 24px und
+  `Qt::ToolButtonIconOnly` statt Style-Default — reine `QToolBar`-Styling-
+  Anpassung, keine Widget-Typen geändert (es waren schon durchgehend aktuelle
+  Qt6-Widgets, der "alte" Eindruck kam nur von Default-Icon-Größe/-Spacing).
+
+### 15.3 RX/TX-Diagnosefilter im Hex-Monitor (`komporthexview.h/.cpp`)
+
+- Zwei `QCheckBox`en ("RX"/"TX", Default: beide an) im Header-Bereich des
+  Hex-Monitor-Panels, links vom "Clear"-Button.
+- `appendByte()` bricht früh ab, wenn die jeweilige Checkbox aus ist —
+  zusätzlich zum bereits vorhandenen Sichtbarkeits-Check (Abschnitt 9.6).
+- Neues Methodenpaar `saveSettings(QSettings*)`/`loadSettings(QSettings*)`
+  (Gruppe `"HexMonitor"`, genau wie `KomportMacroBar`s `"Macros"`-Gruppe
+  genestet unter `Profiles/<Name>/...`), von `KomportApp::saveProfile()`/
+  `loadProfile()` direkt neben den bestehenden `macroBar->saveSettings()`/
+  `loadSettings()`-Aufrufen mit angebunden.
+- `loadSettings()` bewusst **ohne** `contains()`-Guard pro Checkbox (Default
+  `true`, wenn der Schlüssel fehlt) — dieselbe Begründung wie beim
+  `KomportMacroBar`-Fix in Abschnitt 12: ein Profil ohne eigene
+  `HexMonitor`-Gruppe muss auf den Standard zurückfallen, nicht die
+  Checkbox-Stellung des zuvor geladenen Profils übernehmen.
+
+### 15.4 Verifikation
+
+- Build mit `-Wall -Wextra`: weiterhin 0 Warnungen, 0 Fehler.
+- Offscreen-Smoke-Test: startet weiterhin fehlerfrei.
+- Zusätzlicher, nicht ausgelieferter Integrationstest (`komport_minimaptest`,
+  provisorisches CMake-Target, danach wieder entfernt) über ein echtes
+  `pty`-Gerät: 85 Zeilen als *empfangene* Daten geschickt (direkt auf die
+  Master-Seite des `pty`-Paars geschrieben, nicht über `putStr()` — das wäre
+  Senderichtung und wird lokal nicht dargestellt), 12 Prüfungen, alle grün:
+  - `totalHistoryRows()` wächst korrekt über die Bildschirmhöhe hinaus,
+    sobald der Scrollback-Puffer greift;
+  - `cellAtHistoryRow()` liefert für jede gültige (Spalte,Zeile)-Kombination
+    eine echte Zelle, für negative/zu große Zeilenindizes sauber `nullptr`
+    statt Absturz;
+  - Fenster mehrfach in der Größe geändert (übt `resizeEvent()` und den
+    Minimap-Reflow aus) — kein Absturz;
+  - Ein frisch geseedetes Profil hat erwartungsgemäß noch keine
+    `HexMonitor`-Filterwerte gespeichert (Default greift).
+- Visuelle Kontrolle der Minimap-Silhouette/des Hover-Previews selbst konnte
+  in dieser Sandbox nicht erfolgen (kein echtes Display) — auf echter
+  Hardware/Display gegenzuprüfen empfohlen.
