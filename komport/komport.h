@@ -28,10 +28,15 @@ class QSettings;
 class QAction;
 class QMenu;
 class QToolBar;
+class QSplitter;
+class QComboBox;
 
 // forward declaration of the Komport classes
 class KomportDoc;
 class KomportView;
+class KomportHexView;
+class KomportMacroBar;
+class KomportSessionLogger;
 
 /**
   * The base class for Komport application windows. It sets up the main
@@ -82,6 +87,8 @@ class KomportApp : public QMainWindow
     void initDocument();
     /** creates the centerwidget of the main window and sets it as the view */
     void initView();
+    /** builds the bottom macro/quick-command bar */
+    void initMacroBar();
     /** rebuilds the "Upload recent file..." submenu from mRecentFiles */
     void rebuildRecentFilesMenu();
     /** add a URL to the recent-files list */
@@ -126,6 +133,14 @@ class KomportApp : public QMainWindow
     void slotDocumentModified();
     /** No descriptions */
     void slotViewModified(KomportView*);
+    /** toggles the hex monitor split-screen panel */
+    void slotViewHexMonitor(bool checked);
+    /** send a macro bar command (plus the configured line ending) */
+    void slotMacroTriggered(const QString &command);
+    /** toggles session logging - prompts for a file to start, if not already logging */
+    void slotToggleRecording(bool checked);
+    /** apply a line-ending choice ("CR"/"LF"/"CR+LF") from the toolbar dropdown */
+    void slotLineEndingChanged(const QString &text);
 
   private:
     /** the persistent settings object of the application */
@@ -141,6 +156,7 @@ class KomportApp : public QMainWindow
     QString strParity;
     QString strEmulation;
     QString strScrollBuffer;
+    QString strLineEnding;
     KomportView *view;
     /** doc represents your actual document and is created only once. */
     KomportDoc *doc;
@@ -160,10 +176,22 @@ class KomportApp : public QMainWindow
     QAction* viewToolBar;
     QAction* viewStatusBar;
     QAction* showPreferences;
+    /** toggles the hex monitor pane */
+    QAction* viewHexMonitor;
+    /** toggles session logging */
+    QAction* recordSession;
 
     // Menus/toolbar
     QMenu* fileOpenRecentMenu;
     QToolBar* mainToolBar;
+    /** CR/LF/CR+LF chooser for the Return key and macro commands */
+    QComboBox* lineEndingCombo;
+
+    // Hex monitor / macro bar / session logging (new in the Qt6 port)
+    QSplitter* centralSplitter;
+    KomportHexView* hexView;
+    KomportMacroBar* macroBar;
+    KomportSessionLogger* sessionLogger;
 };
 
 #endif // KOMPORT_H

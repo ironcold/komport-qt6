@@ -559,6 +559,11 @@ ESC[Ps;...;Psm
 class KomportEmulation : public QObject  {
 Q_OBJECT
 public:
+  /** what the Return key (and, for consistency, macro commands sent from
+   *  KomportApp's macro bar) send: a plain VT100 sends CR, many Unix hosts
+   *  expect LF, some gear wants both. */
+  enum class LineEnding { CR, LF, CRLF };
+
 	KomportEmulation(KomportSerial* _serial, KomportCellArray* _cellArray);
 	~KomportEmulation() override;
   /** get the character cell array */
@@ -567,27 +572,54 @@ public:
   inline KomportSerial* serial() {return mSerial;}
   /** recognise and execute an escape sequence */
   virtual void sequence(char _ch);
+  /** what the Return key/macro commands send at end-of-line */
+  LineEnding lineEnding() const { return mLineEnding; }
+  void setLineEnding(LineEnding _le) { mLineEnding = _le; }
+  /** the raw bytes for the current line ending, e.g. for use by callers
+   *  that send a whole line themselves (the macro bar) */
+  QByteArray lineEndingBytes() const;
 protected:
-  /** cursor to absolute x,y */
+  /** cursor to absolute x,y (CSI H/f) */
   virtual void  doCursorTo();
-  /** cursor up one row */
+  /** cursor up <n> rows (CSI A) */
   virtual void  doCursorUp();
-  /** cursor down one row. */
+  /** cursor down <n> rows (CSI B) */
   virtual void  doCursorDown();
-  /** cursor left one column  */
+  /** cursor left <n> columns (CSI D) */
   virtual void  doCursorLeft();
-  /** cursor right one column  */
+  /** cursor right <n> columns (CSI C) */
   virtual void  doCursorRight();
   /** clear the entire screen  */
   virtual void  doClearScreen();
-  /** do graphics attributes */
+  /** do graphics attributes (CSI m) */
   virtual void doGraphics();
-  /** restore cursor */
+  /** restore cursor (CSI u / ESC 8) */
   virtual void doRestoreCursor();
-  /** save cursor */
+  /** save cursor (CSI s / ESC 7) */
   virtual void doSaveCursor();
   /** clear to EOL from cursor position */
   virtual void doClearEOL();
+  /** index: cursor down, scrolling at the bottom margin (ESC D) */
+  virtual void doIndex();
+  /** reverse index: cursor up, stopping at the top row (ESC M) */
+  virtual void doReverseIndex();
+  /** next line: CR + index (ESC E) */
+  virtual void doNextLine();
+  /** reset to initial state (ESC c) */
+  virtual void doReset();
+  /** insert <n> blank lines at the cursor row (CSI L) */
+  virtual void doInsertLine();
+  /** delete <n> lines at the cursor row (CSI M) */
+  virtual void doDeleteLine();
+  /** delete <n> characters at the cursor (CSI P) */
+  virtual void doDeleteChar();
+  /** set/reset mode (CSI h / CSI l), including private (?-prefixed) modes
+   *  such as DECCKM (application cursor keys) and DECTCEM (cursor visible) */
+  virtual void doSetMode(bool _set);
+  /** device status / cursor position report (CSI n) */
+  virtual void doDeviceStatusReport();
+  /** device attributes / "who are you" identification (CSI c) */
+  virtual void doDeviceAttributes();
 public slots:
   /** key press input. process and transmit the char. */
   virtual void slotKeyPressed(QKeyEvent* _e);
@@ -602,8 +634,24 @@ private:
   QByteArray  mCtlSequence;
   /** did we see an ESC? */
   bool mSawESC;
-  /** are we in a terminal control sequence? */
+  /** are we in a terminal control sequence (ESC [ ... letter)? */
   bool mInCtlSequence;
+  /** ESC ( or ESC ) was seen - the next character (a charset designator)
+   *  is consumed rather than printed. Character set switching itself is
+   *  not implemented (no line-drawing glyphs), this only keeps the
+   *  designator byte from leaking onto the screen as garbage. */
+  bool mPendingCharsetChar;
+  /** DECCKM - application (ESC O x) vs. normal (ESC [ x) cursor key encoding */
+  bool mApplicationCursorKeys;
+  /** what Return sends */
+  LineEnding mLineEnding;
+  /** parse mCtlSequence (optionally "?"-prefixed for private modes) as a
+   *  single decimal parameter, defaulting to _def when absent/empty */
+  int ctlParam(int _def = 1) const;
+  /** handle a two-character escape sequence (ESC followed by _ch, with no
+   *  '[' in between) - Index, Reverse Index, Next Line, Save/Restore
+   *  Cursor, Reset, keypad mode, charset select, ... */
+  void shortEscape(char _ch);
 public: // Public attributes
   /** save cursor position */
   QPoint mSaveCursor;

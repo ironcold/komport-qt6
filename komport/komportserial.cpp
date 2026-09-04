@@ -167,14 +167,20 @@ void KomportSerial::applyPortSettings(){
 /** put a character */
 void KomportSerial::putChar(char _ch){
   if ( isOpen() ) {
-    mPort.putChar( _ch );
+    if ( mPort.putChar( _ch ) ) {
+      emit sentChar( _ch );
+    }
   }
 }
 
 /** transmit a string */
 void KomportSerial::putStr(const char* str){
-  if ( str != nullptr && isOpen() ) {
-    mPort.write( str, static_cast<qint64>( strlen(str) ) );
+  // Loop over putChar() rather than a single write() call, so every byte
+  // also gets a sentChar() signal (used by the hex monitor).
+  if ( str != nullptr ) {
+    for ( const char *p = str; *p != '\0'; ++p ) {
+      putChar(*p);
+    }
   }
 }
 

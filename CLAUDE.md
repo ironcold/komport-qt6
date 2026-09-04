@@ -2,8 +2,14 @@
 
 > **Status:** Die Portierung ist durchgeführt und baut sauber mit CMake/Qt6
 > (`cmake -B build && cmake --build build`, auch mit `-Wall -Wextra` ohne Warnungen).
-> Details, was dabei gemacht/entschieden wurde, stehen in `TODO.md`. Dieses
-> Dokument bleibt als Ziel-/Architektur-Referenz für künftige Änderungen bestehen.
+> Dazu gekommen sind vier Admin-Tool-Features: ein zuschaltbarer Hex-Monitor
+> (RX/TX, Split-Screen), eine deutlich vollständigere VT100/VT102-Emulation
+> (Cursor-Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports,
+> erweiterte SGR-Farben — plus ein gefundener Absturz-Bug bei Cursor-Clamping),
+> programmierbare Makro-Buttons, Ein-Klick-Session-Logging und eine
+> Zeilenende-Auswahl (CR/LF/CRLF) für Enter-Taste und Makros. Details, was dabei
+> gemacht/entschieden wurde, stehen in `TODO.md`. Dieses Dokument bleibt als
+> Ziel-/Architektur-Referenz für künftige Änderungen bestehen.
 
 ## Was ist Komport?
 
@@ -97,23 +103,39 @@ Soll ersetzt werden durch:
   `KomportView`/`KomportEmulation` nicht mehr als nötig angefasst werden müssen — intern
   aber komplett auf `QSerialPort` umstellen.
 
-## Architektur-Überblick (bleibt strukturell erhalten)
+## Architektur-Überblick
 
-- `KomportApp` (`komport.h/.cpp`) — Hauptfenster, Menüs/Toolbar/Statusbar, Dateiverwaltung.
+- `KomportApp` (`komport.h/.cpp`) — Hauptfenster, Menüs/Toolbar/Statusbar, Dateiverwaltung,
+  verdrahtet auch die neueren Panels/Leisten unten (Hex-Monitor, Makro-Bar, Recording, s.u.).
+  Zentralwidget ist ein `QSplitter` mit `KomportView` und `KomportHexView`.
 - `KomportDoc` (`komportdoc.h/.cpp`) — hält `KomportSerial`-Instanz, Document-View-Pattern
   (aus KDevelop-Boilerplate; für ein Terminal eigentlich zu schwergewichtig, aber wird
   strukturell übernommen statt neu designt).
 - `KomportView` (`komportview.h/.cpp`) — Zeichen-Grid-Widget, Zeichnen, Maus-/Tastatur-Events,
   Auswahl/Zwischenablage, hält `KomportCellArray`, `KomportScrollBuffer`, `KomportEmulation`.
+  **Achtung:** sitzt im Zentral-`QSplitter`, nicht direkt unter `KomportApp` — `getDocument()`
+  läuft deshalb über `window()`, nicht `parentWidget()` (siehe `TODO.md` 8.6).
 - `KomportEmulation` (`komportemulation.h/.cpp`) — VT100/VT102-Escape-Sequenz-Interpreter.
-  **Größtes und wichtigstes Modul — Verhalten hier nicht "nebenbei" ändern.**
-- `KomportCell`/`KomportCellArray` — Zeichen-Zellen-Modell des sichtbaren Bildschirms.
+  **Größtes und wichtigstes Modul.** Inzwischen recht vollständig (Cursor-Bewegung mit
+  Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports, erweiterte
+  SGR-Farben, Tab, non-CSI-Escapes) — Details und bekannte Lücken (Scroll-Regionen,
+  VT52, Zeichensatz-Umschaltung) in `TODO.md` Abschnitt 8.2. Trägt auch die
+  `LineEnding`-Einstellung (CR/LF/CRLF) für die Enter-Taste und die Makro-Bar.
+- `KomportCell`/`KomportCellArray` — Zeichen-Zellen-Modell des sichtbaren Bildschirms;
+  `KomportCellArray` trägt seit der Feature-Erweiterung auch das DECTCEM-Sichtbarkeits-Flag
+  für den Cursor (`cursorVisible()`/`setCursorVisible()`/Signal `cursorVisibilityChanged`).
 - `KomportScrollBuffer`/`KomportFileScrollBuffer` — Scrollback (Speicher bzw. Datei).
-- `KomportSerial` (`komportserial.h/.cpp`) — **wird auf `QSerialPort` umgestellt** (s.o.).
-- `KomportQueue` — einfacher Ringpuffer, evtl. nach der Serial-Migration überflüssig.
+- `KomportSerial` (`komportserial.h/.cpp`) — auf `QSerialPort` umgestellt (s.o.); trägt
+  neben `receivedChar(char)` inzwischen auch `sentChar(char)` (für den Hex-Monitor).
 - `KomportTransfer`/`KomportUpload`/`KomportDownload`/`KomportScript` — Datei-Transfer-Grundgerüst.
-- `SettingsDialog` (`settingsdialog.ui/.h/.cpp`) — Verbindungseinstellungen; UI-Datei ist
-  Qt3-Designer-Format, muss für Qt6 neu erzeugt/gepflegt werden (Qt Designer/`uic` von Qt6).
+- `SettingsDialog` (`settingsdialog.h/.cpp`) — Verbindungseinstellungen, handgeschrieben mit
+  Qt6-Layouts (die alte Qt3-`.ui` ist entfernt, `uic` von Qt6 kann sie nicht lesen).
+- `KomportHexView` (`komporthexview.h/.cpp`, **neu**) — zuschaltbares Split-Screen-Hexdump-Panel
+  (RX/TX getrennt, 16 Byte/Zeile, roh vor jeder Emulations-Interpretation).
+- `KomportMacroBar` (`komportmacrobar.h/.cpp`, **neu**) — 8 programmierbare Quick-Command-Buttons,
+  unten angedockt, editierbar per Klick/Rechtsklick, persistiert.
+- `KomportSessionLogger` (`komportsessionlogger.h/.cpp`, **neu**) — Ein-Klick-Mitschnitt des
+  empfangenen Bytestroms in eine zeitgestempelte Textdatei.
 
 ## Build-System
 

@@ -36,6 +36,8 @@
 #include <QFileInfo>
 #include <QComboBox>
 #include <QSpinBox>
+#include <QSplitter>
+#include <QLabel>
 
 // application specific includes
 #include "komport.h"
@@ -43,6 +45,9 @@
 #include "komportdoc.h"
 #include "komporttransfer.h"
 #include "settingsdialog.h"
+#include "komporthexview.h"
+#include "komportmacrobar.h"
+#include "komportsessionlogger.h"
 
 static const int MAX_RECENT_FILES = 10;
 
@@ -52,6 +57,8 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
 
   config = new QSettings(this);
 
+  sessionLogger = new KomportSessionLogger(this);
+
   ///////////////////////////////////////////////////////////////////
   // call inits to invoke all other construction parts
   initStatusBar();
@@ -60,6 +67,13 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   initToolBar();
   initDocument();
   initView();
+  initMacroBar();
+
+  // hex monitor and session logger both watch the raw byte stream,
+  // independent of what the VT100/VT102 emulation makes of it
+  connect( view->getSerial(), &KomportSerial::receivedChar, hexView, &KomportHexView::appendRx );
+  connect( view->getSerial(), &KomportSerial::sentChar, hexView, &KomportHexView::appendTx );
+  connect( view->getSerial(), &KomportSerial::receivedChar, sessionLogger, &KomportSessionLogger::logChar );
 
   readOptions();
 }
@@ -134,6 +148,16 @@ void KomportApp::initActions()
   showPreferences->setShortcut( QKeySequence::Preferences );
   connect( showPreferences, &QAction::triggered, this, &KomportApp::slotShowPreferences );
   showPreferences->setStatusTip( tr("Connection Settings") );
+
+  viewHexMonitor = new QAction( QIcon::fromTheme(QStringLiteral("format-text-code")), tr("&Hex Monitor"), this );
+  viewHexMonitor->setCheckable( true );
+  connect( viewHexMonitor, &QAction::toggled, this, &KomportApp::slotViewHexMonitor );
+  viewHexMonitor->setStatusTip( tr("Show raw sent/received bytes as a hex dump, next to the terminal") );
+
+  recordSession = new QAction( QIcon::fromTheme(QStringLiteral("media-record")), tr("&Record Session..."), this );
+  recordSession->setCheckable( true );
+  connect( recordSession, &QAction::toggled, this, &KomportApp::slotToggleRecording );
+  recordSession->setStatusTip( tr("Log everything received to a timestamped text file") );
 }
 
 void KomportApp::initMenus()
@@ -158,6 +182,11 @@ void KomportApp::initMenus()
   QMenu *viewMenu = menuBar()->addMenu( tr("&View") );
   viewMenu->addAction( viewToolBar );
   viewMenu->addAction( viewStatusBar );
+  viewMenu->addSeparator();
+  viewMenu->addAction( viewHexMonitor );
+
+  QMenu *sessionMenu = menuBar()->addMenu( tr("&Session") );
+  sessionMenu->addAction( recordSession );
 
   QMenu *settingsMenu = menuBar()->addMenu( tr("&Settings") );
   settingsMenu->addAction( showPreferences );
@@ -176,6 +205,18 @@ void KomportApp::initToolBar()
   mainToolBar->addAction( editCut );
   mainToolBar->addAction( editCopy );
   mainToolBar->addAction( editPaste );
+  mainToolBar->addSeparator();
+  mainToolBar->addAction( viewHexMonitor );
+  mainToolBar->addAction( recordSession );
+  mainToolBar->addSeparator();
+
+  mainToolBar->addWidget( new QLabel( tr(" Enter sends: "), mainToolBar ) );
+  lineEndingCombo = new QComboBox( mainToolBar );
+  lineEndingCombo->addItems( { QStringLiteral("CR"), QStringLiteral("LF"), QStringLiteral("CR+LF") } );
+  lineEndingCombo->setToolTip( tr("What the Return key (and quick-command buttons) send at end of line - "
+                                   "some gear only understands a bare CR, Unix hosts usually expect LF.") );
+  connect( lineEndingCombo, &QComboBox::currentTextChanged, this, &KomportApp::slotLineEndingChanged );
+  mainToolBar->addWidget( lineEndingCombo );
 }
 
 void KomportApp::initStatusBar()
@@ -201,8 +242,33 @@ void KomportApp::initView()
 
   view = new KomportView(this);
   doc->addView(view);
-  setCentralWidget(view);
+
+  // The hex monitor sits next to the terminal view in a splitter, hidden
+  // by default and toggled by the "Hex Monitor" action/menu item.
+  hexView = new KomportHexView(this);
+  hexView->setVisible(false);
+
+  centralSplitter = new QSplitter(Qt::Horizontal, this);
+  centralSplitter->addWidget(view);
+  centralSplitter->addWidget(hexView);
+  centralSplitter->setStretchFactor(0, 0); // the terminal view has a fixed cell-grid size
+  centralSplitter->setStretchFactor(1, 1); // the hex monitor gets any extra space
+  setCentralWidget(centralSplitter);
+
   setWindowTitle( doc->fileName() );
+}
+
+void KomportApp::initMacroBar()
+{
+  macroBar = new KomportMacroBar(this);
+  connect( macroBar, &KomportMacroBar::macroTriggered, this, &KomportApp::slotMacroTriggered );
+
+  addToolBarBreak( Qt::BottomToolBarArea );
+  QToolBar *macroToolBar = new QToolBar( tr("Quick Commands"), this );
+  macroToolBar->setObjectName( QStringLiteral("macroToolBar") );
+  macroToolBar->setMovable( false );
+  macroToolBar->addWidget( macroBar );
+  addToolBar( Qt::BottomToolBarArea, macroToolBar );
 }
 
 void KomportApp::openDocumentFile(const QUrl& url)
@@ -244,6 +310,7 @@ void KomportApp::saveOptions()
   config->setValue( QStringLiteral("Geometry"), size() );
   config->setValue( QStringLiteral("Show Toolbar"), viewToolBar->isChecked() );
   config->setValue( QStringLiteral("Show Statusbar"), viewStatusBar->isChecked() );
+  config->setValue( QStringLiteral("Show Hex Monitor"), viewHexMonitor->isChecked() );
   QStringList recent;
   for ( const QUrl &url : std::as_const(mRecentFiles) ) recent << url.toString();
   config->setValue( QStringLiteral("Recent Files"), recent );
@@ -261,7 +328,10 @@ void KomportApp::saveOptions()
   config->setValue( QStringLiteral("Parity"), strParity );
   config->setValue( QStringLiteral("Emulation"), strEmulation );
   config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
+  config->setValue( QStringLiteral("LineEnding"), strLineEnding );
   config->endGroup();
+
+  macroBar->saveSettings(config);
   config->sync();
 }
 
@@ -277,6 +347,10 @@ void KomportApp::readOptions()
   bool bViewStatusbar = config->value( QStringLiteral("Show Statusbar"), true ).toBool();
   viewStatusBar->setChecked(bViewStatusbar);
   slotViewStatusBar();
+
+  bool bViewHexMonitor = config->value( QStringLiteral("Show Hex Monitor"), false ).toBool();
+  viewHexMonitor->setChecked(bViewHexMonitor);
+  slotViewHexMonitor(bViewHexMonitor);
 
   mRecentFiles.clear();
   const QStringList recent = config->value( QStringLiteral("Recent Files") ).toStringList();
@@ -302,7 +376,10 @@ void KomportApp::readOptions()
   strParity = config->value( QStringLiteral("Parity"), QStringLiteral("NONE") ).toString();
   strEmulation = config->value( QStringLiteral("Emulation"), QStringLiteral("VT102") ).toString();
   strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") ).toString();
+  strLineEnding = config->value( QStringLiteral("LineEnding"), QStringLiteral("CR") ).toString();
   config->endGroup();
+
+  macroBar->loadSettings(config);
 
   view->setScrollBuffer( strScrollBuffer.toInt() );
   KomportSerial* serial = view->getSerial();
@@ -313,6 +390,9 @@ void KomportApp::readOptions()
   serial->setRxQueue( strRxQueue.toInt() );
   serial->setFlushRate( strFlushRate.toInt() );
   serial->open();
+
+  lineEndingCombo->setCurrentText( strLineEnding );
+  slotLineEndingChanged( strLineEnding );
 }
 
 void KomportApp::closeEvent(QCloseEvent *event)
@@ -551,4 +631,51 @@ void KomportApp::slotViewModified(KomportView* _v){
 /** get configuration object */
 QSettings* KomportApp::getConfig(){
     return config;
+}
+
+/** toggles the hex monitor split-screen panel */
+void KomportApp::slotViewHexMonitor(bool checked)
+{
+  hexView->setVisible(checked);
+}
+
+/** send a macro bar command (plus the configured line ending) */
+void KomportApp::slotMacroTriggered(const QString &command)
+{
+  KomportSerial *serial = view->getSerial();
+  if ( !serial->isOpen() || command.isEmpty() ) return;
+  serial->putStr( command.toLocal8Bit().constData() );
+  serial->putStr( view->mEmulation->lineEndingBytes().constData() );
+}
+
+/** toggles session logging - prompts for a file to start, if not already logging */
+void KomportApp::slotToggleRecording(bool checked)
+{
+  if ( checked ) {
+    QString fileName = QFileDialog::getSaveFileName( this, tr("Start Session Log..."), QDir::currentPath(),
+                                                       tr("Text files (*.log *.txt);;All files (*)") );
+    if ( fileName.isEmpty() || !sessionLogger->startLogging(fileName) ) {
+      recordSession->blockSignals(true);
+      recordSession->setChecked(false);
+      recordSession->blockSignals(false);
+      if ( !fileName.isEmpty() ) {
+        QMessageBox::warning( this, tr("Session Log"), tr("Could not open \"%1\" for writing.").arg(fileName) );
+      }
+      return;
+    }
+    slotStatusMsg( tr("Recording session to %1").arg(sessionLogger->fileName()) );
+  } else {
+    sessionLogger->stopLogging();
+    slotStatusMsg( tr("Ready.") );
+  }
+}
+
+/** apply a line-ending choice ("CR"/"LF"/"CR+LF") from the toolbar dropdown */
+void KomportApp::slotLineEndingChanged(const QString &text)
+{
+  strLineEnding = text;
+  KomportEmulation::LineEnding le = KomportEmulation::LineEnding::CR;
+  if ( text == QLatin1String("LF") ) le = KomportEmulation::LineEnding::LF;
+  else if ( text == QLatin1String("CR+LF") ) le = KomportEmulation::LineEnding::CRLF;
+  view->mEmulation->setLineEnding(le);
 }

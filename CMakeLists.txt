@@ -47,6 +47,12 @@ add_executable(komport
   komport/komportscript.h
   komport/settingsdialog.cpp
   komport/settingsdialog.h
+  komport/komporthexview.cpp
+  komport/komporthexview.h
+  komport/komportmacrobar.cpp
+  komport/komportmacrobar.h
+  komport/komportsessionlogger.cpp
+  komport/komportsessionlogger.h
   komport/komport.qrc
 )
 

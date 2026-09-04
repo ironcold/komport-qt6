@@ -101,6 +101,10 @@ public:
   void setCursor(QPoint _p);
   /** cursor position */
   QPoint cursor();
+  /** is the cursor supposed to be drawn at all (DECTCEM, ESC[?25h/l)? */
+  inline bool cursorVisible() { return mCursorVisible; }
+  /** show/hide the cursor (DECTCEM) */
+  void setCursorVisible(bool _v);
   /** Insert a character at the current cursor position and advance cursor. Scroll if advance is passed the last column. */
   void putChar(QChar _ch);
   /** move the cursor once cell forward, scolling or wrapping as nessesary */
@@ -154,6 +158,8 @@ private: // Private attributes
   QColor mBackgroundColor;
   /** if true, signals are emitted when a cell is changed, otherwise not */
   bool mNotify;
+  /** DECTCEM cursor-visible flag */
+  bool mCursorVisible = true;
 protected:
   /** size of cell array */
   QSize mArraySize;
@@ -176,6 +182,9 @@ signals: // Signals
 signals: // Signals
   /** prepare for scrolling */
   void aboutToScrollUp();
+signals: // Signals
+  /** the DECTCEM cursor-visible flag changed */
+  void cursorVisibilityChanged(bool _visible);
 };
 
 #endif

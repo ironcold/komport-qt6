@@ -544,6 +544,7 @@ ESC[Ps;...;Psm
 
 #define ASCII_BEL   0x07
 #define ASCII_BS    0x08
+#define ASCII_HT    0x09
 #define ASCII_LF    0x0A
 #define ASCII_CR    0x0D
 #define ASCII_ESC   0x1B
@@ -553,8 +554,35 @@ KomportEmulation::KomportEmulation(KomportSerial* _serial, KomportCellArray* _ce
 , mCellArray(_cellArray)
 , mSawESC(false)
 , mInCtlSequence(false)
+, mPendingCharsetChar(false)
+, mApplicationCursorKeys(false)
+, mLineEnding(LineEnding::CR)
 {
   QObject::connect(serial(),SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(char)));
+}
+
+/** the raw bytes for the current line ending */
+QByteArray KomportEmulation::lineEndingBytes() const {
+  switch ( mLineEnding ) {
+    case LineEnding::LF:   return QByteArray("\n");
+    case LineEnding::CRLF: return QByteArray("\r\n");
+    case LineEnding::CR:
+    default:               return QByteArray("\r");
+  }
+}
+
+/** parse mCtlSequence (optionally "?"-prefixed) as a single decimal parameter */
+int KomportEmulation::ctlParam(int _def) const {
+  QByteArray seq = mCtlSequence;
+  if ( seq.startsWith('?') ) seq.remove(0,1);
+  // only look at the first ';'-separated field - good enough for the
+  // single-parameter sequences (cursor movement, insert/delete) that use it
+  int sep = seq.indexOf(';');
+  if ( sep >= 0 ) seq = seq.left(sep);
+  if ( seq.isEmpty() ) return _def;
+  bool ok = false;
+  int n = seq.toInt(&ok);
+  return ( ok && n > 0 ) ? n : _def;
 }
 
 KomportEmulation::~KomportEmulation(){
@@ -565,6 +593,10 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
 {
   KomportSerial* s = serial();
   if ( s->isOpen() ) {
+    // DECCKM: application cursor-key mode sends "ESC O x" instead of the
+    // normal "ESC [ x" - real hardware (Cisco/Juniper CLIs, vi, htop, ...)
+    // switches this on for full-screen apps and back off for line input.
+    const char *cursorPrefix = mApplicationCursorKeys ? "O" : "[";
     switch( _e->key() ) {
       case Qt::Key_Insert: s->putChar(ASCII_ESC); s->putStr("[1~");  break;
       case Qt::Key_Delete: s->putChar(ASCII_ESC); s->putStr("[4~"); break;
@@ -572,10 +604,17 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
       case Qt::Key_End:  s->putChar(ASCII_ESC); s->putStr("[5~"); break;
       case Qt::Key_PageUp: s->putChar(ASCII_ESC); s->putStr("[3~"); break;
       case Qt::Key_PageDown: s->putChar(ASCII_ESC); s->putStr("[6~"); break;
-      case Qt::Key_Left: s->putChar(ASCII_ESC); s->putStr("[D"); break;
-      case Qt::Key_Up: s->putChar(ASCII_ESC); s->putStr("[A"); break;
-      case Qt::Key_Right: s->putChar(ASCII_ESC); s->putStr("[C"); break;
-      case Qt::Key_Down : s->putChar(ASCII_ESC); s->putStr("[B"); break;
+      case Qt::Key_Left: s->putChar(ASCII_ESC); s->putStr(cursorPrefix); s->putStr("D"); break;
+      case Qt::Key_Up: s->putChar(ASCII_ESC); s->putStr(cursorPrefix); s->putStr("A"); break;
+      case Qt::Key_Right: s->putChar(ASCII_ESC); s->putStr(cursorPrefix); s->putStr("C"); break;
+      case Qt::Key_Down : s->putChar(ASCII_ESC); s->putStr(cursorPrefix); s->putStr("B"); break;
+      case Qt::Key_Return:
+      case Qt::Key_Enter:
+        // What Return sends is configurable (see KomportApp's line-ending
+        // toolbar dropdown) - some gear only understands a bare CR, Unix
+        // hosts expect LF.
+        s->putStr( lineEndingBytes().constData() );
+        break;
       default:
       {
         // QKeyEvent::ascii() was removed in Qt6 - text() carries the same
@@ -609,44 +648,45 @@ void KomportEmulation::doCursorTo()
   }  
 }
 
-/** cursor up */
+/** cursor up <n> rows (CSI Pn A), clamped to the top row */
 void KomportEmulation::doCursorUp()
 {
   QPoint pos = cellArray()->cursor();
-  if ( pos.y() > 0 ) {
-    pos.setY( pos.y()-1 );
-    cellArray()->setCursor(pos);
-  }
+  int n = ctlParam(1);
+  pos.setY( qMax(0, pos.y()-n) );
+  cellArray()->setCursor(pos);
 }
 
-/** cursor down */
+/** cursor down <n> rows (CSI Pn B), clamped to the bottom row.
+ *  NOTE: the original clamped with "< arrayHeight()" (off by one), which let
+ *  the cursor land one row past the last valid row - the next character
+ *  drawn there would call cell(x,y) on an out-of-range row, which returns
+ *  nullptr, and drawChar() dereferenced it unconditionally: a crash. Fixed
+ *  here (and in doCursorRight() below, same bug on the x axis). */
 void KomportEmulation::doCursorDown()
 {
   QPoint pos = cellArray()->cursor();
-  if ( pos.y() < cellArray()->arrayHeight() ) {
-    pos.setY( pos.y()+1 );
-    cellArray()->setCursor(pos);
-  }
+  int n = ctlParam(1);
+  pos.setY( qMin(cellArray()->arrayHeight()-1, pos.y()+n) );
+  cellArray()->setCursor(pos);
 }
 
-/** cursor left */
+/** cursor left <n> columns (CSI Pn D), clamped to the left margin */
 void KomportEmulation::doCursorLeft()
 {
   QPoint pos = cellArray()->cursor();
-  if ( pos.x() > 0 ) {
-    pos.setX( pos.x()-1 );
-    cellArray()->setCursor(pos);
-  }
+  int n = ctlParam(1);
+  pos.setX( qMax(0, pos.x()-n) );
+  cellArray()->setCursor(pos);
 }
 
-/** cursor right */
+/** cursor right <n> columns (CSI Pn C), clamped to the right margin */
 void KomportEmulation::doCursorRight()
 {
   QPoint pos = cellArray()->cursor();
-    if ( pos.x() < cellArray()->arrayWidth() ) {
-      pos.setX( pos.x()+1 );
-    cellArray()->setCursor(pos);
-  }
+  int n = ctlParam(1);
+  pos.setX( qMin(cellArray()->arrayWidth()-1, pos.x()+n) );
+  cellArray()->setCursor(pos);
 }
 
 void KomportEmulation::doClearEOL()
@@ -762,6 +802,19 @@ void KomportEmulation::doGraphics(){
           break;
         case 8:   //    Concealed on
           break;
+        case 21:  //    Normal intensity (documented alias of 22 below)
+        case 22:  //    Normal intensity / bold off
+          cellArray()->setBold(false);
+          break;
+        case 24:  //    Cancel underlined
+          cellArray()->setUnderline(false);
+          break;
+        case 25:  //    Cancel blinking
+          cellArray()->setBlink(false);
+          break;
+        case 27:  //    Cancel reverse
+          cellArray()->setReverse(false);
+          break;
 
         //    Foreground colors
         case 30:  //    Black
@@ -780,6 +833,8 @@ void KomportEmulation::doGraphics(){
           cellArray()->setForegroundColor(QColor(10,240,230));  break;
         case 37:  //    White
           cellArray()->setForegroundColor(QColor(255,255,255)); break;
+        case 39:  //    Default foreground
+          cellArray()->setForegroundColor(cellArray()->defaultForegroundColor()); break;
 
         //  Background colors
         case 40:  //    Black
@@ -789,7 +844,7 @@ void KomportEmulation::doGraphics(){
         case 42:  //    Green
           cellArray()->setBackgroundColor(QColor(0,255,0));     break;
         case 43:  //    Yellow
-          cellArray()->setForegroundColor(QColor(240,240,10));  break;
+          cellArray()->setBackgroundColor(QColor(240,240,10));  break;
         case 44:  //    Blue
           cellArray()->setBackgroundColor(QColor(0,0,255));     break;
         case 45:  //    Magenta
@@ -798,6 +853,35 @@ void KomportEmulation::doGraphics(){
           cellArray()->setBackgroundColor(QColor(10,240,230));  break;
         case 47:  //    White
           cellArray()->setBackgroundColor(QColor(255,255,255)); break;
+        case 49:  //    Default background
+          cellArray()->setBackgroundColor(cellArray()->defaultBackgroundColor()); break;
+
+        //    Bright ("aixterm") foreground colors 90-97 - not in the
+        //    original vt102 doc block above (that's xterm-era ANSI), but
+        //    real-world gear (Cisco/Juniper CLIs, colored `ls`, ...) uses
+        //    them routinely, so a "complete" ANSI color implementation
+        //    needs them too. Same base hues as 30-37, lightened.
+        // QColor::lighter() multiplies the HSV value component, which is
+        // 0 for pure black and so never brightens - use an explicit grey
+        // for "bright black" instead.
+        case 90:  cellArray()->setForegroundColor(QColor(85,85,85));                 break;
+        case 91:  cellArray()->setForegroundColor(QColor(255,0,0).lighter(140));     break;
+        case 92:  cellArray()->setForegroundColor(QColor(0,255,0).lighter(140));     break;
+        case 93:  cellArray()->setForegroundColor(QColor(240,240,10).lighter(140));  break;
+        case 94:  cellArray()->setForegroundColor(QColor(0,0,255).lighter(140));     break;
+        case 95:  cellArray()->setForegroundColor(QColor(215,15,230).lighter(140));  break;
+        case 96:  cellArray()->setForegroundColor(QColor(10,240,230).lighter(140));  break;
+        case 97:  cellArray()->setForegroundColor(QColor(255,255,255));              break;
+
+        //    Bright background colors 100-107
+        case 100: cellArray()->setBackgroundColor(QColor(85,85,85));                 break;
+        case 101: cellArray()->setBackgroundColor(QColor(255,0,0).lighter(140));     break;
+        case 102: cellArray()->setBackgroundColor(QColor(0,255,0).lighter(140));     break;
+        case 103: cellArray()->setBackgroundColor(QColor(240,240,10).lighter(140));  break;
+        case 104: cellArray()->setBackgroundColor(QColor(0,0,255).lighter(140));     break;
+        case 105: cellArray()->setBackgroundColor(QColor(215,15,230).lighter(140));  break;
+        case 106: cellArray()->setBackgroundColor(QColor(10,240,230).lighter(140));  break;
+        case 107: cellArray()->setBackgroundColor(QColor(255,255,255));              break;
 
         default:
           printf( "?attr? %d\n", attr);
@@ -805,6 +889,162 @@ void KomportEmulation::doGraphics(){
       }
     }
   } while( sep < mCtlSequence.length() );
+}
+
+/** index: cursor down, scrolling at the bottom margin (ESC D) */
+void KomportEmulation::doIndex()
+{
+  QPoint pos = cellArray()->cursor();
+  pos.setY( pos.y()+1 );
+  if ( pos.y() >= cellArray()->arrayHeight() ) {
+    pos.setY( cellArray()->arrayHeight()-1 );
+    cellArray()->scrollUp();
+  }
+  cellArray()->setCursor(pos);
+}
+
+/** reverse index: cursor up, stopping at the top row (ESC M).
+ *  NOTE: a "full" reverse index scrolls the screen *down* (inserting a
+ *  blank line at the top) once the cursor is already on the top row -
+ *  that needs a symmetric scrollDown()/scroll-region implementation that
+ *  KomportCellArray does not have (it only ever scrolls forward). Simply
+ *  stopping at the top row, like the original doCursorUp() already did, is
+ *  the safe subset implemented here; scrolling down is a known gap. */
+void KomportEmulation::doReverseIndex()
+{
+  QPoint pos = cellArray()->cursor();
+  if ( pos.y() > 0 ) {
+    pos.setY( pos.y()-1 );
+    cellArray()->setCursor(pos);
+  }
+}
+
+/** next line: CR + index (ESC E) */
+void KomportEmulation::doNextLine()
+{
+  QPoint pos = cellArray()->cursor();
+  pos.setX(0);
+  cellArray()->setCursor(pos);
+  doIndex();
+}
+
+/** reset to initial state (ESC c) */
+void KomportEmulation::doReset()
+{
+  cellArray()->setBackgroundColor(cellArray()->defaultBackgroundColor());
+  cellArray()->setForegroundColor(cellArray()->defaultForegroundColor());
+  cellArray()->setBlink(false);
+  cellArray()->setBold(false);
+  cellArray()->setReverse(false);
+  cellArray()->setUnderline(false);
+  cellArray()->setCursorVisible(true);
+  mApplicationCursorKeys = false;
+  cellArray()->clear();
+  cellArray()->setCursor(QPoint(0,0));
+}
+
+/** insert <n> blank lines at the cursor row, pushing the rows below it (and
+ *  the bottom margin's worth of the screen) down - CSI Pn L */
+void KomportEmulation::doInsertLine()
+{
+  int n = ctlParam(1);
+  int w = cellArray()->arrayWidth();
+  int h = cellArray()->arrayHeight();
+  int y = cellArray()->cursor().y();
+  if ( n > h-y ) n = h-y;
+  for ( int row = h-1; row >= y+n; row-- ) {
+    for ( int x=0; x < w; x++ ) cellArray()->cell(x,row)->copy( cellArray()->cell(x,row-n) );
+    cellArray()->updateRow(row);
+  }
+  for ( int row = y; row < y+n; row++ ) cellArray()->clearRow(row);
+}
+
+/** delete <n> lines at the cursor row, pulling the rows below it up and
+ *  clearing the newly exposed rows at the bottom - CSI Pn M */
+void KomportEmulation::doDeleteLine()
+{
+  int n = ctlParam(1);
+  int w = cellArray()->arrayWidth();
+  int h = cellArray()->arrayHeight();
+  int y = cellArray()->cursor().y();
+  if ( n > h-y ) n = h-y;
+  for ( int row = y; row < h-n; row++ ) {
+    for ( int x=0; x < w; x++ ) cellArray()->cell(x,row)->copy( cellArray()->cell(x,row+n) );
+    cellArray()->updateRow(row);
+  }
+  for ( int row = h-n; row < h; row++ ) cellArray()->clearRow(row);
+}
+
+/** delete <n> characters at the cursor, shifting the rest of the row left
+ *  and blanking the exposed columns at the end - CSI Pn P */
+void KomportEmulation::doDeleteChar()
+{
+  int n = ctlParam(1);
+  int w = cellArray()->arrayWidth();
+  int y = cellArray()->cursor().y();
+  int x0 = cellArray()->cursor().x();
+  if ( n > w-x0 ) n = w-x0;
+  for ( int x=x0; x < w-n; x++ ) cellArray()->cell(x,y)->copy( cellArray()->cell(x+n,y) );
+  for ( int x=qMax(x0,w-n); x < w; x++ ) cellArray()->cell(x,y)->clear();
+  cellArray()->updateRow(y);
+}
+
+/** set/reset mode (CSI Ps h / CSI Ps l), including private ("?"-prefixed)
+ *  modes. Unsupported modes are safely ignored (consumed, no side effect)
+ *  rather than leaking their sequence onto the screen or crashing. */
+void KomportEmulation::doSetMode(bool _set)
+{
+  bool priv = mCtlSequence.startsWith('?');
+  QByteArray seq = mCtlSequence;
+  if ( priv ) seq.remove(0,1);
+
+  int index = 0;
+  int sep;
+  do {
+    sep = seq.indexOf( ';', index );
+    if ( sep < 0 ) sep = seq.length();
+    QByteArray modeStr = seq.mid( index, sep-index );
+    index = sep+1;
+    if ( !modeStr.isEmpty() ) {
+      int mode = modeStr.toInt();
+      if ( priv ) {
+        switch ( mode ) {
+          case 1:  mApplicationCursorKeys = _set; break;          // DECCKM
+          case 25: cellArray()->setCursorVisible(_set); break;    // DECTCEM
+          default: break; // ?2/?3/?4/?5/?6/?7/?8/... not implemented, ignored safely
+        }
+      }
+      // non-private modes (2=keyboard lock, 4=insert mode, 12=echo,
+      // 20=CR/LF mapping, ...) are not implemented; ignored safely.
+    }
+  } while ( sep < seq.length() );
+}
+
+/** device status / cursor position report (CSI Ps n) */
+void KomportEmulation::doDeviceStatusReport()
+{
+  int code = ctlParam(0);
+  switch ( code ) {
+    case 5: // status report request -> "ready, no malfunction"
+      serial()->putStr( "\x1b[0n" );
+      break;
+    case 6: // cursor position report request
+      {
+        QPoint pos = cellArray()->cursor();
+        QByteArray reply = "\x1b[" + QByteArray::number(pos.y()+1) + ";" + QByteArray::number(pos.x()+1) + "R";
+        serial()->putStr( reply.constData() );
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+/** device attributes / "who are you" (CSI c, CSI 0c) - always answers as a
+ *  VT102, matching this emulation's documented scope. */
+void KomportEmulation::doDeviceAttributes()
+{
+  serial()->putStr( "\x1b[?6c" );
 }
 
 // received part of an escape sequence
@@ -846,6 +1086,33 @@ void KomportEmulation::sequence(char _ch)
       case 'u':   // restore cursor position
         doRestoreCursor();
         break;
+      case 'L':   // insert line(s)
+        doInsertLine();
+        break;
+      case 'M':   // delete line(s)
+        doDeleteLine();
+        break;
+      case 'P':   // delete character(s)
+        doDeleteChar();
+        break;
+      case 'h':   // set mode
+        doSetMode(true);
+        break;
+      case 'l':   // reset mode
+        doSetMode(false);
+        break;
+      case 'n':   // device status / cursor position report
+        doDeviceStatusReport();
+        break;
+      case 'c':   // device attributes ("who are you")
+        doDeviceAttributes();
+        break;
+      case 'g':   // clear tab stop(s) - tab stops are always at every 8th
+      case 'r':   // set scrolling region - not implemented (would need a
+                  // scroll-region-aware scrollUp()/scrollDown() in
+                  // KomportCellArray); consumed harmlessly rather than
+                  // printed as garbage.
+        break;
       default:
         printf( "?ctl? '%c'\n ", _ch );
         break;
@@ -858,24 +1125,70 @@ void KomportEmulation::sequence(char _ch)
   }
 }
 
+/** handle a two-character escape sequence: ESC followed directly by _ch
+ *  (no '['). These are documented at the top of this file (Index, Reverse
+ *  Index, Next Line, Save/Restore Cursor, Reset, keypad mode, character
+ *  set selection, ...). The original implementation didn't recognise any
+ *  of these at all: it fell through to the printable-character branch
+ *  below *without* resetting mSawESC, so e.g. every "ESC 7" (save cursor)
+ *  a real host sends would print a literal '7' on screen and then get
+ *  stuck thinking it was still mid-escape-sequence for everything after
+ *  it. This function, and slotReceivedChar()'s state machine below, fix
+ *  that. */
+void KomportEmulation::shortEscape(char _ch)
+{
+  switch ( _ch ) {
+    case 'D': doIndex(); break;
+    case 'M': doReverseIndex(); break;
+    case 'E': doNextLine(); break;
+    case '7': doSaveCursor(); break;
+    case '8': doRestoreCursor(); break;
+    case 'c': doReset(); break;
+    case 'H': break; // set horizontal tab stop - tab stops are fixed at every 8th column, ignored
+    case '(': case ')': // select G0/G1 character set - consume the designator that follows
+      mPendingCharsetChar = true;
+      break;
+    case '=': case '>': // application/numeric keypad mode - not implemented, ignored safely
+    case 'N': case 'O': // single-shift G2/G3 - not implemented, ignored safely
+    default:
+      break;
+  }
+}
+
 // received a char */
 void KomportEmulation::slotReceivedChar(char _ch)
 {
-  // handle the terminal control sequence...
-  if ( _ch == ASCII_ESC && !mSawESC && !mInCtlSequence ) {
-    mSawESC = true;
+  // a character-set designator following ESC ( or ESC ) - swallow it, see
+  // shortEscape() above.
+  if ( mPendingCharsetChar ) {
+    mPendingCharsetChar = false;
     return;
   }
-  if ( _ch == '[' && mSawESC && !mInCtlSequence  ) {
-    mInCtlSequence=true;
-    mCtlSequence.resize(0);
+
+  // handle the terminal control sequence...
+  if ( _ch == ASCII_ESC ) {
+    // a fresh ESC always (re)starts sequence recognition, even if one was
+    // already in progress - real hosts do send ESC to abort a sequence.
+    mSawESC = true;
+    mInCtlSequence = false;
+    mCtlSequence.clear();
+    return;
+  }
+  if ( mSawESC && !mInCtlSequence ) {
+    if ( _ch == '[' ) {
+      mInCtlSequence = true;
+      mCtlSequence.clear();
+    } else {
+      shortEscape(_ch);
+      mSawESC = false;
+    }
     return;
   }
   if ( mInCtlSequence ) {
     sequence(_ch);
     return;
   }
-    
+
   // handle standard dumb terminal codes and printable ASCII....
   switch(_ch) {
     case ASCII_BEL:
@@ -885,6 +1198,15 @@ void KomportEmulation::slotReceivedChar(char _ch)
       break;
     case ASCII_BS:
       doCursorLeft();
+      break;
+    case ASCII_HT:
+      {
+        QPoint pos = cellArray()->cursor();
+        int next = ((pos.x()/8)+1)*8;
+        if ( next >= cellArray()->arrayWidth() ) next = cellArray()->arrayWidth()-1;
+        pos.setX(next);
+        cellArray()->setCursor(pos);
+      }
       break;
     case ASCII_LF:
       {

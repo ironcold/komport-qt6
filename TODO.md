@@ -9,10 +9,8 @@ für die Ziele/Klassen-Mappings). Wird laufend aktualisiert.
       Autotools-Build aus KDevelop-1.2-Ära, KDE 2/3 + Qt 3 APIs)
 - [x] Git-Repository initialisiert, Ausgangszustand als Baseline committet
       (Commit `Import upstream KDE3/Qt3 Komport 0.4.6`)
-- [ ] **Blocker: Build-Toolchain fehlt auf diesem System.** `cmake` und die Qt6-Dev-Pakete
-      (Header/CMake-Configs) sind nicht installiert, nur Qt6-Runtime-Libs. Nutzer wurde
-      gebeten auszuführen:
-      `sudo apt install -y cmake qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-l10n-tools`
+- [x] Build-Toolchain (`cmake`, `qt6-base-dev`, `qt6-serialport-dev`, ...) vom Nutzer
+      nachinstalliert, seither kein Blocker mehr.
       Ohne das kann nicht gebaut/iteriert werden — Code-Portierung läuft parallel weiter.
 
 ## 1. Quellcode-Analyse (abgeschlossen)
@@ -161,4 +159,156 @@ Stand vor der Migration, nicht Teil dieser Portierung, aber als Ausblick festgeh
 - Pro-Verbindung eigene Settings-Datei (aktuell: eine gemeinsame `QSettings`-Instanz
   je Prozess/Fenster).
 - VT100-Emulation weiter finalisieren (über den in Abschnitt 2 beschriebenen
-  reinen Syntax-Port hinaus — nicht Teil dieser Migration).
+  reinen Syntax-Port hinaus — mittlerweile zu großen Teilen erledigt, siehe Abschnitt 8).
+
+## 8. Admin-Tool-Features (zweiter Auftrag, nach der Basis-Portierung)
+
+Drei Feature-Wünsche plus eine nachgereichte Ergänzung um drei weitere. Alle
+umgesetzt, neu gebaut (0 Warnungen mit `-Wall -Wextra`) und per Selbsttest
+verifiziert (Details unten).
+
+### 8.1 Hex-Monitor (`komporthexview.h/.cpp`, neu)
+
+- Zuschaltbares Split-Screen-Panel: `QSplitter` im Zentralwidget von `KomportApp`
+  hält `KomportView` und die neue `KomportHexView` nebeneinander; Hex-Panel ist
+  standardmäßig versteckt (`setVisible(false)`), Sichtbarkeit über eine neue
+  Toggle-Action "Hex Monitor" (Toolbar-Button + Eintrag im View-Menü) und
+  in `QSettings` persistiert.
+- Klassisches Format `[Offset] [Hex] [ASCII]`, 16 Bytes pro Zeile, getrennt nach
+  Richtung: `RX`-Zeilen (empfangen, eigener Offset-Zähler) und `TX`-Zeilen
+  (tatsächlich gesendet, eigener Offset-Zähler) — zeigt explizit auch die
+  Steuerzeichen, die im reinen Textfenster unsichtbar sind oder das Layout
+  zerschießen.
+- Angebunden direkt an `KomportSerial::receivedChar(char)`/das dafür neu
+  ergänzte `KomportSerial::sentChar(char)` (siehe unten) — **vor** jeder
+  Interpretation durch die VT100-Emulation, zeigt also wirklich die rohen Bytes.
+- Unvollständige Zeilen (<16 Byte) werden von einem 300ms-Timer nachgezogen,
+  damit auch kleine/vereinzelte Bytes zeitnah sichtbar werden, statt auf eine
+  volle Zeile zu warten.
+- `KomportSerial` bekam dafür ein neues Signal `sentChar(char)`, emittiert aus
+  `putChar()`; `putStr()` wurde von einem einzelnen `write()`-Aufruf zurück auf
+  eine Schleife über `putChar()` umgestellt (kostet minimal Performance, dafür
+  bekommt jedes gesendete Byte sein Signal — für einen Terminal-Client ohne
+  Bulk-Transfers irrelevant).
+
+### 8.2 VT100/VT102-Emulation vervollständigt (`komportemulation.h/.cpp`)
+
+- **Kritischer Bugfix (Absturz):** `doCursorDown()`/`doCursorRight()` hatten im
+  Original ein Off-by-one (`pos.y() < arrayHeight()` statt `< arrayHeight()-1`)
+  — der Cursor konnte eine Zeile/Spalte außerhalb des gültigen Bereichs landen;
+  das nächste gezeichnete Zeichen rief `cell(x,y)` auf einem out-of-range Index
+  auf, das `nullptr` liefert, und `drawChar()` dereferenzierte das ungeprüft →
+  Absturz. Gefixt, plus Regressionstest (s.u.).
+- Cursor-Bewegung (`CSI A/B/C/D`) berücksichtigt jetzt den numerischen
+  Wiederholungs-Parameter (`ESC[5C` = 5 Spalten nach rechts), vorher wurde er
+  ignoriert und immer nur 1 Schritt gemacht.
+- Non-CSI-Zweizeichen-Escapes (`ESC D` Index, `ESC M` Reverse Index, `ESC E`
+  Next Line, `ESC 7`/`ESC 8` Save/Restore Cursor, `ESC c` Reset,
+  `ESC (`/`ESC )` Zeichensatz-Auswahl) waren im Original **komplett
+  unbehandelt** — die Zustandsmaschine fiel ohne `mSawESC` zurückzusetzen in
+  den Normalzeichen-Zweig durch, druckte das zweite Escape-Zeichen als
+  Klartext-Glyphe und blieb danach in einem inkonsistenten Zustand hängen.
+  Neu strukturiert (`shortEscape()`), inklusive Verschlucken des auf
+  `ESC (`/`ESC )` folgenden Zeichensatz-Designators statt ihn zu drucken.
+- Neue CSI-Sequenzen: `L`/`M`/`P` (Insert/Delete Line, Delete Char), `h`/`l`
+  (Set/Reset Mode, inkl. privater Modi `?1`=DECCKM und `?25`=DECTCEM), `n`
+  (Device Status Report inkl. Cursor-Position-Report), `c` (Device Attributes,
+  antwortet als VT102, wie in der Kopfkommentar-Doku dieser Datei vorgesehen).
+- SGR (`CSI m`) ergänzt um die in der eigenen Kopfkommentar-Dokumentation
+  bereits aufgeführten, aber nie implementierten Codes `21/22/24/25/27`
+  (Attribute gezielt zurücksetzen) sowie `39/49` (Vorder-/Hintergrund auf
+  Standard) und die hellen ANSI-Farben `90–97`/`100–107` (nicht in der
+  originalen VT102-Doku, aber von realer Hardware/Farb-CLIs routinemäßig
+  genutzt).
+- Tab (`0x09`) wurde vorher als **druckbares Zeichen gezeichnet** (kein
+  Tab-Handling vorhanden) — jetzt springt der Cursor korrekt zum nächsten
+  Vielfachen von 8.
+- DECCKM (`ESC[?1h`/`l`): Pfeiltasten senden abhängig vom Modus `ESC[A` (normal)
+  oder `ESC OA` (Application-Modus) — wichtig für Vollbild-Programme wie `vi`
+  oder `htop` auf der Gegenseite.
+- DECTCEM (`ESC[?25h`/`l`): Cursor kann jetzt unsichtbar geschaltet werden;
+  `KomportCellArray` hat dafür ein neues `cursorVisible`-Flag samt Signal,
+  `KomportView::paintCell()` respektiert es.
+- Bekannte, bewusst nicht geschlossene Lücken (ehrlich dokumentiert statt
+  stillschweigend unvollständig zu lassen): Scroll-Regionen (`DECSTBM`,
+  `CSI r`) werden nur konsumiert, nicht angewendet — bräuchte eine
+  scroll-region-fähige `scrollUp()`/neue `scrollDown()` in `KomportCellArray`.
+  `ESC M` (Reverse Index) scrollt am oberen Rand deshalb nicht rückwärts,
+  sondern bleibt stehen (wie es `doCursorUp()` schon immer tat). VT52-Modus,
+  echte Zeichensatz-Umschaltung (Linien-Grafikzeichen) und Insert-Mode (`CSI 4h`)
+  sind nicht implementiert.
+
+### 8.3 Makro-Buttons (`komportmacrobar.h/.cpp`, neu)
+
+- Leiste mit 8 programmierbaren Buttons, angedockt unten im Hauptfenster
+  (eigene `QToolBar` in `Qt::BottomToolBarArea`).
+- Klick auf einen konfigurierten Button sendet den hinterlegten Befehl plus
+  das aktuell gewählte Zeilenende (s. 8.5); Klick auf einen leeren Button oder
+  Rechtsklick auf jeden Button öffnet einen Editor (Label + Befehl) für den
+  jeweiligen Slot.
+- Drei Slots vorbelegt mit den vom Nutzer genannten Beispielen
+  (`show running-config`, `wr mem`, `exit`), fünf leer zur freien Belegung.
+- Persistiert unter `QSettings`-Gruppe `Macros`.
+
+### 8.4 Ein-Klick-Session-Logging (`komportsessionlogger.h/.cpp`, neu)
+
+- Toggle-Action "Record Session..." (Toolbar + Session-Menü): beim Aktivieren
+  `QFileDialog::getSaveFileName`, dann Aufzeichnung; beim Deaktivieren wird die
+  Datei sauber geschlossen (letzte unvollständige Zeile wird noch geflusht).
+  Schlägt das Öffnen der Datei fehl, springt der Button-Zustand zurück und es
+  gibt eine Fehlermeldung.
+- Loggt den **empfangenen** Bytestrom (das, was über den Bildschirm läuft),
+  zeilenweise mit Zeitstempel `[HH:mm:ss.zzz]` pro Zeile, angebunden an
+  `KomportSerial::receivedChar(char)` — unabhängig vom Hex-Monitor (der zeigt
+  Rohbytes inkl. TX, der Logger die für Menschen lesbare Session).
+
+### 8.5 Zeilenende-Auswahl (Toolbar-Dropdown + `KomportEmulation`)
+
+- Neues `KomportEmulation::LineEnding`-Enum (`CR`/`LF`/`CRLF`) plus
+  `setLineEnding()`/`lineEndingBytes()`; steuert, was die Enter-Taste
+  (`slotKeyPressed()`, vorher immer nur ein hartkodiertes `\r`) und die
+  Makro-Buttons an Zeilenende senden.
+- Schnelles Dropdown in der Toolbar ("Enter sends: CR/LF/CR+LF"), Auswahl wird
+  in `QSettings` persistiert. Bewusst *nicht* zusätzlich in den
+  Settings-Dialog dupliziert — der Nutzer wollte explizit ein schnelles
+  Toolbar-Dropdown, kein Dialogfeld.
+
+### 8.6 Speicher-Bug beim Reparenting gefunden und gefixt
+
+Beim Einbau des `QSplitter`s für den Hex-Monitor reparentiert
+`QSplitter::addWidget()` die `KomportView` weg von `KomportApp` (ihr direkter
+Parent ist danach der Splitter, nicht mehr das Hauptfenster). `KomportView::
+getDocument()` castete bis dahin `parentWidget()` direkt nach `KomportApp*` —
+nach dem Reparenting zeigte das auf den `QSplitter`, der C-Style-Cast war damit
+falsch, und der erste Zugriff auf `view->getSerial()` (im `KomportApp`-Konstruktor,
+für die neuen Hex-/Logger-Verbindungen) stürzte reproduzierbar ab (per `gdb`
+verifiziert). Fix: `getDocument()` benutzt jetzt `window()` statt
+`parentWidget()` — läuft die komplette Widget-Hierarchie bis zum Top-Level-Fenster
+hoch, unabhängig davon, wie viele Container-Widgets dazwischenliegen.
+
+### 8.7 Verifikation
+
+- Build mit `-Wall -Wextra`: weiterhin 0 Warnungen, 0 Fehler.
+- Offscreen-GUI-Smoke-Test (`QT_QPA_PLATFORM=offscreen ./build/komport`): startet,
+  keine Abstürze (hat den Splitter/`getDocument()`-Bug oben tatsächlich gefangen).
+- Zusätzlich ein temporärer, nicht mit ausgelieferter Integrationstest
+  (`komport_selftest`, provisorisches CMake-Target, nach Gebrauch wieder aus
+  `CMakeLists.txt` entfernt): über ein echtes `pty`-Geräte-Paar
+  (`python3 pty.openpty()`) hat `KomportSerial` einen echten seriellen Port
+  geöffnet, ein Python-Treiber hat auf der Gegenseite Bytes geschrieben/gelesen.
+  30 Prüfungen, alle grün, u.a.:
+  - Klartext, Cursor-Positionierung, SGR-Farben inkl. hell, Mehrfach-Parameter
+    bei Cursor-Bewegung;
+  - **Regressionstest für den Absturz-Bug** 8.2: Cursor gezielt in die untere
+    rechte Ecke bewegt, dann versucht darüber hinaus zu bewegen/zu zeichnen —
+    kein Absturz, sauber geklemmt;
+  - Tab-Sprung, Insert/Delete-Char, DECTCEM, non-CSI Save/Restore/Index/Reset,
+    Zeichensatz-Designator wird verschluckt statt gedruckt;
+  - **Echter Byte-Roundtrip über den seriellen Port:** `CSI 6n`
+    (Cursor-Position-Report) beantwortet, Antwort auf der Host-Seite des
+    `pty`-Paars gelesen und verglichen;
+  - DECCKM schaltet die von `slotKeyPressed()` für die Pfeiltasten gesendeten
+    Bytes tatsächlich zwischen `ESC[A` und `ESC OA` um;
+  - Enter-Taste sendet abhängig von `LineEnding` tatsächlich CR, LF oder CRLF;
+  - `KomportSessionLogger`: Datei geschrieben, Zeile + Zeitstempel im
+    Dateiinhalt wiedergefunden.

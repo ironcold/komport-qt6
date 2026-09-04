@@ -169,6 +169,14 @@ void KomportCellArray::setCursor(QPoint _p){
   }
 }
 
+/** show/hide the cursor (DECTCEM) */
+void KomportCellArray::setCursorVisible(bool _v){
+  if ( mCursorVisible != _v ) {
+    mCursorVisible = _v;
+    emit cursorVisibilityChanged(_v);
+  }
+}
+
 /** Insert a character at the current cursor position and advance cursor. Scroll if advance is passed the last column. */
 void KomportCellArray::putChar(QChar _ch){
   drawChar(_ch,cursor());

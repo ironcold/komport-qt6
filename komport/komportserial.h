@@ -112,6 +112,8 @@ signals: // Signals
   void settingsFailed();
   /** received a char */
   void receivedChar(char _ch);
+  /** a char was actually written to the port (for e.g. the hex monitor) */
+  void sentChar(char _ch);
 private slots: // Private slots
   /** QSerialPort has data available */
   void slotDataAvailable();

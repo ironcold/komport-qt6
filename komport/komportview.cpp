@@ -59,6 +59,9 @@ KomportView::KomportView(QWidget *parent)
   QObject::connect(cellArray(),SIGNAL(rowChanged(int)),this,SLOT(slotRowChanged(int)));
   QObject::connect(cellArray(),SIGNAL(aboutToScrollUp()),this,SLOT(slotAboutToScrollUp()));
   QObject::connect(cellArray(),SIGNAL(scrolledUp()),this,SLOT(slotScrolledUp()));
+  QObject::connect(cellArray(),&KomportCellArray::cursorVisibilityChanged,this,[this](bool){
+      updateCell( cellArray()->cursor() );
+  });
   QObject::connect(QApplication::clipboard(),SIGNAL(selectionChanged()),this,SLOT(slotSelectionChanged()));
 
   mCursorTimer = startTimer( 500 );
@@ -83,7 +86,13 @@ KomportView::~KomportView()
 
 KomportDoc *KomportView::getDocument() const
 {
-  KomportApp *theApp=(KomportApp *) parentWidget();
+  // window() rather than parentWidget(): this view no longer sits directly
+  // under KomportApp - it's inside the central QSplitter (for the hex
+  // monitor pane) - so its immediate parent is the splitter, not the main
+  // window. window() walks all the way up to the top-level widget, which
+  // is still KomportApp regardless of how many container widgets sit in
+  // between.
+  KomportApp *theApp=(KomportApp *) window();
 
   return theApp->getDocument();
 }
@@ -122,7 +131,7 @@ void KomportView::paintCell( QPainter* _paint, int _x, int _y, QRect _bounds ) {
   KomportCell* cell = getCell(_x,_y);
   if ( cell != nullptr ) {
     QString str( cell->character() );
-    bool cursorCellOn = (cellArray()->cursor() == QPoint( _x, _y ) && mCursorState);
+    bool cursorCellOn = (cellArray()->cursor() == QPoint( _x, _y ) && mCursorState && cellArray()->cursorVisible());
     QColor fillColor;
     QColor textColor;
     QColor cellBackground = cell->backgroundColor();
