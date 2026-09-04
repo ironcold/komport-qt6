@@ -6,11 +6,11 @@
 > (`~/Entwicklung/komport-qt6`), CMake-Projekt-/Binary-Name (`komport-qt6`),
 > `.desktop`-Anzeigename ("Komport Qt6") und Versionszählung (neu bei `1.0.0`,
 > statt der von KDE3 geerbten `0.4.6`) sind entsprechend angepasst. Ältere
-> Einträge in `TODO.md` sprechen noch von `./build/komport` — das war zum
-> jeweiligen Zeitpunkt der tatsächliche Binary-Name und wird als historisches
-> Protokoll nicht nachträglich umgeschrieben. Die Quelldateien in `komport/`
-> behalten ihre Dateinamen und den Datei-Header-Titel "Komport Serial Port
-> Communicator" als Verweis auf ihren Ursprung.
+> Einträge in `TODO-ARCHIVE.md` sprechen noch von `./build/komport` — das war
+> zum jeweiligen Zeitpunkt der tatsächliche Binary-Name und wird als
+> historisches Protokoll nicht nachträglich umgeschrieben. Die Quelldateien in
+> `komport/` behalten ihre Dateinamen und den Datei-Header-Titel "Komport
+> Serial Port Communicator" als Verweis auf ihren Ursprung.
 
 > **Status:** Die Portierung ist durchgeführt und baut sauber mit CMake/Qt6
 > (`cmake -B build && cmake --build build`, auch mit `-Wall -Wextra` ohne Warnungen).
@@ -20,9 +20,10 @@
 > erweiterte SGR-Farben — plus zwei per Code-Review gefundene und gefixte
 > Absturz-Bugs bei Cursor-Clamping), programmierbare Makro-Buttons,
 > Ein-Klick-Session-Logging und eine Zeilenende-Auswahl (CR/LF/CRLF) für
-> Enter-Taste und Makros. Details, was dabei gemacht/entschieden wurde, stehen
-> in `TODO.md`. Dieses Dokument bleibt als Ziel-/Architektur-Referenz für
-> künftige Änderungen bestehen.
+> Enter-Taste und Makros. Was dabei gemacht/entschieden wurde, steht im Detail
+> in `TODO-ARCHIVE.md`; offene Punkte/bekannte Lücken in `TODO.md`. Dieses
+> Dokument bleibt als Ziel-/Architektur-Referenz für künftige Änderungen
+> bestehen.
 
 ## Was ist Komport?
 
@@ -127,12 +128,13 @@ Soll ersetzt werden durch:
 - `KomportView` (`komportview.h/.cpp`) — Zeichen-Grid-Widget, Zeichnen, Maus-/Tastatur-Events,
   Auswahl/Zwischenablage, hält `KomportCellArray`, `KomportScrollBuffer`, `KomportEmulation`.
   **Achtung:** sitzt im Zentral-`QSplitter`, nicht direkt unter `KomportApp` — `getDocument()`
-  läuft deshalb über `window()`, nicht `parentWidget()` (siehe `TODO.md` 8.6).
+  läuft deshalb über `window()`, nicht `parentWidget()` (siehe `TODO-ARCHIVE.md` 8.6).
 - `KomportEmulation` (`komportemulation.h/.cpp`) — VT100/VT102-Escape-Sequenz-Interpreter.
   **Größtes und wichtigstes Modul.** Inzwischen recht vollständig (Cursor-Bewegung mit
   Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports, erweiterte
-  SGR-Farben, Tab, non-CSI-Escapes) — Details und bekannte Lücken (Scroll-Regionen,
-  VT52, Zeichensatz-Umschaltung) in `TODO.md` Abschnitt 8.2. Trägt auch die
+  SGR-Farben, Tab, non-CSI-Escapes) — Details in `TODO-ARCHIVE.md` Abschnitt 8.2,
+  bekannte Lücken (Scroll-Regionen, VT52, Zeichensatz-Umschaltung) in `TODO.md`
+  Abschnitt 6. Trägt auch die
   `LineEnding`-Einstellung (CR/LF/CRLF) für die Enter-Taste und die Makro-Bar.
 - `KomportCell`/`KomportCellArray` — Zeichen-Zellen-Modell des sichtbaren Bildschirms;
   `KomportCellArray` trägt seit der Feature-Erweiterung auch das DECTCEM-Sichtbarkeits-Flag
@@ -156,8 +158,8 @@ Soll ersetzt werden durch:
 KDevelop-1.2-generiert, KDE-2/3-typisch) wurde komplett durch ein Top-Level
 `CMakeLists.txt` ersetzt (`find_package(Qt6 COMPONENTS Widgets PrintSupport
 SerialPort REQUIRED)`, `CMAKE_AUTOMOC`/`CMAKE_AUTORCC`, C++17). Alle Autotools-
-Dateien und die KDevelop-1.x-Projektdateien sind entfernt (siehe `TODO.md` Abschnitt 3
-für die vollständige Liste). Bauen: `cmake -B build && cmake --build build`.
+Dateien und die KDevelop-1.x-Projektdateien sind entfernt (siehe `TODO-ARCHIVE.md`
+Abschnitt 3 für die vollständige Liste). Bauen: `cmake -B build && cmake --build build`.
 
 ## Was NICHT im Scope ist (sofern nicht anders vom Nutzer gewünscht)
 
