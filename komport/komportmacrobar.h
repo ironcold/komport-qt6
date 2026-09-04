@@ -1,10 +1,14 @@
 /***************************************************************************
                           komportmacrobar.h  -  Komport Serial Port Communicator
                              -------------------
-    New in the Qt6 port (2026): a row of programmable quick-command
-    buttons (e.g. "show running-config", "exit", "wr mem") docked to the
-    bottom of the main window, so a repeated command is one click instead
-    of retyping it under pressure.
+    begin                : 2026 (new in the Qt6 port)
+    copyright            : (C) 2026 by Harald Stürmer
+    email                : ironcold@ironcold.de
+
+    A row of programmable quick-command buttons (e.g. "show
+    running-config", "exit", "wr mem") docked to the bottom of the main
+    window, so a repeated command is one click instead of retyping it
+    under pressure.
  ***************************************************************************/
 
 /***************************************************************************

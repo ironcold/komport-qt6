@@ -312,3 +312,69 @@ hoch, unabhängig davon, wie viele Container-Widgets dazwischenliegen.
   - Enter-Taste sendet abhängig von `LineEnding` tatsächlich CR, LF oder CRLF;
   - `KomportSessionLogger`: Datei geschrieben, Zeile + Zeitstempel im
     Dateiinhalt wiedergefunden.
+
+## 9. Code-Review (nach Abschnitt 8) — 10 Findings, alle behoben
+
+Ein `/code-review` über den kompletten Diff der Abschnitte 1–8 hat 10 verifizierte
+Findings ergeben. Alle behoben, erneut gebaut (0 Warnungen mit `-Wall -Wextra`) und
+per erweitertem PTY-Selbsttest verifiziert (32/32 Checks grün, inkl. zwei neuer
+Regressionstests für die beiden Absturz-/Logikfixes unten).
+
+1. **`doCursorTo()` (CSI H/f) klemmte nicht an den Grid-Rand** — anders als die
+   bereits gefixten relativen Cursor-Bewegungen (`komportemulation.cpp`). Ein
+   `ESC[9999;9999H` gefolgt von `ESC[K`/`ESC[P`/`ESC[L`/`ESC[M` oder einem
+   normalen Zeichen hätte `cell(x,y)` außerhalb des gültigen Bereichs aufgerufen
+   → `nullptr`-Dereferenzierung → Absturz. Jetzt mit `qBound()` auf
+   `[0, arrayHeight()-1]`/`[0, arrayWidth()-1]` geklemmt, wie die anderen
+   Cursor-Befehle auch. Nebeneffekt (Verbesserung, kein Funktionsverlust): die
+   Einzelparameter-Form `ESC[5H` (nur Zeile, keine Spalte) wurde im Original
+   fälschlich wie "kein Parameter" behandelt und sprang immer auf (0,0) —
+   funktioniert jetzt korrekt (Spalte defaultet auf 1).
+2. **Echtes ESC nach `ESC(`/`ESC)` wurde als Zeichensatz-Designator verschluckt**
+   — der `mPendingCharsetChar`-Check lief vor der ESC-Prüfung. Jetzt prüft
+   `slotReceivedChar()` zuerst auf ein neues ESC (das immer Vorrang hat und
+   jeden anderen Zustand abbricht, auch einen offenen `mPendingCharsetChar`),
+   erst danach auf den Designator.
+3. **`ctlParam()` ohne Obergrenze → möglicher Integer-Overflow** — ein
+   `ESC[2147483647C` hätte `pos.x()+n` überlaufen lassen (UB), bevor geklemmt
+   wird. Neue Konstante `MaxCtlParam = 10000` (weit über jeder plausiblen
+   Bildschirmgröße) deckelt jeden geparsten CSI-Zähler-Parameter, bevor er in
+   irgendeine Arithmetik einfließt — behebt das für alle Aufrufer von
+   `ctlParam()` auf einmal (Cursor-Bewegung, Insert/Delete Line/Char, Device
+   Status Report).
+4. **Neue Dateien ohne Copyright-Header** — `komporthexview.*`,
+   `komportmacrobar.*`, `komportsessionlogger.*` haben jetzt denselben
+   Header-Aufbau (`begin`/`copyright`/`email`) wie alle bestehenden Dateien,
+   zugeschrieben an `Harald Stürmer <ironcold@ironcold.de>` (bereits in
+   `AUTHORS` als zweiter Autor neben Mike Sharkey gelistet) für die 2026
+   neu hinzugekommenen Dateien der Qt6-Portierung.
+5. **Helle ANSI-Farben (90–97/100–107) — Scope-Frage** — technisch xterm/aixterm,
+   nicht Teil der VT100/VT102-Doku, die dieser Datei eigentlich zugrunde liegt,
+   und `CLAUDE.md` schließt xterm-Erweiterungen explizit aus. Da der Nutzer
+   selbst "korrektes Handling von Farb-Codes (ANSI)" als vollständig gefordert
+   hatte und die Farben bereits funktionieren, wurde **nicht der Code entfernt**,
+   sondern `CLAUDE.md` um eine explizite, begründete Ausnahme für genau diese
+   beiden Codebereiche ergänzt (keine sonstige xterm-Erweiterung wie 256-Farben
+   o.ä.).
+6. **Hex-Monitor arbeitete auch während er versteckt war** — `KomportHexView::
+   appendByte()` bricht jetzt sofort ab, wenn das Panel nicht sichtbar ist
+   (Default: versteckt). Kein Verlust: der Hex-Monitor ist ein Live-Monitor,
+   kein persistentes Log (dafür gibt's den Session-Logger) — es gibt keinen
+   Rückstand nachzuholen, wenn das Panel später geöffnet wird.
+7. **`putStr()`-Schleife über `putChar()` war ineffizient** — zurückgebaut auf
+   einen einzelnen `QSerialPort::write()`-Aufruf; `sentChar()` (für den
+   Hex-Monitor) wird weiterhin pro tatsächlich geschriebenem Byte emittiert,
+   nur getrennt vom eigentlichen I/O.
+8. **`viewHexMonitor` feuerte beim Start doppelt** — hing an `QAction::toggled`
+   statt `triggered` wie `viewToolBar`/`viewStatusBar`; `readOptions()`s
+   `setChecked()` + expliziter Slot-Aufruf hätte den Slot zweimal ausgelöst.
+   Jetzt konsistent auf `triggered` umgestellt.
+9. **`doInsertLine`/`doDeleteLine` duplizierten `KomportCellArray::copyRow()`**
+   — `copyRow()` war `protected`, jetzt `public` (mit Doku-Kommentar) und wird
+   von beiden Funktionen direkt genutzt statt die Pro-Zelle-Kopierschleife
+   erneut zu schreiben.
+10. **CSI-Parameter-Parsing existierte vierfach** (`ctlParam`, `doGraphics`,
+    `doSetMode`, `doCursorTo`) — auf zwei geteilte Datei-lokale Helfer
+    konsolidiert: `splitCsiParams()` (`;`-getrennte Felder) und
+    `stripPrivatePrefix()` (führendes `?` für private Modi). Alle vier
+    Stellen nutzen jetzt dieselbe Parsing-Logik.

@@ -151,7 +151,12 @@ void KomportApp::initActions()
 
   viewHexMonitor = new QAction( QIcon::fromTheme(QStringLiteral("format-text-code")), tr("&Hex Monitor"), this );
   viewHexMonitor->setCheckable( true );
-  connect( viewHexMonitor, &QAction::toggled, this, &KomportApp::slotViewHexMonitor );
+  // triggered (not toggled), matching viewToolBar/viewStatusBar below: it
+  // only fires on actual user interaction, not on the setChecked() calls
+  // readOptions() makes at startup (which call slotViewHexMonitor()
+  // explicitly anyway) - toggled would fire from both, applying the same
+  // visibility twice.
+  connect( viewHexMonitor, &QAction::triggered, this, &KomportApp::slotViewHexMonitor );
   viewHexMonitor->setStatusTip( tr("Show raw sent/received bytes as a hex dump, next to the terminal") );
 
   recordSession = new QAction( QIcon::fromTheme(QStringLiteral("media-record")), tr("&Record Session..."), this );

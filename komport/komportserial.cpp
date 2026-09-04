@@ -175,12 +175,15 @@ void KomportSerial::putChar(char _ch){
 
 /** transmit a string */
 void KomportSerial::putStr(const char* str){
-  // Loop over putChar() rather than a single write() call, so every byte
-  // also gets a sentChar() signal (used by the hex monitor).
-  if ( str != nullptr ) {
-    for ( const char *p = str; *p != '\0'; ++p ) {
-      putChar(*p);
-    }
+  // A single batched write() rather than looping putChar() per byte - one
+  // syscall/QSerialPort call instead of N. sentChar() (for the hex
+  // monitor) is still emitted once per byte actually written, just not
+  // tangled up with how the bytes got onto the wire.
+  if ( str == nullptr || !isOpen() ) return;
+  const qint64 len = static_cast<qint64>( strlen(str) );
+  const qint64 written = mPort.write( str, len );
+  for ( qint64 i = 0; i < written; ++i ) {
+    emit sentChar( str[i] );
   }
 }
 

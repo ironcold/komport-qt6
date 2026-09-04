@@ -1,10 +1,13 @@
 /***************************************************************************
                           komportsessionlogger.h  -  Komport Serial Port Communicator
                              -------------------
-    New in the Qt6 port (2026): one-click session logging - everything
-    that scrolls across the terminal gets written to a text file, one
-    timestamped line at a time, so an admin can review or hand over a
-    console session afterwards.
+    begin                : 2026 (new in the Qt6 port)
+    copyright            : (C) 2026 by Harald Stürmer
+    email                : ironcold@ironcold.de
+
+    One-click session logging - everything that scrolls across the
+    terminal gets written to a text file, one timestamped line at a time,
+    so an admin can review or hand over a console session afterwards.
  ***************************************************************************/
 
 /***************************************************************************

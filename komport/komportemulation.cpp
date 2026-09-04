@@ -549,6 +549,49 @@ ESC[Ps;...;Psm
 #define ASCII_CR    0x0D
 #define ASCII_ESC   0x1B
 
+namespace {
+
+  // A generous cap, far larger than any plausible terminal screen, applied
+  // to every parsed CSI repeat-count/position parameter. Without it, a
+  // host sending e.g. "ESC[2147483647C" would overflow the signed
+  // pos.x()+n arithmetic in doCursorRight() et al. before the result gets
+  // clamped to the screen bounds (signed overflow is undefined behaviour).
+  // Capping the parsed value itself, long before it reaches any arithmetic,
+  // closes that off regardless of screen size.
+  constexpr int MaxCtlParam = 10000;
+
+  // Split a CSI parameter string (already stripped of any leading "?") on
+  // ';' into its fields. Shared by ctlParam(), doCursorTo(), doGraphics()
+  // and doSetMode(), which used to each duplicate this same loop.
+  QList<QByteArray> splitCsiParams(const QByteArray &_seq)
+  {
+    QList<QByteArray> fields;
+    int index = 0;
+    int sep;
+    do {
+      sep = _seq.indexOf(';', index);
+      if ( sep < 0 ) sep = _seq.length();
+      fields.append( _seq.mid(index, sep-index) );
+      index = sep+1;
+    } while ( sep < _seq.length() );
+    return fields;
+  }
+
+  // Strip a leading "?" (marks a DEC private-mode sequence, e.g. CSI
+  // ?25h), reporting via _isPrivate whether one was present. Shared by
+  // ctlParam() and doSetMode().
+  QByteArray stripPrivatePrefix(const QByteArray &_seq, bool *_isPrivate)
+  {
+    if ( _seq.startsWith('?') ) {
+      if ( _isPrivate ) *_isPrivate = true;
+      return _seq.mid(1);
+    }
+    if ( _isPrivate ) *_isPrivate = false;
+    return _seq;
+  }
+
+} // namespace
+
 KomportEmulation::KomportEmulation(KomportSerial* _serial, KomportCellArray* _cellArray)
 : mSerial(_serial)
 , mCellArray(_cellArray)
@@ -573,16 +616,13 @@ QByteArray KomportEmulation::lineEndingBytes() const {
 
 /** parse mCtlSequence (optionally "?"-prefixed) as a single decimal parameter */
 int KomportEmulation::ctlParam(int _def) const {
-  QByteArray seq = mCtlSequence;
-  if ( seq.startsWith('?') ) seq.remove(0,1);
-  // only look at the first ';'-separated field - good enough for the
-  // single-parameter sequences (cursor movement, insert/delete) that use it
-  int sep = seq.indexOf(';');
-  if ( sep >= 0 ) seq = seq.left(sep);
-  if ( seq.isEmpty() ) return _def;
+  const QByteArray seq = stripPrivatePrefix(mCtlSequence, nullptr);
+  const QList<QByteArray> fields = splitCsiParams(seq);
+  if ( fields.isEmpty() || fields.first().isEmpty() ) return _def;
   bool ok = false;
-  int n = seq.toInt(&ok);
-  return ( ok && n > 0 ) ? n : _def;
+  int n = fields.first().toInt(&ok);
+  if ( !ok || n <= 0 ) return _def;
+  return qMin(n, MaxCtlParam); // see MaxCtlParam above - avoids overflow further downstream
 }
 
 KomportEmulation::~KomportEmulation(){
@@ -632,20 +672,22 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
   }
 }
 
-/** move cursor to x,y */
+/** move cursor to x,y (CSI Pr;PcH / CSI Pr;Pcf), clamped to the grid.
+ *  NOTE: the original only clamped to >= 0, never to the upper bound, so
+ *  "ESC[9999;5H" (or any row/col past the edge) left the cursor sitting
+ *  on an out-of-range cell; the next drawChar()/doClearEOL()/doDeleteChar()
+ *  etc. would then index cell(x,y) out of bounds - cell() returns nullptr
+ *  there, and every one of those callers dereferences it unconditionally.
+ *  Clamping here, like the relative cursor-movement handlers already do,
+ *  closes that off for every command that positions the cursor. */
 void KomportEmulation::doCursorTo()
 {
-  int sep = mCtlSequence.indexOf( ';' );
-  if ( sep >= 0 ) {
-    QByteArray rowStr = mCtlSequence.left( sep );
-    ++sep;
-    QByteArray colStr = mCtlSequence.right( mCtlSequence.length()-sep );
-    int row = rowStr.toInt()-1;
-    int col = colStr.toInt()-1;
-    cellArray()->setCursor(QPoint(col>=0?col:0,row>=0?row:0));
-  } else {
-    cellArray()->setCursor(QPoint(0,0));
-  }  
+  const QList<QByteArray> fields = splitCsiParams(mCtlSequence);
+  int row = ( fields.size() > 0 && !fields.at(0).isEmpty() ) ? fields.at(0).toInt()-1 : 0;
+  int col = ( fields.size() > 1 && !fields.at(1).isEmpty() ) ? fields.at(1).toInt()-1 : 0;
+  row = qBound( 0, row, cellArray()->arrayHeight()-1 );
+  col = qBound( 0, col, cellArray()->arrayWidth()-1 );
+  cellArray()->setCursor(QPoint(col,row));
 }
 
 /** cursor up <n> rows (CSI Pn A), clamped to the top row */
@@ -763,16 +805,8 @@ void KomportEmulation::doRestoreCursor(){
 
 /** do graphics attributes */
 void KomportEmulation::doGraphics(){
-  int index=0;
-  int sep=0;
-  if ( mCtlSequence.isEmpty() )
-    mCtlSequence = "0";
-  do {
-    sep = mCtlSequence.indexOf( ';', index );
-    if ( sep < 0 )
-      sep = mCtlSequence.length();
-    QByteArray attrStr = mCtlSequence.mid( index, sep-index );
-    index = sep+1;
+  const QList<QByteArray> fields = splitCsiParams( mCtlSequence.isEmpty() ? QByteArray("0") : mCtlSequence );
+  for ( const QByteArray &attrStr : fields ) {
     if ( !attrStr.isEmpty() ) {
       int attr = attrStr.toInt();
       switch(attr) {
@@ -888,7 +922,7 @@ void KomportEmulation::doGraphics(){
           break;
       }
     }
-  } while( sep < mCtlSequence.length() );
+  }
 }
 
 /** index: cursor down, scrolling at the bottom margin (ESC D) */
@@ -948,13 +982,11 @@ void KomportEmulation::doReset()
 void KomportEmulation::doInsertLine()
 {
   int n = ctlParam(1);
-  int w = cellArray()->arrayWidth();
   int h = cellArray()->arrayHeight();
   int y = cellArray()->cursor().y();
   if ( n > h-y ) n = h-y;
   for ( int row = h-1; row >= y+n; row-- ) {
-    for ( int x=0; x < w; x++ ) cellArray()->cell(x,row)->copy( cellArray()->cell(x,row-n) );
-    cellArray()->updateRow(row);
+    cellArray()->copyRow(row, row-n);
   }
   for ( int row = y; row < y+n; row++ ) cellArray()->clearRow(row);
 }
@@ -964,13 +996,11 @@ void KomportEmulation::doInsertLine()
 void KomportEmulation::doDeleteLine()
 {
   int n = ctlParam(1);
-  int w = cellArray()->arrayWidth();
   int h = cellArray()->arrayHeight();
   int y = cellArray()->cursor().y();
   if ( n > h-y ) n = h-y;
   for ( int row = y; row < h-n; row++ ) {
-    for ( int x=0; x < w; x++ ) cellArray()->cell(x,row)->copy( cellArray()->cell(x,row+n) );
-    cellArray()->updateRow(row);
+    cellArray()->copyRow(row, row+n);
   }
   for ( int row = h-n; row < h; row++ ) cellArray()->clearRow(row);
 }
@@ -994,30 +1024,23 @@ void KomportEmulation::doDeleteChar()
  *  rather than leaking their sequence onto the screen or crashing. */
 void KomportEmulation::doSetMode(bool _set)
 {
-  bool priv = mCtlSequence.startsWith('?');
-  QByteArray seq = mCtlSequence;
-  if ( priv ) seq.remove(0,1);
+  bool priv = false;
+  const QByteArray seq = stripPrivatePrefix(mCtlSequence, &priv);
+  const QList<QByteArray> fields = splitCsiParams(seq);
 
-  int index = 0;
-  int sep;
-  do {
-    sep = seq.indexOf( ';', index );
-    if ( sep < 0 ) sep = seq.length();
-    QByteArray modeStr = seq.mid( index, sep-index );
-    index = sep+1;
-    if ( !modeStr.isEmpty() ) {
-      int mode = modeStr.toInt();
-      if ( priv ) {
-        switch ( mode ) {
-          case 1:  mApplicationCursorKeys = _set; break;          // DECCKM
-          case 25: cellArray()->setCursorVisible(_set); break;    // DECTCEM
-          default: break; // ?2/?3/?4/?5/?6/?7/?8/... not implemented, ignored safely
-        }
+  for ( const QByteArray &modeStr : fields ) {
+    if ( modeStr.isEmpty() ) continue;
+    int mode = modeStr.toInt();
+    if ( priv ) {
+      switch ( mode ) {
+        case 1:  mApplicationCursorKeys = _set; break;          // DECCKM
+        case 25: cellArray()->setCursorVisible(_set); break;    // DECTCEM
+        default: break; // ?2/?3/?4/?5/?6/?7/?8/... not implemented, ignored safely
       }
-      // non-private modes (2=keyboard lock, 4=insert mode, 12=echo,
-      // 20=CR/LF mapping, ...) are not implemented; ignored safely.
     }
-  } while ( sep < seq.length() );
+    // non-private modes (2=keyboard lock, 4=insert mode, 12=echo,
+    // 20=CR/LF mapping, ...) are not implemented; ignored safely.
+  }
 }
 
 /** device status / cursor position report (CSI Ps n) */
@@ -1158,20 +1181,25 @@ void KomportEmulation::shortEscape(char _ch)
 // received a char */
 void KomportEmulation::slotReceivedChar(char _ch)
 {
+  // handle the terminal control sequence... a fresh ESC always takes
+  // priority and (re)starts sequence recognition - real hosts do send ESC
+  // to abort a sequence, and this must win even over a pending charset
+  // designator below: checking it *after* that check let a genuine ESC
+  // arriving right after "ESC (" / "ESC )" get silently swallowed as if it
+  // were the (bogus) designator byte, instead of starting the new
+  // sequence it actually was.
+  if ( _ch == ASCII_ESC ) {
+    mPendingCharsetChar = false;
+    mSawESC = true;
+    mInCtlSequence = false;
+    mCtlSequence.clear();
+    return;
+  }
+
   // a character-set designator following ESC ( or ESC ) - swallow it, see
   // shortEscape() above.
   if ( mPendingCharsetChar ) {
     mPendingCharsetChar = false;
-    return;
-  }
-
-  // handle the terminal control sequence...
-  if ( _ch == ASCII_ESC ) {
-    // a fresh ESC always (re)starts sequence recognition, even if one was
-    // already in progress - real hosts do send ESC to abort a sequence.
-    mSawESC = true;
-    mInCtlSequence = false;
-    mCtlSequence.clear();
     return;
   }
   if ( mSawESC && !mInCtlSequence ) {

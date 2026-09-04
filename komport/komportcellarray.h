@@ -137,6 +137,10 @@ public:
   void clear(QPoint _p);
   /** clear cell */
   void clear(int _x, int _y);
+  /** copy the contents of row _src onto row _dst (including notifying
+   *  rowChanged(_dst)) - used e.g. by KomportEmulation's insert/delete
+   *  line handling to shift rows without duplicating the per-cell loop. */
+  void copyRow(int _dst, int _src);
 private: // Private attributes
   /** cell list (owning: array deletes the cells it holds) */
   QList<KomportCell*> mCells;
@@ -173,9 +177,6 @@ signals: // Signals
   void cellChanged(QPoint _p);
   /** signal a row has changed */
   void rowChanged(int _row);
-protected: // Protected methods
-  /** copy a row  */
-  void copyRow(int _dst, int _src);
 signals: // Signals
   /** notify anyone who cares that the array has scrolled up by one row */
   void scrolledUp();

@@ -1,5 +1,9 @@
 /***************************************************************************
                           komporthexview.cpp  -  Komport Serial Port Communicator
+                             -------------------
+    begin                : 2026 (new in the Qt6 port)
+    copyright            : (C) 2026 by Harald Stürmer
+    email                : ironcold@ironcold.de
  ***************************************************************************/
 
 /***************************************************************************
@@ -60,6 +64,13 @@ void KomportHexView::appendTx(char _ch){ appendByte(Direction::Tx, _ch); }
 
 void KomportHexView::appendByte(Direction _dir, char _ch)
 {
+  // The panel is hidden by default and often stays that way for a whole
+  // session - don't spend cycles formatting/logging bytes nobody can see.
+  // Nothing is lost by skipping while hidden: this is a live monitor, not
+  // a persistent log (that's what the session logger is for), so there is
+  // no backlog to catch up on once the panel is shown again.
+  if ( !isVisible() ) return;
+
   QByteArray &buf = (_dir == Direction::Rx) ? mRxBuffer : mTxBuffer;
   buf.append(_ch);
   if ( buf.size() >= 16 ) {

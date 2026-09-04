@@ -1,12 +1,16 @@
 /***************************************************************************
                           komporthexview.h  -  Komport Serial Port Communicator
                              -------------------
-    New in the Qt6 port (2026): a toggleable hex monitor. Real serial gear
-    (switches, PLCs, ...) routinely sends control characters (NUL, ETX,
-    stray CR/LF combinations, ...) that a plain text terminal either
-    swallows or lets corrupt the on-screen layout - this makes every byte,
-    printable or not, visible in the classic [offset] [hex] [ascii] form,
-    for both directions (RX from the wire, TX what was actually sent).
+    begin                : 2026 (new in the Qt6 port)
+    copyright            : (C) 2026 by Harald Stürmer
+    email                : ironcold@ironcold.de
+
+    A toggleable hex monitor. Real serial gear (switches, PLCs, ...)
+    routinely sends control characters (NUL, ETX, stray CR/LF
+    combinations, ...) that a plain text terminal either swallows or lets
+    corrupt the on-screen layout - this makes every byte, printable or
+    not, visible in the classic [offset] [hex] [ascii] form, for both
+    directions (RX from the wire, TX what was actually sent).
  ***************************************************************************/
 
 /***************************************************************************

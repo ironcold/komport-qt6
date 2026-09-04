@@ -150,6 +150,14 @@ für die vollständige Liste). Bauen: `cmake -B build && cmake --build build`.
 
 - Keine neue Terminal-Emulation (kein xterm/VT220/256-Farben-Ausbau) — nur VT100/VT102
   wie bisher, nur die Infrastruktur drumherum wird modernisiert.
+  **Explizit vom Nutzer gewünschte Ausnahme:** die hellen ANSI-Farbcodes `90–97`/`100–107`
+  (`komportemulation.cpp`, `doGraphics()`) sind aixterm/xterm-Herkunft, nicht Teil der
+  originalen VT102-Doku im Kopfkommentar dieser Datei — sie wurden bewusst mit
+  aufgenommen, weil der Nutzer explizit "korrektes Handling von Farb-Codes (ANSI)"
+  als vollständig gefordert hat und reale Zielgeräte (Cisco/Juniper-CLIs, eingefärbte
+  `ls`-Ausgaben o.ä.) sie routinemäßig senden. Bewusste, dokumentierte Ausnahme von der
+  VT100/VT102-Beschränkung, keine sonstige xterm-Erweiterung (keine 256-Farben, kein
+  True-Color, kein sonstiger xterm-Funktionsumfang).
 - Keine funktionale Erweiterung des Datei-Transfers (Upload/Download/Script) über das
   bisherige rudimentäre Grundgerüst hinaus.
 - Keine Internationalisierung/`.po`-Pflege über das Nötigste hinaus (die alte
