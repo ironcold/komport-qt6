@@ -985,25 +985,39 @@ abgeschnitten. Die Statusleiste war also nie das Problem; das Video konnte
 nur schlicht den Sekundenbruchteil des defekten *nativen Popups* nicht
 einfangen (1 fps Aufnahme, keine höhere zeitliche Auflösung verfügbar).
 
-### 18.1 Fix: natives Tooltip-Popup für Toolbar-Icons komplett unterdrückt
+### 18.1 Erster Fix (Zwischenstand): natives Popup komplett unterdrückt
 
-`hoverHintLabel` bleibt bestehen (funktioniert und ist strukturell robust,
-schadet nicht) — zusätzlich wird das native Popup für die Toolbar-Buttons
-jetzt vollständig unterdrückt, damit der fehlerhafte Mechanismus gar nicht
-mehr zur Anzeige kommt:
+Erste Version: `QEvent::ToolTip` im Event-Filter einfach abgefangen und
+`true` zurückgegeben — kein natives Popup mehr, nur noch `hoverHintLabel`
+in der Statusleiste. Funktional ein Fix (das kaputte Popup verschwindet
+komplett), aber vom Nutzer zu Recht als bloßer Workaround eingestuft:
+"als schneller Workaround ok, aber Tooltip wäre schöner" — ein
+funktionierendes natives Tooltip ist besser als gar keins.
 
-- In `initToolBar()`: für jede Aktion mit gesetztem `statusTip()` wird
-  zusätzlich zur bestehenden `hovered()`-Verbindung ein Event-Filter auf
-  dem zugehörigen Button-Widget installiert
-  (`mainToolBar->widgetForAction(action)->installEventFilter(this)`).
-- `KomportApp::eventFilter()`: fängt `QEvent::ToolTip` ab und gibt `true`
-  zurück (Event konsumiert, kein natives Popup) — sicher unconditional,
-  da dieser Filter ausschließlich auf `mainToolBar` selbst und dessen
-  Icon-Buttons installiert ist, nirgends sonst.
-- `hoverHintLabel` bleibt die einzige verbleibende Hover-Hinweis-Anzeige
-  für diese Buttons.
+### 18.2 Eigentlicher Fix: natives Tooltip selbst neu zeigen statt nur unterdrücken
 
-### 18.2 Verifikation
+Statt das Popup zu unterdrücken, wird es jetzt **selbst** angezeigt — mit
+einem expliziten `QToolTip::hideText()` direkt vor jedem
+`QToolTip::showText()`, um genau die Ursache zu umgehen (Qt cached sonst
+die Popup-Geometrie des vorherigen Tooltips beim direkten Wechsel
+zwischen zwei benachbarten Widgets und schneidet den neuen, ggf.
+längeren Text dagegen ab). Gleiches Muster wie bereits vorher in
+`KomportMinimapScrollBar::event()` für den Minimap-Hover-Preview
+verwendet (siehe Abschnitt 15) — dort trat das Problem nie auf, weil es
+dort nur ein einzelnes Widget mit eigenem `event()`-Override ist, keine
+Sequenz mehrerer benachbarter Fremd-Widgets mit je eigenem Tooltip.
+
+- `initToolBar()`: jeder Toolbar-Button bekommt jetzt zusätzlich ein
+  echtes `QWidget::setToolTip(action->statusTip())` — denselben,
+  ausführlicheren Text wie `hoverHintLabel`, statt der knappen
+  `action->text()`-Vorbelegung, die es vorher implizit gezeigt hätte.
+- `KomportApp::eventFilter()`: fängt `QEvent::ToolTip` weiterhin ab, ruft
+  jetzt aber `QToolTip::hideText()` gefolgt von
+  `QToolTip::showText(pos, widget->toolTip(), widget)` selbst auf, bevor
+  `true` zurückgegeben wird (Event bleibt konsumiert — Qts eigene,
+  fehlerhafte Popup-Wiederverwendung kommt so nie mehr zum Zug).
+
+### 18.3 Verifikation
 
 - Build mit `-Wall -Wextra`: 0 Warnungen, 0 Fehler (voller Clean-Rebuild).
 - Offscreen-Smoke-Test: startet weiterhin fehlerfrei.
@@ -1011,11 +1025,10 @@ mehr zur Anzeige kommt:
   gegen das Original-Video-Muster verifiziert werden (kein echtes Display,
   und `QEvent::ToolTip`-Timing/Popup-Wiederverwendung ist ohnehin ein
   reines Rendering-/Fensterverwaltungs-Verhalten, das sich nicht sinnvoll
-  automatisiert nachstellen lässt) — dafür ist die Diagnose diesmal deutlich
-  besser durch das tatsächliche Reproduktionsmuster des Nutzers gestützt
-  als die vorherigen zwei Versuche. Bitte erneut auf echter Hardware
-  gegenprüfen; falls das native Popup selbst (nicht die Statusleiste)
-  weiterhin irgendwo auftaucht, ist das ein klares Zeichen, dass die
-  Unterdrückung an der falschen Stelle ansetzt (z.B. weil ein anderes
-  Widget als der `QToolButton` das Popup zeigt) und weiter eingegrenzt
-  werden muss.
+  automatisiert nachstellen lässt). Das explizite `hideText()`-vor-
+  `showText()`-Muster ist aber ein bekannter, in der Qt-Community
+  dokumentierter Workaround genau für diese Geometrie-Wiederverwendung,
+  kein Ratespiel ins Blaue — bitte erneut auf echter Hardware
+  gegenprüfen; sollte es weiterhin auftreten, ist das ein Zeichen, dass
+  das Popup nicht dort ansetzt, wo hier angenommen (z.B. ein anderes
+  Widget als der `QToolButton`), und weiter eingegrenzt werden muss.
