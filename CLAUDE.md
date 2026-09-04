@@ -1,0 +1,139 @@
+# Komport — Modernisierung KDE3/Qt3 → Qt6
+
+## Was ist Komport?
+
+Ein serielles Terminalprogramm (VT100/VT102-ähnliche Emulation) aus 2003, ursprünglich
+für KDE 2/3 geschrieben (Mike Sharkey). Autor der KDE-Portierung: `komport/` enthält
+Doc/View/App-Struktur im klassischen KDevelop-1.2-Stil (KMainWindow + KAction-Menüs +
+Session-Management). Build-System ist reines Autotools (`configure.in`, `Makefile.am`,
+`admin/`) — kein CMake, keine `.pro`-Datei.
+
+Kernfunktionen, die erhalten bleiben müssen:
+- Serielle Verbindung öffnen/konfigurieren (Device, Baudrate, Datenbits, Stopbits,
+  Parität, Flow Control) und Terminal-I/O in Echtzeit.
+- Zeichen-Grid-Darstellung (`KomportCell`/`KomportCellArray`) mit Scrollback
+  (`KomportScrollBuffer`, optional dateibasiert via `KomportFileScrollBuffer`).
+- VT100/VT102-Emulation (`komportemulation.cpp`, ~910 Zeilen — der mit Abstand größte
+  und wertvollste Teil des Codes; Escape-Sequenz-Logik selbst bleibt inhaltlich
+  unverändert, nur die Qt/KDE-Abhängigkeiten drumherum werden ersetzt).
+- Datei-Transfer-Grundgerüst (`KomportTransfer`/`KomportUpload`/`KomportDownload`,
+  `KomportScript`, `KomportQueue`) — aktuell rudimentär, bei der Portierung nicht
+  funktional erweitern, nur lauffähig halten.
+- Settings-Dialog (`settingsdialog.ui`/`.cpp`/`.h`) für Verbindungsparameter.
+
+## Ziel dieser Migration
+
+1. **KDE-Klassen raus, Standard-Qt6-Klassen rein.** Es soll am Ende ein reines Qt6-Programm
+   sein, keine KDE-Frameworks-/KF6-Abhängigkeit mehr.
+2. **Serielles Backend auf `QSerialPort` + `QSerialPortInfo` umstellen**
+   (Qt SerialPort-Modul), als Ersatz für die aktuelle rohe POSIX/`termios`-Implementierung
+   in `komportserial.cpp`.
+3. Funktionsumfang und Bedienung so weit wie sinnvoll erhalten — das ist eine
+   **Technologie-Migration, kein Rewrite der Funktionalität**. UI darf im Zuge dessen
+   modernisiert werden (z.B. Qt Designer `.ui`-Dateien statt handgeschriebener
+   Widget-Aufbau), aber Emulationslogik/Verhalten soll sich nicht ändern.
+
+## Klassen-Mapping (KDE/Qt3 → Qt6)
+
+| Alt (KDE/Qt3)                          | Neu (Qt6)                                          | Betroffene Dateien |
+|-----------------------------------------|----------------------------------------------------|---------------------|
+| `KApplication`, `kapp.h`                | `QApplication`                                      | `main.cpp`, `komport.h/.cpp` |
+| `KCmdLineArgs`, `KCmdLineOptions`       | `QCommandLineParser`/`QCommandLineOption`           | `main.cpp` |
+| `KAboutData`, `I18N_NOOP`               | Direkt in `QApplication`-Setup / ggf. weglassen; `QCoreApplication::translate` für i18n | `main.cpp` |
+| `KMainWindow`                           | `QMainWindow`                                       | `komport.h/.cpp` |
+| `KAction`, `KToggleAction`, `KActionCollection`, `KStdAction` | `QAction`, `QAction::setCheckable(true)` | `komport.h/.cpp` |
+| `KRecentFilesAction`                    | eigene Recent-Files-Logik via `QAction`-Liste + `QSettings` (kein direktes Qt6-Äquivalent) | `komport.h/.cpp` |
+| `KMenuBar`                              | `QMenuBar` (in `QMainWindow` bereits enthalten)     | `komport.cpp` |
+| `KStatusBar`                            | `QStatusBar` (`QMainWindow::statusBar()`)           | `komport.cpp` |
+| `KConfig`                               | `QSettings`                                          | `komport.h/.cpp` |
+| `KMessageBox`                           | `QMessageBox`                                        | `komport.cpp`, `komportdoc.cpp` |
+| `KIconLoader`, KDE-Icon-Theme            | `QIcon` (Ressourcen/Theme-Icons via `QIcon::fromTheme`) | `komport.cpp` |
+| `KProgress`                              | `QProgressBar`/`QProgressDialog`                     | Transfer-Dialoge |
+| `KURL`                                   | `QUrl`                                                | `komportdoc.h/.cpp`, `komport.h/.cpp`, `komporttransfer.h/.cpp`, `settingsdialog.h/.cpp` |
+| `KURLRequester`                          | `QLineEdit` + `QToolButton` mit `QFileDialog::getOpenFileName`, oder eigenes Composite-Widget | `settingsdialog.ui/.h/.cpp` |
+| `kfiledialog.h` (`KFileDialog`)          | `QFileDialog`                                         | `komport.cpp` |
+| `komportui.rc` (KDE XML-UI-Framework)    | Menüs/Toolbars programmatisch in `QMainWindow` oder via Qt Designer `.ui` aufbauen | `komport.cpp`, `komportui.rc` entfällt |
+| `KAccel`                                 | `QShortcut` / `QAction::setShortcut`                  | `komport.h/.cpp` |
+
+## Klassen-Mapping (Qt3 → Qt6, unabhängig von KDE)
+
+| Alt (Qt3)          | Neu (Qt6)                          | Hinweis |
+|---------------------|--------------------------------------|---------|
+| `QCString`          | `QByteArray`                        | v.a. `komportserial.h/.cpp` (Device-Name), `komportemulation.h` |
+| `QPtrList<T>`        | `QList<T>`                          | `komportdoc.h/.cpp`, `komportcellarray.h` |
+| `QSocketNotifier` für serielle Daten | entfällt — `QSerialPort::readyRead()` übernimmt das | `komportserial.cpp` |
+| `local8Bit()`/`QString::local8Bit()` | `toLocal8Bit()` | überall wo verwendet |
+| Altes `SIGNAL()/SLOT()`-Makro | funktioniert weiter in Qt6, aber neue Function-Pointer-Syntax (`connect(a, &A::sig, b, &B::slot)`) bevorzugen bei neu geschriebenem/portiertem Code | v.a. `komport.cpp`, `komportserial.cpp` |
+| `WFlags`             | `Qt::WindowFlags`                    | `settingsdialog.h` |
+| `QT_VERSION`-Constructor-Signatur `(parent, name)` | Qt6-Constructor `(parent, Qt::WindowFlags)`, `name` via `setObjectName()` | überall |
+
+## Serielles Backend — Kernstück der Migration
+
+`komportserial.h/.cpp` macht aktuell:
+- `::open()`/`::close()`/`read()`/`write()` auf `/dev/ttyXX` direkt (POSIX).
+- `termios`-Struct manuell für Baudrate/Framing konfigurieren (`tcgetattr`/`tcsetattr`).
+- `QSocketNotifier` auf dem File-Descriptor für eingehende Daten, dazu ein eigener
+  Ring-Puffer (`KomportQueue`) und ein Timer, der den Puffer per `receivedChar(char)`-Signal
+  leert.
+- Baudraten als eigenes `enum Baud` mit manueller String-Tabelle.
+
+Soll ersetzt werden durch:
+- `QSerialPort` als Member statt rohem `fd`.
+- `QSerialPortInfo::availablePorts()` zur Geräteauswahl (ersetzt fest codierte
+  Device-Comboboxen/-Listen im Settings-Dialog).
+- `QSerialPort::setBaudRate()`, `setDataBits()`, `setStopBits()`, `setParity()`,
+  `setFlowControl()` statt manuellem `termios`.
+- `QSerialPort::readyRead()`-Signal statt `QSocketNotifier` + eigenem Ring-Puffer;
+  `KomportQueue` kann entfallen oder bleibt nur als optionaler Anwendungs-Puffer, falls
+  Flush-Rate-Verhalten (`setFlushRate`) bewusst beibehalten werden soll.
+- Fehlerbehandlung über `QSerialPort::errorOccurred()` statt `errno`/`perror`.
+- Die öffentliche Signal-/Slot-Schnittstelle nach außen (`receivedChar`, `settingsChanged`,
+  `settingsFailed`, `putChar`/`putStr`) so weit wie möglich beibehalten, damit
+  `KomportView`/`KomportEmulation` nicht mehr als nötig angefasst werden müssen — intern
+  aber komplett auf `QSerialPort` umstellen.
+
+## Architektur-Überblick (bleibt strukturell erhalten)
+
+- `KomportApp` (`komport.h/.cpp`) — Hauptfenster, Menüs/Toolbar/Statusbar, Dateiverwaltung.
+- `KomportDoc` (`komportdoc.h/.cpp`) — hält `KomportSerial`-Instanz, Document-View-Pattern
+  (aus KDevelop-Boilerplate; für ein Terminal eigentlich zu schwergewichtig, aber wird
+  strukturell übernommen statt neu designt).
+- `KomportView` (`komportview.h/.cpp`) — Zeichen-Grid-Widget, Zeichnen, Maus-/Tastatur-Events,
+  Auswahl/Zwischenablage, hält `KomportCellArray`, `KomportScrollBuffer`, `KomportEmulation`.
+- `KomportEmulation` (`komportemulation.h/.cpp`) — VT100/VT102-Escape-Sequenz-Interpreter.
+  **Größtes und wichtigstes Modul — Verhalten hier nicht "nebenbei" ändern.**
+- `KomportCell`/`KomportCellArray` — Zeichen-Zellen-Modell des sichtbaren Bildschirms.
+- `KomportScrollBuffer`/`KomportFileScrollBuffer` — Scrollback (Speicher bzw. Datei).
+- `KomportSerial` (`komportserial.h/.cpp`) — **wird auf `QSerialPort` umgestellt** (s.o.).
+- `KomportQueue` — einfacher Ringpuffer, evtl. nach der Serial-Migration überflüssig.
+- `KomportTransfer`/`KomportUpload`/`KomportDownload`/`KomportScript` — Datei-Transfer-Grundgerüst.
+- `SettingsDialog` (`settingsdialog.ui/.h/.cpp`) — Verbindungseinstellungen; UI-Datei ist
+  Qt3-Designer-Format, muss für Qt6 neu erzeugt/gepflegt werden (Qt Designer/`uic` von Qt6).
+
+## Build-System
+
+Aktuell: klassisches Autotools-Setup (`configure.in`, `acinclude.m4`, `admin/*`,
+generiert im KDevelop-1.2-Stil, KDE-2/3-typisch). Das passt nicht zu einer reinen
+Qt6-Anwendung. **Migration auf CMake** (Standard für moderne Qt6-Projekte, mit
+`find_package(Qt6 COMPONENTS Widgets SerialPort REQUIRED)`) ist Teil dieser Aufgabe,
+auch wenn nicht explizit zuerst genannt — ohne das lässt sich das Ergebnis nicht sinnvoll
+bauen/testen. Alte `admin/`-Verzeichnis, `Makefile.am`/`.in`, `configure*`,
+`acinclude.m4`, `stamp-h.in` können nach erfolgreicher CMake-Umstellung entfernt werden.
+
+## Was NICHT im Scope ist (sofern nicht anders vom Nutzer gewünscht)
+
+- Keine neue Terminal-Emulation (kein xterm/VT220/256-Farben-Ausbau) — nur VT100/VT102
+  wie bisher, nur die Infrastruktur drumherum wird modernisiert.
+- Keine funktionale Erweiterung des Datei-Transfers (Upload/Download/Script) über das
+  bisherige rudimentäre Grundgerüst hinaus.
+- Keine Internationalisierung/`.po`-Pflege über das Nötigste hinaus (die alte
+  `I18N_NOOP`/KDE-i18n-Kette entfällt, `po/` kann ggf. auf Qt-`.ts`/`lupdate` umgestellt
+  werden, ist aber nicht Kernziel).
+
+## Sonstiges
+
+- Lizenz: GPL (siehe `COPYING`), Original-Autor Mike Sharkey — bei Umbenennungen/neuen
+  Dateien Copyright-Header-Konvention der bestehenden Dateien beibehalten bzw. sinnvoll
+  ergänzen (nicht den ursprünglichen Autor entfernen).
+- `komport.desktop`, Icons (`lo16-app-komport.png`, `lo32-app-komport.png`) bleiben
+  nutzbar, ggf. Pfade/Kategorien im `.desktop`-File an Nicht-KDE-Umgebungen anpassen.

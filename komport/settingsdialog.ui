@@ -1,0 +1,1004 @@
+<!DOCTYPE UI><UI version="3.1" stdsetdef="1">
+<class>SettingsDialog</class>
+<comment>Serial port settings form</comment>
+<author>Mike Sharkey &lt;michael@sharkey.servebeer.com&gt;</author>
+<widget class="QDialog">
+    <property name="name">
+        <cstring>SettingsDialog</cstring>
+    </property>
+    <property name="geometry">
+        <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>608</width>
+            <height>345</height>
+        </rect>
+    </property>
+    <property name="caption">
+        <string>Settings</string>
+    </property>
+    <property name="sizeGripEnabled">
+        <bool>true</bool>
+    </property>
+    <grid>
+        <property name="name">
+            <cstring>unnamed</cstring>
+        </property>
+        <property name="margin">
+            <number>11</number>
+        </property>
+        <property name="spacing">
+            <number>6</number>
+        </property>
+        <widget class="QTabWidget" row="0" column="1">
+            <property name="name">
+                <cstring>tabWidget</cstring>
+            </property>
+            <widget class="QWidget">
+                <property name="name">
+                    <cstring>Widget2</cstring>
+                </property>
+                <attribute name="title">
+                    <string>Device</string>
+                </attribute>
+                <widget class="QLabel">
+                    <property name="name">
+                        <cstring>BaudRateLabel</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>0</x>
+                            <y>60</y>
+                            <width>80</width>
+                            <height>20</height>
+                        </rect>
+                    </property>
+                    <property name="text">
+                        <string>Baud Rate:</string>
+                    </property>
+                    <property name="alignment">
+                        <set>AlignVCenter|AlignRight</set>
+                    </property>
+                </widget>
+                <widget class="QLabel">
+                    <property name="name">
+                        <cstring>textLabel1</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>30</x>
+                            <y>20</y>
+                            <width>50</width>
+                            <height>20</height>
+                        </rect>
+                    </property>
+                    <property name="text">
+                        <string>Device:</string>
+                    </property>
+                    <property name="alignment">
+                        <set>AlignVCenter|AlignRight</set>
+                    </property>
+                </widget>
+                <widget class="QComboBox">
+                    <item>
+                        <property name="text">
+                            <string>50</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>75</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>110</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>134</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>150</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>300</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>600</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>1200</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>1800</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>2400</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>4800</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>9600</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>19200</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>38400</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>57600</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>115200</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>230400</string>
+                        </property>
+                    </item>
+                    <property name="name">
+                        <cstring>BaudRateComboBox</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>90</x>
+                            <y>60</y>
+                            <width>170</width>
+                            <height>30</height>
+                        </rect>
+                    </property>
+                    <property name="currentItem">
+                        <number>11</number>
+                    </property>
+                    <property name="toolTip" stdset="0">
+                        <string>Baud Rate (bps)</string>
+                    </property>
+                </widget>
+                <widget class="QComboBox">
+                    <item>
+                        <property name="text">
+                            <string>/dev/ttyS0</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>/dev/ttyS1</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>/dev/ttyS2</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>/dev/ttyS3</string>
+                        </property>
+                    </item>
+                    <property name="name">
+                        <cstring>DeviceComboBox</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>90</x>
+                            <y>20</y>
+                            <width>170</width>
+                            <height>30</height>
+                        </rect>
+                    </property>
+                    <property name="editable">
+                        <bool>true</bool>
+                    </property>
+                    <property name="toolTip" stdset="0">
+                        <string>Device special file name</string>
+                    </property>
+                </widget>
+                <widget class="QGroupBox">
+                    <property name="name">
+                        <cstring>RXQueueGroupBox</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>270</x>
+                            <y>110</y>
+                            <width>270</width>
+                            <height>120</height>
+                        </rect>
+                    </property>
+                    <property name="title">
+                        <string>RX Queue</string>
+                    </property>
+                    <widget class="QSpinBox">
+                        <property name="name">
+                            <cstring>RxQueueSpinBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>100</x>
+                                <y>30</y>
+                                <width>70</width>
+                                <height>30</height>
+                            </rect>
+                        </property>
+                        <property name="maxValue">
+                            <number>32768</number>
+                        </property>
+                        <property name="minValue">
+                            <number>1024</number>
+                        </property>
+                        <property name="lineStep">
+                            <number>1024</number>
+                        </property>
+                    </widget>
+                    <widget class="QSpinBox">
+                        <property name="name">
+                            <cstring>FlushRateSpinBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>100</x>
+                                <y>70</y>
+                                <width>70</width>
+                                <height>30</height>
+                            </rect>
+                        </property>
+                        <property name="maxValue">
+                            <number>4096</number>
+                        </property>
+                        <property name="lineStep">
+                            <number>16</number>
+                        </property>
+                        <property name="value">
+                            <number>256</number>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel2</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>180</x>
+                                <y>30</y>
+                                <width>52</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>bytes</string>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel1_2</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>40</x>
+                                <y>30</y>
+                                <width>52</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Size:</string>
+                        </property>
+                        <property name="alignment">
+                            <set>AlignVCenter|AlignRight</set>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel1_3</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>10</x>
+                                <y>70</y>
+                                <width>80</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Flush Interval:</string>
+                        </property>
+                        <property name="alignment">
+                            <set>AlignVCenter|AlignRight</set>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel2_2</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>180</x>
+                                <y>70</y>
+                                <width>78</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>milliseconds</string>
+                        </property>
+                    </widget>
+                </widget>
+                <widget class="QComboBox">
+                    <item>
+                        <property name="text">
+                            <string>XON/XOFF</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>RTS/CTS</string>
+                        </property>
+                    </item>
+                    <item>
+                        <property name="text">
+                            <string>NONE</string>
+                        </property>
+                    </item>
+                    <property name="name">
+                        <cstring>FlowControlComboBox</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>380</x>
+                            <y>20</y>
+                            <width>130</width>
+                            <height>30</height>
+                        </rect>
+                    </property>
+                    <property name="currentItem">
+                        <number>2</number>
+                    </property>
+                </widget>
+                <widget class="QGroupBox">
+                    <property name="name">
+                        <cstring>groupBox4</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>40</x>
+                            <y>100</y>
+                            <width>190</width>
+                            <height>150</height>
+                        </rect>
+                    </property>
+                    <property name="title">
+                        <string>Framing</string>
+                    </property>
+                    <widget class="QComboBox">
+                        <item>
+                            <property name="text">
+                                <string>1</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>2</string>
+                            </property>
+                        </item>
+                        <property name="name">
+                            <cstring>StartBitsComboBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>100</x>
+                                <y>20</y>
+                                <width>70</width>
+                                <height>26</height>
+                            </rect>
+                        </property>
+                    </widget>
+                    <widget class="QComboBox">
+                        <item>
+                            <property name="text">
+                                <string>5</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>6</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>7</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>8</string>
+                            </property>
+                        </item>
+                        <property name="name">
+                            <cstring>DataBitsComboBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>100</x>
+                                <y>50</y>
+                                <width>70</width>
+                                <height>26</height>
+                            </rect>
+                        </property>
+                        <property name="currentItem">
+                            <number>3</number>
+                        </property>
+                    </widget>
+                    <widget class="QComboBox">
+                        <item>
+                            <property name="text">
+                                <string>1</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>1.5</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>2</string>
+                            </property>
+                        </item>
+                        <property name="name">
+                            <cstring>StopBitsComboBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>100</x>
+                                <y>80</y>
+                                <width>70</width>
+                                <height>26</height>
+                            </rect>
+                        </property>
+                    </widget>
+                    <widget class="QComboBox">
+                        <item>
+                            <property name="text">
+                                <string>NONE</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>EVEN</string>
+                            </property>
+                        </item>
+                        <item>
+                            <property name="text">
+                                <string>ODD</string>
+                            </property>
+                        </item>
+                        <property name="name">
+                            <cstring>ParityComboBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>70</x>
+                                <y>110</y>
+                                <width>100</width>
+                                <height>26</height>
+                            </rect>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel3</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>12</x>
+                                <y>80</y>
+                                <width>70</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Stop bits:</string>
+                        </property>
+                        <property name="alignment">
+                            <set>AlignVCenter|AlignRight</set>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel2_3</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>12</x>
+                                <y>50</y>
+                                <width>70</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Data bits:</string>
+                        </property>
+                        <property name="alignment">
+                            <set>AlignVCenter|AlignRight</set>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel1_4</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>10</x>
+                                <y>20</y>
+                                <width>70</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Start bits:</string>
+                        </property>
+                        <property name="alignment">
+                            <set>AlignVCenter|AlignRight</set>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLabel4_2</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>10</x>
+                                <y>110</y>
+                                <width>50</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Parity:</string>
+                        </property>
+                        <property name="alignment">
+                            <set>AlignVCenter|AlignRight</set>
+                        </property>
+                    </widget>
+                </widget>
+                <widget class="QLabel">
+                    <property name="name">
+                        <cstring>textLabel4</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>280</x>
+                            <y>20</y>
+                            <width>90</width>
+                            <height>20</height>
+                        </rect>
+                    </property>
+                    <property name="text">
+                        <string>Flow Control:</string>
+                    </property>
+                    <property name="alignment">
+                        <set>AlignVCenter|AlignRight</set>
+                    </property>
+                </widget>
+            </widget>
+            <widget class="QWidget">
+                <property name="name">
+                    <cstring>Widget3</cstring>
+                </property>
+                <attribute name="title">
+                    <string>Terminal</string>
+                </attribute>
+                <widget class="QButtonGroup">
+                    <property name="name">
+                        <cstring>buttonGroup1</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>240</x>
+                            <y>10</y>
+                            <width>320</width>
+                            <height>170</height>
+                        </rect>
+                    </property>
+                    <property name="title">
+                        <string>History Buffer</string>
+                    </property>
+                    <widget class="KURLRequester">
+                        <property name="name">
+                            <cstring>FileBufferURLRequeste</cstring>
+                        </property>
+                        <property name="enabled">
+                            <bool>false</bool>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>40</x>
+                                <y>130</y>
+                                <width>240</width>
+                                <height>28</height>
+                            </rect>
+                        </property>
+                    </widget>
+                    <widget class="QRadioButton">
+                        <property name="name">
+                            <cstring>FileBufferRadioButton</cstring>
+                        </property>
+                        <property name="enabled">
+                            <bool>true</bool>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>20</x>
+                                <y>90</y>
+                                <width>87</width>
+                                <height>16</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>File buffer</string>
+                        </property>
+                    </widget>
+                    <widget class="Line">
+                        <property name="name">
+                            <cstring>line1</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>10</x>
+                                <y>70</y>
+                                <width>300</width>
+                                <height>16</height>
+                            </rect>
+                        </property>
+                        <property name="frameShape">
+                            <enum>HLine</enum>
+                        </property>
+                        <property name="frameShadow">
+                            <enum>Sunken</enum>
+                        </property>
+                        <property name="orientation">
+                            <enum>Horizontal</enum>
+                        </property>
+                    </widget>
+                    <widget class="QRadioButton">
+                        <property name="name">
+                            <cstring>MemoryBufferRadioButton</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>20</x>
+                                <y>30</y>
+                                <width>120</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Memory buffer</string>
+                        </property>
+                        <property name="checked">
+                            <bool>true</bool>
+                        </property>
+                    </widget>
+                    <widget class="QSpinBox">
+                        <property name="name">
+                            <cstring>ScrollBufferSpinBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>140</x>
+                                <y>30</y>
+                                <width>80</width>
+                                <height>30</height>
+                            </rect>
+                        </property>
+                        <property name="maxValue">
+                            <number>4096</number>
+                        </property>
+                        <property name="minValue">
+                            <number>0</number>
+                        </property>
+                        <property name="lineStep">
+                            <number>256</number>
+                        </property>
+                        <property name="value">
+                            <number>1024</number>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLines1</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>230</x>
+                                <y>30</y>
+                                <width>70</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>lines max.</string>
+                        </property>
+                    </widget>
+                    <widget class="QLabel">
+                        <property name="name">
+                            <cstring>textLines2</cstring>
+                        </property>
+                        <property name="enabled">
+                            <bool>false</bool>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>230</x>
+                                <y>90</y>
+                                <width>70</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>lines max.</string>
+                        </property>
+                    </widget>
+                    <widget class="QSpinBox">
+                        <property name="name">
+                            <cstring>FileBufferSizeSpinBox</cstring>
+                        </property>
+                        <property name="enabled">
+                            <bool>false</bool>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>140</x>
+                                <y>90</y>
+                                <width>80</width>
+                                <height>30</height>
+                            </rect>
+                        </property>
+                        <property name="maxValue">
+                            <number>102400</number>
+                        </property>
+                        <property name="minValue">
+                            <number>1024</number>
+                        </property>
+                        <property name="lineStep">
+                            <number>1024</number>
+                        </property>
+                        <property name="value">
+                            <number>4096</number>
+                        </property>
+                    </widget>
+                </widget>
+                <widget class="QGroupBox">
+                    <property name="name">
+                        <cstring>groupBox3</cstring>
+                    </property>
+                    <property name="geometry">
+                        <rect>
+                            <x>20</x>
+                            <y>10</y>
+                            <width>210</width>
+                            <height>170</height>
+                        </rect>
+                    </property>
+                    <property name="title">
+                        <string>Emulation</string>
+                    </property>
+                    <widget class="QComboBox">
+                        <item>
+                            <property name="text">
+                                <string>VT102</string>
+                            </property>
+                        </item>
+                        <property name="name">
+                            <cstring>EmulationComboBox</cstring>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>30</x>
+                                <y>30</y>
+                                <width>140</width>
+                                <height>30</height>
+                            </rect>
+                        </property>
+                    </widget>
+                    <widget class="QCheckBox">
+                        <property name="name">
+                            <cstring>VisualBellCheckBox</cstring>
+                        </property>
+                        <property name="enabled">
+                            <bool>true</bool>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>30</x>
+                                <y>80</y>
+                                <width>100</width>
+                                <height>20</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Visual Bell</string>
+                        </property>
+                    </widget>
+                    <widget class="QCheckBox">
+                        <property name="name">
+                            <cstring>LocalEchoCheckBox</cstring>
+                        </property>
+                        <property name="enabled">
+                            <bool>true</bool>
+                        </property>
+                        <property name="geometry">
+                            <rect>
+                                <x>30</x>
+                                <y>120</y>
+                                <width>100</width>
+                                <height>21</height>
+                            </rect>
+                        </property>
+                        <property name="text">
+                            <string>Local Echo</string>
+                        </property>
+                    </widget>
+                </widget>
+            </widget>
+        </widget>
+        <widget class="QLayoutWidget" row="1" column="0" rowspan="1" colspan="2">
+            <property name="name">
+                <cstring>Layout1</cstring>
+            </property>
+            <hbox>
+                <property name="name">
+                    <cstring>unnamed</cstring>
+                </property>
+                <property name="margin">
+                    <number>0</number>
+                </property>
+                <property name="spacing">
+                    <number>6</number>
+                </property>
+                <widget class="QPushButton">
+                    <property name="name">
+                        <cstring>buttonHelp</cstring>
+                    </property>
+                    <property name="text">
+                        <string>&amp;Help</string>
+                    </property>
+                    <property name="accel">
+                        <string>F1</string>
+                    </property>
+                    <property name="autoDefault">
+                        <bool>true</bool>
+                    </property>
+                </widget>
+                <spacer>
+                    <property name="name">
+                        <cstring>Horizontal Spacing2</cstring>
+                    </property>
+                    <property name="orientation">
+                        <enum>Horizontal</enum>
+                    </property>
+                    <property name="sizeType">
+                        <enum>Expanding</enum>
+                    </property>
+                    <property name="sizeHint">
+                        <size>
+                            <width>20</width>
+                            <height>20</height>
+                        </size>
+                    </property>
+                </spacer>
+                <widget class="QPushButton">
+                    <property name="name">
+                        <cstring>buttonOk</cstring>
+                    </property>
+                    <property name="text">
+                        <string>&amp;OK</string>
+                    </property>
+                    <property name="accel">
+                        <string></string>
+                    </property>
+                    <property name="autoDefault">
+                        <bool>true</bool>
+                    </property>
+                    <property name="default">
+                        <bool>true</bool>
+                    </property>
+                </widget>
+                <widget class="QPushButton">
+                    <property name="name">
+                        <cstring>buttonCancel</cstring>
+                    </property>
+                    <property name="text">
+                        <string>&amp;Cancel</string>
+                    </property>
+                    <property name="accel">
+                        <string></string>
+                    </property>
+                    <property name="autoDefault">
+                        <bool>true</bool>
+                    </property>
+                </widget>
+            </hbox>
+        </widget>
+    </grid>
+</widget>
+<connections>
+    <connection>
+        <sender>buttonOk</sender>
+        <signal>clicked()</signal>
+        <receiver>SettingsDialog</receiver>
+        <slot>accept()</slot>
+    </connection>
+    <connection>
+        <sender>buttonCancel</sender>
+        <signal>clicked()</signal>
+        <receiver>SettingsDialog</receiver>
+        <slot>reject()</slot>
+    </connection>
+    <connection>
+        <sender>FileBufferRadioButton</sender>
+        <signal>toggled(bool)</signal>
+        <receiver>FileBufferSizeSpinBox</receiver>
+        <slot>setEnabled(bool)</slot>
+    </connection>
+    <connection>
+        <sender>FileBufferRadioButton</sender>
+        <signal>toggled(bool)</signal>
+        <receiver>FileBufferURLRequeste</receiver>
+        <slot>setEnabled(bool)</slot>
+    </connection>
+    <connection>
+        <sender>MemoryBufferRadioButton</sender>
+        <signal>toggled(bool)</signal>
+        <receiver>ScrollBufferSpinBox</receiver>
+        <slot>setEnabled(bool)</slot>
+    </connection>
+    <connection>
+        <sender>MemoryBufferRadioButton</sender>
+        <signal>toggled(bool)</signal>
+        <receiver>textLines1</receiver>
+        <slot>setEnabled(bool)</slot>
+    </connection>
+    <connection>
+        <sender>FileBufferRadioButton</sender>
+        <signal>toggled(bool)</signal>
+        <receiver>textLines2</receiver>
+        <slot>setEnabled(bool)</slot>
+    </connection>
+</connections>
+<layoutdefaults spacing="6" margin="11"/>
+<includehints>
+    <includehint>kurlrequester.h</includehint>
+    <includehint>klineedit.h</includehint>
+    <includehint>kpushbutton.h</includehint>
+</includehints>
+</UI>
