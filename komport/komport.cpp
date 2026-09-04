@@ -28,6 +28,7 @@
 #include <QMenu>
 #include <QToolBar>
 #include <QStatusBar>
+#include <QLayout>
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -264,6 +265,23 @@ void KomportApp::initToolBar()
                                    "some gear only understands a bare CR, Unix hosts usually expect LF.") );
   connect( lineEndingCombo, &QComboBox::currentTextChanged, this, &KomportApp::slotLineEndingChanged );
   mainToolBar->addWidget( lineEndingCombo );
+
+  // Force an immediate status-bar relayout on every toolbar-icon hover.
+  // Qt already shows each action's statusTip() in the status bar
+  // automatically on hover, but QLayout::updateGeometry() only *posts* a
+  // deferred QEvent::LayoutRequest rather than relaying out synchronously.
+  // That's invisible for an isolated hover (there's time for it to catch
+  // up before the next paint), but sweeping the mouse across two adjacent
+  // toolbar icons can outrun it: the new message paints against the
+  // still-stale, narrower geometry left over from the previous one and
+  // gets visually clipped - the icon-to-icon truncation this works around.
+  for ( QAction *action : mainToolBar->actions() ) {
+    if ( action->statusTip().isEmpty() ) continue;
+    connect( action, &QAction::hovered, this, [this, action]{
+      statusBar()->showMessage( action->statusTip() );
+      if ( statusBar()->layout() ) statusBar()->layout()->activate();
+    } );
+  }
 }
 
 void KomportApp::initStatusBar()
