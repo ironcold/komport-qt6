@@ -1,4 +1,4 @@
-Building Komport (Qt6)
+Building Komport-Qt6
 =======================
 
 Requirements
@@ -13,7 +13,7 @@ Build
     cmake -B build -S .
     cmake --build build -j$(nproc)
 
-The resulting binary is build/komport.
+The resulting binary is build/komport-qt6.
 
 Install (optional)
 -------------------

@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(komport
-  VERSION 0.4.6
-  DESCRIPTION "Komport - serial port communicator and terminal emulator"
+# Komport-Qt6: a maintained Qt6/QSerialPort fork of the original KDE3/Qt3
+# "Komport" serial terminal (Mike Sharkey, 2003), whose upstream project is
+# no longer maintained. Versioning starts fresh at 1.0.0 here rather than
+# continuing the inherited 0.4.6 - see CLAUDE.md/TODO.md for the full
+# migration history.
+project(komport-qt6
+  VERSION 1.0.0
+  DESCRIPTION "Komport-Qt6 - serial port communicator and terminal emulator"
   LANGUAGES CXX
 )
 
@@ -17,7 +22,7 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets PrintSupport SerialPort)
 
 qt_standard_project_setup()
 
-add_executable(komport
+add_executable(komport-qt6
   komport/main.cpp
   komport/komport.cpp
   komport/komport.h
@@ -56,25 +61,25 @@ add_executable(komport
   komport/komport.qrc
 )
 
-target_include_directories(komport PRIVATE komport)
+target_include_directories(komport-qt6 PRIVATE komport)
 
-target_compile_definitions(komport PRIVATE
+target_compile_definitions(komport-qt6 PRIVATE
   KOMPORT_VERSION="${PROJECT_VERSION}"
 )
 
-target_link_libraries(komport PRIVATE
+target_link_libraries(komport-qt6 PRIVATE
   Qt6::Widgets
   Qt6::PrintSupport
   Qt6::SerialPort
 )
 
-install(TARGETS komport RUNTIME DESTINATION bin)
+install(TARGETS komport-qt6 RUNTIME DESTINATION bin)
 install(FILES komport/komport.desktop DESTINATION share/applications)
 install(FILES komport/lo32-app-komport.png
   DESTINATION share/icons/hicolor/32x32/apps
-  RENAME komport.png
+  RENAME komport-qt6.png
 )
 install(FILES komport/lo16-app-komport.png
   DESTINATION share/icons/hicolor/16x16/apps
-  RENAME komport.png
+  RENAME komport-qt6.png
 )

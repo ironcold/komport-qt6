@@ -1,15 +1,28 @@
-# Komport — Modernisierung KDE3/Qt3 → Qt6
+# Komport-Qt6 — Modernisierung KDE3/Qt3 → Qt6
+
+> **Projekt umbenannt:** Das Original-Projekt "Komport" (Mike Sharkey, KDE 2/3,
+> zuletzt 2003 aktiv) wird upstream nicht mehr gepflegt. Dieser Qt6-Fork läuft
+> deshalb eigenständig als **Komport-Qt6** weiter — Verzeichnis
+> (`~/Entwicklung/komport-qt6`), CMake-Projekt-/Binary-Name (`komport-qt6`),
+> `.desktop`-Anzeigename ("Komport Qt6") und Versionszählung (neu bei `1.0.0`,
+> statt der von KDE3 geerbten `0.4.6`) sind entsprechend angepasst. Ältere
+> Einträge in `TODO.md` sprechen noch von `./build/komport` — das war zum
+> jeweiligen Zeitpunkt der tatsächliche Binary-Name und wird als historisches
+> Protokoll nicht nachträglich umgeschrieben. Die Quelldateien in `komport/`
+> behalten ihre Dateinamen und den Datei-Header-Titel "Komport Serial Port
+> Communicator" als Verweis auf ihren Ursprung.
 
 > **Status:** Die Portierung ist durchgeführt und baut sauber mit CMake/Qt6
 > (`cmake -B build && cmake --build build`, auch mit `-Wall -Wextra` ohne Warnungen).
 > Dazu gekommen sind vier Admin-Tool-Features: ein zuschaltbarer Hex-Monitor
 > (RX/TX, Split-Screen), eine deutlich vollständigere VT100/VT102-Emulation
 > (Cursor-Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports,
-> erweiterte SGR-Farben — plus ein gefundener Absturz-Bug bei Cursor-Clamping),
-> programmierbare Makro-Buttons, Ein-Klick-Session-Logging und eine
-> Zeilenende-Auswahl (CR/LF/CRLF) für Enter-Taste und Makros. Details, was dabei
-> gemacht/entschieden wurde, stehen in `TODO.md`. Dieses Dokument bleibt als
-> Ziel-/Architektur-Referenz für künftige Änderungen bestehen.
+> erweiterte SGR-Farben — plus zwei per Code-Review gefundene und gefixte
+> Absturz-Bugs bei Cursor-Clamping), programmierbare Makro-Buttons,
+> Ein-Klick-Session-Logging und eine Zeilenende-Auswahl (CR/LF/CRLF) für
+> Enter-Taste und Makros. Details, was dabei gemacht/entschieden wurde, stehen
+> in `TODO.md`. Dieses Dokument bleibt als Ziel-/Architektur-Referenz für
+> künftige Änderungen bestehen.
 
 ## Was ist Komport?
 

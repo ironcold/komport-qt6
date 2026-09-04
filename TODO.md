@@ -378,3 +378,42 @@ Regressionstests für die beiden Absturz-/Logikfixes unten).
     konsolidiert: `splitCsiParams()` (`;`-getrennte Felder) und
     `stripPrivatePrefix()` (führendes `?` für private Modi). Alle vier
     Stellen nutzen jetzt dieselbe Parsing-Logik.
+
+## 10. Projekt umbenannt auf Komport-Qt6
+
+Das Original-Projekt "Komport" ist upstream tot (letzte Aktivität von Mike
+Sharkey 2003). Auf Wunsch des Nutzers läuft der Qt6-Fork jetzt eigenständig
+als **Komport-Qt6** weiter:
+
+- [x] Verzeichnis umbenannt: `~/Entwicklung/komport-0.4.6` → `~/Entwicklung/komport-qt6`.
+- [x] `CMakeLists.txt`: `project(komport-qt6 VERSION 1.0.0 ...)` (statt
+      `komport`/`0.4.6`), `add_executable(komport-qt6 ...)`, `install()`-Regeln
+      und Icon-`RENAME`-Ziele entsprechend angepasst.
+- [x] `komport/komport.desktop`: `Exec=komport-qt6 %f`, `Icon=komport-qt6`,
+      `Name=Komport Qt6`.
+- [x] `main.cpp`: `QCoreApplication`-Organisation/App-Name auf `Komport-Qt6`
+      (wirkt sich auf den `QSettings`-Speicherort aus — bestehende
+      `~/.config/Komport/Komport.conf`-Einstellungen aus Testläufen unter dem
+      alten Namen werden dadurch nicht automatisch übernommen, das ist so
+      gewollt bei einer Neuidentität).
+- [x] `komport.doxygen`: `PROJECT_NAME`/`PROJECT_NUMBER`/`OUTPUT_DIRECTORY`
+      aktualisiert (Letzteres zeigte noch auf einen Pfad auf Mike Sharkeys
+      altem Rechner).
+- [x] `komport.lsm` entfernt — das alte "Linux Software Map"-Format wird von
+      keiner heutigen Distribution mehr genutzt, reine tote Metadaten.
+- [x] `README` (war leer) neu geschrieben: Projektbeschreibung, Feature-Liste,
+      Verweis auf `CLAUDE.md`/`TODO.md`/`INSTALL`, Lizenz-/Autoren-Hinweis.
+- [x] `INSTALL`: Binary-Name in der Kurzanleitung aktualisiert.
+- [x] `CLAUDE.md`: neue Status-Notiz oben, erklärt die Umbenennung und warum
+      ältere `TODO.md`-Einträge noch `komport` als Binary-Namen nennen
+      (historisches Protokoll, nicht rückwirkend umgeschrieben).
+- **Bewusst NICHT umbenannt:** die Quelldateien in `komport/` (Dateinamen wie
+  `komport.cpp`, `komportview.h`, ...) und deren Datei-Header-Titel "Komport
+  Serial Port Communicator" — das sind Verweise auf den historischen Ursprung
+  des Codes, kein Produktname. Die Git-Historie (4 Commits, Baseline +
+  3 Arbeits-Commits, alle bereits mit `Co-Authored-By: Claude Sonnet 5`
+  versehen, siehe Commit-Messages) bleibt unverändert bestehen, wie vom Nutzer
+  gewünscht — ab jetzt wird nur regelmäßiger/kleinteiliger committet.
+- [x] `cmake --build build` nach der Umbenennung neu verifiziert: sauber mit
+      `-Wall -Wextra` (0 Warnungen), Binary heißt jetzt `build/komport-qt6`,
+      Offscreen-Smoke-Test läuft weiterhin fehlerfrei.

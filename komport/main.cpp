@@ -27,13 +27,13 @@ int main(int argc, char *argv[])
 {
   QApplication app(argc, argv);
 
-  QCoreApplication::setOrganizationName( QStringLiteral("Komport") );
-  QCoreApplication::setApplicationName( QStringLiteral("Komport") );
+  QCoreApplication::setOrganizationName( QStringLiteral("Komport-Qt6") );
+  QCoreApplication::setApplicationName( QStringLiteral("Komport-Qt6") );
   QCoreApplication::setApplicationVersion( QStringLiteral(KOMPORT_VERSION) );
 
   QCommandLineParser parser;
   parser.setApplicationDescription(
-      QObject::tr("Komport - Serial port communication and terminal emulator.") );
+      QObject::tr("Komport-Qt6 - Serial port communication and terminal emulator.") );
   parser.addHelpOption();
   parser.addVersionOption();
   parser.addPositionalArgument( QStringLiteral("file"), QObject::tr("file to open"), QStringLiteral("[file]") );

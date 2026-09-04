@@ -1,0 +1,33 @@
+Komport-Qt6
+===========
+
+A serial port communicator and VT100/VT102 terminal emulator for Linux,
+built on Qt6 and QSerialPort.
+
+This is a maintained continuation of "Komport" by Mike Sharkey (2003), a
+KDE 2/3 application whose upstream project is no longer maintained. All
+KDE Frameworks and Qt3 dependencies have been removed; the terminal
+emulation, character-grid rendering and general application structure are
+carried forward. See CLAUDE.md for the full picture of what changed and
+why, and TODO.md for the detailed migration/feature log.
+
+Notable features beyond the original:
+  - Serial backend on QSerialPort/QSerialPortInfo (device autodetection,
+    proper data bits/stop bits/parity/flow control)
+  - Toggleable hex monitor (RX/TX, split-screen, classic [offset][hex][ascii])
+  - Fuller VT100/VT102 emulation (DECCKM, DECTCEM, insert/delete line/char,
+    device status reports, extended SGR colors)
+  - Programmable quick-command macro buttons
+  - One-click, timestamped session logging
+  - Configurable line ending (CR/LF/CR+LF) for the Return key and macros
+
+Build
+-----
+See INSTALL.
+
+License
+-------
+GNU General Public License v2 (or later) - see COPYING.
+Original author: Mike Sharkey <michael@sharkey.servebeer.com>
+Qt6 port and feature work: Harald Stürmer <ironcold@ironcold.de>,
+with Claude (Anthropic) as an AI pair-programmer - see AUTHORS.

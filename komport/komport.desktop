@@ -2,11 +2,11 @@
 [Desktop Entry]
 Encoding=UTF-8
 Type=Application
-Exec=komport %f
-Icon=komport
-Comment=Serial port communicator and terminal emulator
-Comment[de]=Serielles Terminalprogramm
+Exec=komport-qt6 %f
+Icon=komport-qt6
+Comment=Serial port communicator and terminal emulator (Qt6 fork of Komport)
+Comment[de]=Serielles Terminalprogramm (Qt6-Fork von Komport)
 Terminal=false
 Categories=Qt;Utility;
-Name=Komport
-Name[de]=Komport
+Name=Komport Qt6
+Name[de]=Komport Qt6
