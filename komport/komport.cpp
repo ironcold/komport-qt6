@@ -28,8 +28,8 @@
 #include <QMenu>
 #include <QToolBar>
 #include <QStatusBar>
-#include <QLayout>
 #include <QAction>
+#include <QEvent>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -266,35 +266,44 @@ void KomportApp::initToolBar()
   connect( lineEndingCombo, &QComboBox::currentTextChanged, this, &KomportApp::slotLineEndingChanged );
   mainToolBar->addWidget( lineEndingCombo );
 
-  // Force an immediate status-bar relayout on every toolbar-icon hover.
-  // Qt already shows each action's statusTip() in the status bar
-  // automatically on hover, but QLayout::updateGeometry() only *posts* a
-  // deferred QEvent::LayoutRequest rather than relaying out synchronously.
-  // That's invisible for an isolated hover (there's time for it to catch
-  // up before the next paint), but sweeping the mouse across two adjacent
-  // toolbar icons can outrun it: the new message paints against the
-  // still-stale, narrower geometry left over from the previous one and
-  // gets visually clipped - the icon-to-icon truncation this works around.
+  // Drive toolbar-icon hover hints through hoverHintLabel (see komport.h)
+  // instead of statusBar()->showMessage(): showMessage()'s geometry
+  // recomputes lazily (a posted, deferred QEvent::LayoutRequest), and a
+  // fast sweep across adjacent toolbar icons could outrun it, clipping the
+  // new text against the still-stale, narrower geometry left over from the
+  // previous one - the icon-to-icon truncation this works around.
+  // hoverHintLabel's width doesn't depend on its text (QSizePolicy::Ignored),
+  // so plain setText() here never needs a relayout in the first place.
   for ( QAction *action : mainToolBar->actions() ) {
     if ( action->statusTip().isEmpty() ) continue;
     connect( action, &QAction::hovered, this, [this, action]{
-      statusBar()->showMessage( action->statusTip() );
-      if ( statusBar()->layout() ) statusBar()->layout()->activate();
+      hoverHintLabel->setText( action->statusTip() );
     } );
   }
+  // and reset back to "Ready." once the mouse leaves the toolbar entirely
+  // (see eventFilter()) - icon-to-icon moves are handled directly above,
+  // this only catches leaving the last icon with nothing else to enter.
+  mainToolBar->installEventFilter(this);
 }
 
 void KomportApp::initStatusBar()
 {
   ///////////////////////////////////////////////////////////////////
   // STATUSBAR
-  statusBar()->showMessage( tr("Ready.") );
 
-  // Permanent widget (right-aligned, stays put regardless of the transient
-  // showMessage() text on the left) showing the active connection at a
-  // glance. Kept short on purpose - same reasoning as the shortened
-  // setStatusTip() texts above: this window is only as wide as the
-  // terminal's fixed character grid.
+  // Left-hand hover-hint label (see the doc comment on hoverHintLabel in
+  // komport.h for why this isn't just statusBar()->showMessage()).
+  // QSizePolicy::Ignored horizontally: the layout gives it its stretch
+  // share of space up front and never asks it for a size hint again, so
+  // setText() here is a plain repaint, never a relayout.
+  hoverHintLabel = new QLabel( tr("Ready."), statusBar() );
+  hoverHintLabel->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
+  statusBar()->addWidget( hoverHintLabel, 1 );
+
+  // Permanent widget (right-aligned, stays put regardless of hoverHintLabel's
+  // text on the left) showing the active connection at a glance. Kept short
+  // on purpose - same reasoning as the shortened setStatusTip() texts above:
+  // this window is only as wide as the terminal's fixed character grid.
   connectionStatusLabel = new QLabel( statusBar() );
   statusBar()->addPermanentWidget( connectionStatusLabel );
 }
@@ -768,6 +777,20 @@ void KomportApp::closeEvent(QCloseEvent *event)
   }
 }
 
+bool KomportApp::eventFilter(QObject *watched, QEvent *event)
+{
+  // Reset the hover hint back to "Ready." once the mouse leaves the
+  // toolbar entirely - moving from one icon straight to an adjacent one
+  // never reaches this (each icon's own QAction::hovered() connection in
+  // initToolBar() overwrites hoverHintLabel directly), so there's no
+  // flicker in between; this only covers "left the last icon with nothing
+  // else to enter".
+  if ( watched == mainToolBar && event->type() == QEvent::Leave ) {
+    hoverHintLabel->setText( tr("Ready.") );
+  }
+  return QMainWindow::eventFilter(watched, event);
+}
+
 /////////////////////////////////////////////////////////////////////
 // SLOT IMPLEMENTATION
 /////////////////////////////////////////////////////////////////////
@@ -986,7 +1009,18 @@ void KomportApp::slotStatusMsg(const QString &text)
 {
   ///////////////////////////////////////////////////////////////////
   // change status message permanently
-  statusBar()->showMessage(text);
+  //
+  // Through hoverHintLabel, not statusBar()->showMessage(): a temporary
+  // showMessage() hides every "normal" status-bar widget while it's active
+  // (that's what makes it "temporary"), and this is called constantly -
+  // every action prints its own "Ready." here on completion. If this used
+  // showMessage(), hoverHintLabel (also a normal widget) would spend nearly
+  // all its time hidden behind whatever this last printed. Qt's own
+  // automatic menu-hover status tips still go through the real
+  // showMessage() and briefly overlay hoverHintLabel while a menu is open -
+  // that's fine, it already works and reverts on its own once the menu
+  // closes.
+  hoverHintLabel->setText(text);
 }
 
 /** Document has changed.  */

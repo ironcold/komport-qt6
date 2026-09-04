@@ -97,6 +97,11 @@ class KomportApp : public QMainWindow
     void addRecentFile(const QUrl& url);
     /** asks to save modifications, then accepts/rejects the close */
     void closeEvent(QCloseEvent *event) override;
+    /** watches mainToolBar for QEvent::Leave, to reset hoverHintLabel back
+     *  to "Ready." once the mouse leaves the toolbar entirely (icon-to-icon
+     *  transitions inside the toolbar are handled directly by the
+     *  QAction::hovered() connections in initToolBar() instead) */
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
     /** seeds a handful of vendor-preset profiles (Cisco, HP 1920/1950,
      *  Aruba CX, ...) with well-known console defaults, so there's something
@@ -236,6 +241,17 @@ class KomportApp : public QMainWindow
     QComboBox* profileCombo;
     /** permanent status-bar label showing the active device/framing/line-ending */
     QLabel* connectionStatusLabel;
+    /** left-hand status-bar label showing toolbar-icon hover hints and
+     *  "Ready." when idle - a real ("normal", addWidget()) status-bar
+     *  widget with QSizePolicy::Ignored horizontally, so its *allocated*
+     *  width never depends on its current text and setText() never needs a
+     *  relayout. Deliberately not driven through statusBar()->showMessage():
+     *  that path's geometry recomputes lazily (a posted, deferred
+     *  QEvent::LayoutRequest) and a fast sweep across adjacent toolbar
+     *  icons could outrun it, clipping the new text against the still-stale
+     *  narrower geometry left over from the previous one - see
+     *  TODO-ARCHIVE.md section 16.4/17. */
+    QLabel* hoverHintLabel;
 
     // Hex monitor / macro bar / session logging (new in the Qt6 port)
     QSplitter* centralSplitter;
