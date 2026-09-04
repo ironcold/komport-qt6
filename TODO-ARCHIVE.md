@@ -838,3 +838,116 @@ bestätigt** — bitte nach diesem Update erneut gegenprüfen.
     darüber) liefern weiterhin sauber `nullptr`;
   - synthetische `QWheelEvent`s (rauf und runter) werden an `KomportView`
     zugestellt, ohne abzustürzen.
+
+## 17. Rückmeldung nach echtem Hardware-Test: Tooltip-Fix wirkungslos, Mausrad "ruckelt", Hex-Monitor startet leer
+
+Nutzer-Feedback nach Abschnitt 16: die Höhenanpassung funktioniert super,
+aber drei Punkte noch offen.
+
+### 17.1 Tooltip-Truncation — Abschnitt 16.4 hat nicht geholfen, Root Cause neu bewertet
+
+Der `layout()->activate()`-Ansatz aus Abschnitt 16.4 hat das Problem nicht
+behoben. Neue Einschätzung: Qt zeigt Toolbar-Icon-Hovertexte offenbar über
+einen **eigenen, internen** Mechanismus an (unabhängig davon, ob man selbst
+`QAction::hovered()` verbindet oder nicht — das bestätigte bereits ein
+Offscreen-Testprogramm in Abschnitt 16.4, das *ganz ohne* eigenen Code
+korrekten Text zeigte). Das eigentliche Problem liegt vermutlich nicht an
+der Zeitpunkt-Reihenfolge einzelner Events, sondern daran, dass
+`QStatusBar::showMessage()` bei *jedem* Aufruf sein internes
+Nachrichten-Label per (verzögertem) `updateGeometry()` neu vermisst -
+gemeinsam genutzt sowohl von den automatischen Menü-Tooltips als auch von
+`slotStatusMsg()` (aufgerufen bei praktisch jeder Aktion, z.B. "Ready.",
+"Uploading file...", ...). Ein `layout()->activate()` in nur *einem* der
+beiden Aufrufer reicht nicht, wenn der andere unverändert weiter über den
+verzögerten Pfad läuft.
+
+**Grundsätzlich anderer Fix statt weiterer Reparatur am selben
+Mechanismus:** neues `hoverHintLabel` (`QLabel*`, Member von `KomportApp`)
+ersetzt `statusBar()->showMessage()` komplett für alles, was von dieser App
+selbst gesteuert wird (Toolbar-Hover **und** `slotStatusMsg()`):
+
+- `initStatusBar()`: `hoverHintLabel` wird mit `QSizePolicy::Ignored`
+  (horizontal) und Stretch-Faktor 1 per `statusBar()->addWidget(...)` als
+  **normales** (nicht temporäres) Statusleisten-Widget eingehängt. Der
+  entscheidende Punkt: `QSizePolicy::Ignored` sorgt dafür, dass das Layout
+  den Sizehint des Labels komplett ignoriert und ihm von Anfang an einfach
+  seinen Stretch-Anteil an Restbreite zuweist — die *zugewiesene* Breite
+  hängt danach nie wieder vom aktuellen Text ab, `setText()` ist nur noch
+  ein Repaint, nie ein Relayout. Damit ist die Race-Bedingung strukturell
+  ausgeschlossen, nicht nur zeitlich enger gemacht.
+- `initToolBar()`: die `QAction::hovered()`-Verbindungen rufen jetzt
+  `hoverHintLabel->setText(action->statusTip())` statt
+  `statusBar()->showMessage(...)`.
+- Neuer `KomportApp::eventFilter()`-Override, auf `mainToolBar` installiert:
+  setzt bei `QEvent::Leave` (Maus verlässt die Toolbar komplett) den Text
+  zurück auf "Ready." — Wechsel von Icon zu Icon läuft direkt über die
+  einzelnen `hovered()`-Verbindungen und braucht das nicht.
+- `slotStatusMsg()` (bisher `statusBar()->showMessage(text)`) schreibt jetzt
+  ebenfalls auf `hoverHintLabel->setText(text)` — wichtiger Nebenfund beim
+  Umbau: `QStatusBar::showMessage()` blendet *alle* "normalen"
+  (nicht-permanenten) Widgets der Statusleiste aus, solange die temporäre
+  Nachricht aktiv ist. Da `slotStatusMsg()` bei praktisch jeder Aktion
+  aufgerufen wird (u.a. mit "Ready." als Dauerzustand nach jeder
+  Operation), hätte das neue `hoverHintLabel` sonst die meiste Zeit einfach
+  verdeckt hinter dem letzten `slotStatusMsg()`-Text gelegen.
+- Automatische Menü-Tooltips laufen weiterhin unverändert über den echten
+  `showMessage()`-Pfad (bereits bestätigt funktionierend) — der blendet
+  `hoverHintLabel` kurz aus, während ein Menü offen ist, und gibt es beim
+  Schließen automatisch wieder frei (Standard-Qt-Verhalten für
+  "normale" vs. "temporäre" Statusleisten-Widgets).
+
+**Ehrlicher Hinweis:** Auch dieser Fix konnte in der Sandbox (kein echtes
+Display) nicht visuell gegen die Original-Beobachtung getestet werden — er
+beseitigt aber die *einzige* bislang identifizierte, tatsächlich
+nachvollziehbare Ursache (geometrieabhängiges Relayout) vollständig durch
+Konstruktion, statt sie nur zeitlich zu entschärfen. Bitte erneut auf
+echter Hardware gegenprüfen.
+
+### 17.2 Mausrad "ruckelt" — fehlende Delta-Akkumulation
+
+Nutzer: "ich muss voll in eine Richtung beschleunigen, damit sich was
+bewegt." Ursache: `wheelEvent()` (sowohl in `KomportView` als auch in
+`KomportMinimapScrollBar`) hat `_e->angleDelta().y() / 120` pro Event
+einzeln berechnet. Viele Mäuse/Touchpads (v.a. mit Smooth-Scrolling-Treibern
+wie `libinput` unter Linux) melden ein einzelnes "Notch" über mehrere
+Events mit jeweils kleinem Delta statt einem einzelnen Event mit vollen
+120 — jedes davon rundete für sich allein auf 0 herunter, es bewegte sich
+also nur bei einem einzelnen großen Ausschlag (starkes Beschleunigen).
+
+Fix: neues Member `mAccumWheelDelta` (in beiden Klassen) sammelt die
+Rohdeltas über mehrere Events auf; erst wenn genug für mindestens ein
+volles Notch (120) zusammengekommen ist, wird gescrollt und der
+verbrauchte Anteil abgezogen — der Rest bleibt für das nächste Event
+erhalten. Gleiches Muster wie ein normaler `QScrollBar`/`QAbstractSlider`
+das intern handhabt.
+
+### 17.3 Hex-Monitor beginnt leer, ältere Ausgaben fehlen nach dem Öffnen
+
+Bisheriges Verhalten (bewusste Entscheidung, siehe Abschnitt 15.3-Umfeld):
+`KomportHexView::appendByte()` brach früh ab, wenn das Panel gerade nicht
+sichtbar war — Begründung war, keine Zyklen für etwas zu verschwenden, das
+niemand sieht. Nutzer möchte das anders: das Panel soll von Anfang an
+mitschreiben, damit beim ersten Öffnen bereits die Sitzungshistorie zu
+sehen ist, statt bei Null anzufangen.
+
+Fix: die `isVisible()`-Abfrage in `appendByte()` entfernt — RX/TX-Bytes
+werden jetzt unabhängig von der Sichtbarkeit des Panels geloggt (die
+RX/TX-Checkbox-Filter bleiben natürlich weiter wirksam).
+`mLog->setMaximumBlockCount(20000)` begrenzt den Speicherverbrauch
+weiterhin, unabhängig davon, wie lange das Panel geschlossen bleibt.
+
+### 17.4 Verifikation
+
+- Build mit `-Wall -Wextra`: 0 Warnungen, 0 Fehler (voller Clean-Rebuild).
+- Offscreen-Smoke-Test: startet weiterhin fehlerfrei.
+- Zusätzlicher, nicht ausgelieferter Integrationstest (`komport_hextest`,
+  provisorisches CMake-Target, danach wieder entfernt) über ein echtes
+  `pty`-Gerät: Daten bei verstecktem Hex-Panel gesendet, danach geprüft,
+  dass der interne `QPlainTextEdit`-Log bereits vor dem Anzeigen befüllt
+  ist (bestätigt: die Historie ist tatsächlich schon da, nicht erst ab dem
+  Öffnen) — der Kernpunkt des Fixes ist damit verifiziert.
+- Mausrad-Akkumulation und der Statusleisten-Umbau wurden nicht durch einen
+  eigenen Integrationstest abgedeckt (beides schwer sinnvoll ohne echte
+  Maus-/Renderingereignisse zu simulieren) — Build- und Smoke-Test-grün,
+  ansonsten auf Code-Review-Ebene verifiziert; auf echter Hardware
+  gegenzuprüfen.

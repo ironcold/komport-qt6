@@ -76,12 +76,11 @@ void KomportHexView::appendTx(char _ch){ appendByte(Direction::Tx, _ch); }
 
 void KomportHexView::appendByte(Direction _dir, char _ch)
 {
-  // The panel is hidden by default and often stays that way for a whole
-  // session - don't spend cycles formatting/logging bytes nobody can see.
-  // Nothing is lost by skipping while hidden: this is a live monitor, not
-  // a persistent log (that's what the session logger is for), so there is
-  // no backlog to catch up on once the panel is shown again.
-  if ( !isVisible() ) return;
+  // Deliberately keeps logging while hidden (the panel starts hidden and
+  // often stays that way for a while) - so that opening it later shows the
+  // session's history instead of an empty view that only starts filling
+  // in from that point on. mLog's setMaximumBlockCount() bounds memory use
+  // regardless of how long the panel stays closed.
   if ( _dir == Direction::Rx && !mRxCheck->isChecked() ) return;
   if ( _dir == Direction::Tx && !mTxCheck->isChecked() ) return;
 
