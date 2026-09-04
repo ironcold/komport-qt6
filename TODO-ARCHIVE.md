@@ -487,3 +487,63 @@ Vollständige Profilverwaltung über eine `QComboBox` in der Haupt-Toolbar:
   von `QSerialPort`, da ein Pseudo-Terminal keine echte UART-Framing-Hardware
   hat — sauber über `settingsFailed()`/`qWarning()` abgefangen, kein Absturz,
   bestätigt den bereits vorhandenen Fehlerpfad.)
+
+## 12. Vorbelegte Herstellerprofile (Cisco, HP 1920, Aruba CX)
+
+`KomportApp::seedBuiltinProfiles()` legt einmalig drei fertig konfigurierte
+Profile mit bekannten Konsolen-Defaults an, damit die Profil-Combobox nicht
+leer startet:
+
+- **"Cisco (9600 8N1)"** — 9600 8N1, kein Flow-Control (IOS-Standard-Konsole).
+  Makros: Show Config (`show running-config`), Show Version (`show version`),
+  Save (`write memory`), Exit (`exit`).
+- **"HP 1920 (9600 8N1)"** — 9600 8N1, kein Flow-Control. HP-1920 und die
+  breitere HPE-Comware/H3C-Familie (ältere 5130/5510 u.ä.) teilen sich diesen
+  CLI-Dialekt. Makros: Show Config (`display current-configuration`), Show
+  Version (`display version`), Save (`save`), Quit (`quit`).
+- **"Aruba CX (115200 8N1)"** — für neuere Aruba-gebrandete HPE-Switches
+  (CX-Serie, z.B. 6100/6300/6400/8xxx). ArubaOS-CX nutzt bewusst
+  Cisco-ähnliche Befehlssyntax, bootet die Konsole bei vielen Modellen aber
+  mit höherer Baudrate als der klassische 9600er-Standard. Makros wie beim
+  Cisco-Profil.
+
+Alle drei mit `Device=/dev/ttyUSB0` als plausiblem Platzhalter (über
+Dropdown/Settings-Dialog auf das tatsächliche Gerät anzupassen), `Parity=NONE`,
+`StopBits=1`, Standard-RX-Queue/Flush-Rate/Scroll-Buffer.
+
+**Wichtig — ehrlich eingeordnet:** Baudrate und exakte Befehlssyntax können je
+nach genauem Modell/Firmware-Stand abweichen; das sind bewährte Startpunkte,
+keine für jedes Gerät exakt zutreffenden Werte. Trivial anpassbar (Makro-Button
+rechtsklicken zum Editieren, dann "Save Profile") oder per "Delete Profile"
+wieder entfernbar.
+
+- Läuft **einmalig**, getrackt über den Schlüssel `BuiltinProfilesSeeded`
+  (top-level, wie `LastProfile`) — überschreibt nie ein gleichnamiges Profil,
+  das schon existiert, und legt ein einmal gelöschtes Preset nicht erneut an.
+  Aufruf in `KomportApp`s Konstruktor vor `initProfiles()`, damit die neuen
+  Profile sofort in der Combobox erscheinen, ohne dass die
+  `"Default"`-Migrationslogik (Abschnitt 11.2) dadurch beeinträchtigt wird —
+  für Bestandsnutzer mit bereits vorhandenem `"Default"`-Profil kommen die drei
+  Presets einfach zusätzlich dazu.
+- Nebenbei einen kleinen, echten Bug in `KomportMacroBar::loadSettings()`
+  gefunden und gefixt: fehlte die `Macros`-Gruppe eines Profils komplett (wie
+  bei den hier neu angelegten, bevor der Fix da war), blieben die zuvor
+  geladenen Makro-Werte des *vorherigen* Profils einfach stehen, statt
+  zurückgesetzt zu werden — der `contains()`-Check pro Slot wurde entfernt,
+  ein fehlender Slot setzt jetzt sauber auf leer zurück.
+- Fresh-Install-Sonderfall: da die drei Presets vor `initProfiles()`s
+  `profileNames().isEmpty()`-Prüfung angelegt werden, greift die
+  `"Default"`-Migration bei einer wirklich frischen Installation nicht mehr —
+  es gibt ja schon drei Profile. Startprofil ist dann alphabetisch das erste
+  (aktuell "Aruba CX ..."), nicht mehr ein leeres `"Default"`. Rein kosmetisch,
+  jederzeit per Dropdown änderbar.
+
+### Verifikation
+
+- Build mit `-Wall -Wextra`: weiterhin 0 Warnungen, 0 Fehler.
+- Smoke-Test gegen frisches `XDG_CONFIG_HOME`: alle drei Presets korrekt mit
+  allen erwarteten Schlüsseln (inkl. Makros) angelegt, `BuiltinProfilesSeeded=true`
+  gesetzt.
+- Zweiter Lauf nach simuliertem Löschen von "Cisco (9600 8N1)" aus der
+  Konfigurationsdatei: Profil wird beim nächsten Start **nicht** erneut
+  angelegt (Löschung wird respektiert), `BuiltinProfilesSeeded` bleibt `true`.

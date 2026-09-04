@@ -97,6 +97,13 @@ class KomportApp : public QMainWindow
     /** asks to save modifications, then accepts/rejects the close */
     void closeEvent(QCloseEvent *event) override;
 
+    /** one-time seed of a handful of vendor-preset profiles (Cisco, HP 1920,
+     *  Aruba CX, ...) with well-known console defaults, so there's something
+     *  useful to pick from on a fresh install. Runs once (tracked via the
+     *  "BuiltinProfilesSeeded" setting) and never overwrites a same-named
+     *  profile the user already has (including one they deliberately
+     *  deleted after it was first seeded). */
+    void seedBuiltinProfiles();
     /** resolves which device profile to start with (migrating pre-profile
      *  flat settings into a "Default" profile on first run under this
      *  feature, if none exist yet), populates profileCombo and loads it */

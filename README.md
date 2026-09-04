@@ -13,7 +13,7 @@ This project strips away all legacy KDE Frameworks and Qt3/4/5 dependencies, mig
 ### Core Enhancements (Beyond the Original)
 * **Modern Serial Backend:** Powered entirely by `QSerialPort` and `QSerialPortInfo`. Features automatic hardware device detection (no more guessing if it's `/dev/ttyUSB0` or `/dev/ttyS1`).
 * **Hardware-Level Framing:** Proper application of data bits, stop bits, parity, and flow control (XON/XOFF, RTS/CTS) directly to the hardware—fixing long-standing bugs in the 2004 upstream codebase.
-* **Device Profiles:** Save, load, and delete named connection profiles from a dropdown in the toolbar. Each profile bundles the full session: serial parameters, the line-ending choice, and the macro bar's quick commands—switching profiles cleanly disconnects, re-applies the new hardware settings, and reloads the macro bar in one step.
+* **Device Profiles:** Save, load, and delete named connection profiles from a dropdown in the toolbar. Each profile bundles the full session: serial parameters, the line-ending choice, and the macro bar's quick commands—switching profiles cleanly disconnects, re-applies the new hardware settings, and reloads the macro bar in one step. Ships with ready-made presets for **Cisco**, **HP 1920** and **Aruba CX** consoles (baud rate/framing plus vendor-appropriate quick commands)—edit or delete them like any other profile.
 
 ### Admin & Diagnosis Power-Tools
 * **Toggleable Hex Monitor:** View raw RX/TX streams in a toggleable split-screen panel featuring the classic `[Offset] [Hex-Bytes] [ASCII]` layout—ideal for debugging invisible control characters.

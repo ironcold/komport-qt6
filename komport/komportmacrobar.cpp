@@ -103,10 +103,15 @@ void KomportMacroBar::loadSettings(QSettings *_settings)
   _settings->beginGroup( QStringLiteral("Macros") );
   for ( int i = 0; i < SlotCount; ++i ) {
     const QString key = QStringLiteral("Slot%1").arg(i);
-    if ( _settings->contains(key + QStringLiteral("/Command")) ) {
-      mSlots[i].label = _settings->value(key + QStringLiteral("/Label")).toString();
-      mSlots[i].command = _settings->value(key + QStringLiteral("/Command")).toString();
-    }
+    // No contains()-guard: a slot missing from _settings resets to empty
+    // rather than keeping whatever the *previous* group loaded here left
+    // behind. Profiles saved via saveSettings() always write all 8 slots
+    // (even empty ones) so this doesn't change behavior for those - it
+    // only matters for a settings group that never had a "Macros" section
+    // written at all (e.g. a hand-seeded built-in profile), which should
+    // read as "no macros configured", not "whatever was loaded last".
+    mSlots[i].label = _settings->value(key + QStringLiteral("/Label")).toString();
+    mSlots[i].command = _settings->value(key + QStringLiteral("/Command")).toString();
     updateButtonText(i);
   }
   _settings->endGroup();

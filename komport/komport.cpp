@@ -77,6 +77,7 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   connect( view->getSerial(), &KomportSerial::receivedChar, sessionLogger, &KomportSessionLogger::logChar );
 
   readOptions();
+  seedBuiltinProfiles();
   initProfiles();
 }
 
@@ -321,6 +322,96 @@ void KomportApp::initMacroBar()
 // it (KomportMacroBar doesn't need to know about profiles at all - it just
 // reads/writes whatever group is currently open on the QSettings object).
 /////////////////////////////////////////////////////////////////////
+
+void KomportApp::seedBuiltinProfiles()
+{
+  if ( config->value( QStringLiteral("BuiltinProfilesSeeded"), false ).toBool() ) return;
+
+  struct BuiltinMacro { QString label; QString command; };
+  struct BuiltinProfile {
+    QString name;
+    QString baudRate, dataBits, stopBits, parity, flowControl;
+    QList<BuiltinMacro> macros;
+  };
+
+  // Well-known serial-console defaults, one preset per common platform, so
+  // there's something useful to start from instead of an empty combo.
+  // Baud rate and exact CLI command syntax can still vary by exact model/
+  // firmware version - these are a starting point, not gospel. Edit them
+  // (right-click a macro button, or Settings) and hit Save Profile to make
+  // them yours, or Delete Profile if you don't want a preset at all.
+  const QList<BuiltinProfile> builtins = {
+    {
+      QStringLiteral("Cisco (9600 8N1)"),
+      QStringLiteral("9600"), QStringLiteral("8"), QStringLiteral("1"), QStringLiteral("NONE"), QStringLiteral("NONE"),
+      {
+        { tr("Show Config"), QStringLiteral("show running-config") },
+        { tr("Show Version"), QStringLiteral("show version") },
+        { tr("Save (wr mem)"), QStringLiteral("write memory") },
+        { tr("Exit"), QStringLiteral("exit") },
+      }
+    },
+    {
+      // HP 1920 and the wider HPE Comware/H3C-derived switch line (e.g.
+      // older 5130/5510) share this CLI dialect and console default.
+      QStringLiteral("HP 1920 (9600 8N1)"),
+      QStringLiteral("9600"), QStringLiteral("8"), QStringLiteral("1"), QStringLiteral("NONE"), QStringLiteral("NONE"),
+      {
+        { tr("Show Config"), QStringLiteral("display current-configuration") },
+        { tr("Show Version"), QStringLiteral("display version") },
+        { tr("Save"), QStringLiteral("save") },
+        { tr("Quit"), QStringLiteral("quit") },
+      }
+    },
+    {
+      // Newer Aruba-branded HPE switches (CX series - 6100/6300/6400/8xxx).
+      // ArubaOS-CX deliberately uses Cisco-like command syntax, but many CX
+      // models boot their console at a higher default baud rate than the
+      // classic 9600 - double-check your exact model's installation guide,
+      // some lines still default to 9600.
+      QStringLiteral("Aruba CX (115200 8N1)"),
+      QStringLiteral("115200"), QStringLiteral("8"), QStringLiteral("1"), QStringLiteral("NONE"), QStringLiteral("NONE"),
+      {
+        { tr("Show Config"), QStringLiteral("show running-config") },
+        { tr("Show Version"), QStringLiteral("show version") },
+        { tr("Save (wr mem)"), QStringLiteral("write memory") },
+        { tr("Exit"), QStringLiteral("exit") },
+      }
+    },
+  };
+
+  const QStringList existing = profileNames();
+  for ( const BuiltinProfile &bp : builtins ) {
+    if ( existing.contains(bp.name) ) continue; // never clobber a same-named profile the user already has
+
+    config->beginGroup( QStringLiteral("Profiles") );
+    config->beginGroup( bp.name );
+    config->setValue( QStringLiteral("Device"), QStringLiteral("/dev/ttyUSB0") ); // just a common starting point - pick the real port from the dropdown/Settings
+    config->setValue( QStringLiteral("BaudRate"), bp.baudRate );
+    config->setValue( QStringLiteral("FlowControl"), bp.flowControl );
+    config->setValue( QStringLiteral("RXQueue"), QStringLiteral("1024") );
+    config->setValue( QStringLiteral("FlushRate"), QStringLiteral("256") );
+    config->setValue( QStringLiteral("StartBits"), QStringLiteral("1") );
+    config->setValue( QStringLiteral("DataBits"), bp.dataBits );
+    config->setValue( QStringLiteral("StopBits"), bp.stopBits );
+    config->setValue( QStringLiteral("Parity"), bp.parity );
+    config->setValue( QStringLiteral("Emulation"), QStringLiteral("VT102") );
+    config->setValue( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") );
+    config->setValue( QStringLiteral("LineEnding"), QStringLiteral("CR") );
+    config->beginGroup( QStringLiteral("Macros") );
+    for ( int i = 0; i < bp.macros.size() && i < 8; ++i ) { // 8 == KomportMacroBar::SlotCount
+      const QString key = QStringLiteral("Slot%1").arg(i);
+      config->setValue( key + QStringLiteral("/Label"), bp.macros.at(i).label );
+      config->setValue( key + QStringLiteral("/Command"), bp.macros.at(i).command );
+    }
+    config->endGroup(); // Macros
+    config->endGroup(); // <profile name>
+    config->endGroup(); // Profiles
+  }
+
+  config->setValue( QStringLiteral("BuiltinProfilesSeeded"), true );
+  config->sync();
+}
 
 void KomportApp::initProfiles()
 {
