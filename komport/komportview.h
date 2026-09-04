@@ -25,12 +25,12 @@
 #include <QWidget>
 #include <QRect>
 #include <QPixmap>
-#include <QScrollBar>
 
 #include "komportcellarray.h"
 #include "komportscrollbuffer.h"
 #include "komportserial.h"
 #include "komportemulation.h"
+#include "komportminimap.h"
 
 class QPrinter;
 class KomportDoc;
@@ -81,6 +81,16 @@ class KomportView : public QWidget
   /** set the number of lines in the scroll buffer */
   virtual void setScrollBuffer(int _sz);
 
+  /** total rows across scrollback + the live screen, oldest scrollback
+   *  row first - used by KomportMinimapScrollBar to render/scroll the
+   *  whole history independent of the current scroll position. */
+  int totalHistoryRows();
+  /** cell at absolute row _row (0 = oldest scrollback row) across the
+   *  combined scrollback+live history; nullptr if out of range. Same
+   *  underlying data as getCell(), just addressed absolutely instead of
+   *  relative to the current scroll position. */
+  KomportCell* cellAtHistoryRow(int _col, int _row);
+
 protected: // Protected methods
   /** key press event */
   void keyPressEvent(QKeyEvent* _e) override;
@@ -102,8 +112,6 @@ protected: // Protected methods
   void mouseReleaseEvent( QMouseEvent* _e ) override;
   /** No descriptions */
   void mousePressEvent( QMouseEvent* _e ) override;
-   /** No descriptions */
-  void moveEvent( QMoveEvent* _e ) override;
  /** begin a selection by pixel coordinate */
   void selectStart( QPoint _pt );
   /** end a selection by pixel coordinate */
@@ -133,8 +141,12 @@ private: // Private attributes
   bool mInSelection;
   /** has text selection */
   bool mHasSelection;
-  /** scroll bar */
-  QScrollBar* mScrollBar;
+  /** Kate-style minimap scrollbar (see komportminimap.h) - a genuine child
+   *  of this widget (not a manually-positioned sibling like the original
+   *  Qt3 code had it), so its position stays correct no matter what
+   *  container this view itself ends up embedded in (e.g. the central
+   *  QSplitter, for the hex monitor). */
+  KomportMinimapScrollBar* mScrollBar;
   /** auto scroll timer for extending text selection into scroll buffer */
   int mAutoScrollTimer;
   /** for tracking mouse during selctions */

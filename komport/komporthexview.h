@@ -30,6 +30,8 @@
 
 class QPlainTextEdit;
 class QTimer;
+class QCheckBox;
+class QSettings;
 
 /** Split-screen hex dump panel: shows raw bytes exchanged over the serial
  *  port as classic 16-bytes-per-row [offset] [hex] [ascii] lines, tagged
@@ -43,6 +45,17 @@ class KomportHexView : public QWidget
 public:
   explicit KomportHexView(QWidget *parent = nullptr);
   ~KomportHexView() override;
+
+  /** persist the RX/TX filter checkbox states into _settings (nested
+   *  under a "HexMonitor" group - called from within a Profiles/<name>
+   *  group, same pattern as KomportMacroBar::saveSettings()) */
+  void saveSettings(QSettings *_settings) const;
+  /** load the RX/TX filter checkbox states from _settings, defaulting
+   *  both to checked if absent (not contains()-guarded - see the note on
+   *  KomportMacroBar::loadSettings() for why: a profile without a
+   *  "HexMonitor" group must reset to the default, not keep whatever the
+   *  previously loaded profile left the checkboxes at) */
+  void loadSettings(QSettings *_settings);
 
 public slots:
   /** feed one byte received from the serial port */
@@ -64,6 +77,8 @@ private:
   static QString formatRow(const char *_tag, quint64 _offset, const QByteArray &_bytes);
 
   QPlainTextEdit *mLog;
+  QCheckBox *mRxCheck;
+  QCheckBox *mTxCheck;
   QByteArray mRxBuffer;
   QByteArray mTxBuffer;
   quint64 mRxOffset;

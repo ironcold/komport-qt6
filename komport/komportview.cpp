@@ -40,14 +40,14 @@ KomportView::KomportView(QWidget *parent)
 , mInSelection(false)
 , mHasSelection(false)
 {
-  // The scroll bar is deliberately a sibling (child of this view's parent,
-  // not of the view itself) and manually positioned in resizeEvent()/
-  // moveEvent() - this odd layout comes straight from the original Qt3
-  // code and is kept as-is rather than redesigned.
-  mScrollBar = new QScrollBar( Qt::Vertical, parent );
+  // A genuine child of this view (not a manually-positioned sibling of
+  // its parent, like the original Qt3 code had it - that broke once the
+  // view moved into a QSplitter for the hex monitor, showing up as a
+  // stray floating bar). See komportminimap.h for the rest of the story.
+  mScrollBar = new KomportMinimapScrollBar( this, this );
   mScrollBar->setObjectName( QStringLiteral("scroll_bar") );
   mScrollBar->setRange(0, 0);
-  QObject::connect(mScrollBar,SIGNAL(valueChanged(int)),this,SLOT(slotScroll(int)));
+  connect( mScrollBar, &KomportMinimapScrollBar::valueChanged, this, &KomportView::slotScroll );
 
   // We always redraw the full cell area from mPixmap in paintEvent(), so
   // avoid Qt erasing the background first (replaces Qt3's
@@ -81,7 +81,9 @@ KomportView::KomportView(QWidget *parent)
 
 KomportView::~KomportView()
 {
-  delete mScrollBar;
+  // mScrollBar is a real child widget now (parent == this), so Qt's
+  // parent-child ownership already destroys it - deleting it again here
+  // would double-free.
 }
 
 KomportDoc *KomportView::getDocument() const
@@ -201,7 +203,11 @@ void KomportView::keyReleaseEvent(QKeyEvent* _e){
 
 /** paint event */
 void KomportView::paintEvent(QPaintEvent* _e){
-  QRect rect = _e->rect();
+  // Clip to mPixmap's own bounds (the character-grid area) - the minimap
+  // to the right is a proper child widget and paints itself; this must
+  // not draw over/under it with stale pixmap content.
+  QRect rect = _e->rect().intersected( QRect(QPoint(0,0), mPixmap.size()) );
+  if ( rect.isEmpty() ) return;
   QPainter p(this);
   p.drawPixmap(rect.topLeft(), mPixmap, rect);
 }
@@ -256,11 +262,33 @@ KomportCell* KomportView::getCell(int _x, int _y){
   return cell;
 }
 
+/** total rows across scrollback + the live screen */
+int KomportView::totalHistoryRows() {
+  return mScrollBuffer.depth() + cellArray()->arrayHeight();
+}
+
+/** cell at absolute row _row (0 = oldest scrollback row) across the
+ *  combined scrollback+live history. Same indexing scheme as
+ *  slotAboutToScrollUp()/getCell() use internally, just generalized to an
+ *  absolute row instead of one relative to the current scroll position. */
+KomportCell* KomportView::cellAtHistoryRow(int _col, int _row) {
+  int depth = mScrollBuffer.depth();
+  int total = depth + cellArray()->arrayHeight();
+  if ( _row < 0 || _row >= total ) return nullptr;
+  if ( _row < depth ) {
+    return mScrollBuffer.cell( _col, (mScrollBuffer.arrayHeight() - depth) + _row );
+  }
+  return cellArray()->cell( _col, _row - depth );
+}
+
 /** calculates cell size based on font. */
 void KomportView::setCellSize(){
   QFontMetrics fm = fontMetrics();
   cellArray()->setCellSize(QSize(fm.horizontalAdvance(QChar('H')),fm.height()));
-  QSize sz(cellArray()->width(),cellArray()->height());
+  // The widget's own size is the character grid plus the minimap strip
+  // reserved alongside it - see resizeEvent()/paintEvent() for how the
+  // two regions are kept apart.
+  QSize sz(cellArray()->width() + mScrollBar->width(), cellArray()->height());
   setMinimumSize(sz);
   setMaximumSize(sz);
 }
@@ -300,13 +328,21 @@ KomportSerial* KomportView::getSerial(){
 }
 /** resize the offscreen pixmap and refresh */
 void KomportView::resizeEvent(QResizeEvent* _e){
-  mScrollBar->resize( mScrollBar->width(), height() );
-  mScrollBar->move( width(), y() );
+  Q_UNUSED(_e);
+  // mScrollBar is a proper child of this widget now, so its position only
+  // ever needs to be expressed relative to `this` - correct regardless of
+  // how this view itself is embedded (e.g. inside the central QSplitter).
+  int mmWidth = mScrollBar->width();
+  mScrollBar->resize( mmWidth, height() );
+  mScrollBar->move( width() - mmWidth, 0 );
   mScrollBar->show();
+
   // QPixmap has no in-place resize() in Qt6 - build a new one and copy the
   // previous contents into its top-left corner, matching what Qt3's
-  // QPixmap::resize() did.
-  QPixmap resized( _e->size() );
+  // QPixmap::resize() did. Sized to the character-grid area only (this
+  // widget's own size includes the minimap strip, the pixmap doesn't).
+  QSize gridSize( qMax(0, width() - mmWidth), height() );
+  QPixmap resized( gridSize );
   resized.fill(cellArray()->defaultBackgroundColor());
   QPainter p(&resized);
   p.drawPixmap(0, 0, mPixmap);
@@ -367,13 +403,6 @@ void KomportView::mouseMoveEvent( QMouseEvent* _e ){
          selectEnd( (mMousePos = _e->position().toPoint()) );
          select( mSelectStart, mSelectEnd );
      }
-}
-/** No descriptions */
-void KomportView::moveEvent( QMoveEvent* _e ){
-    Q_UNUSED(_e);
-    mScrollBar->resize( mScrollBar->width(), height() );
-    mScrollBar->move( width(), y() );
-    mScrollBar->show();
 }
 /** make a selection by cell coordinates */
 void KomportView::select(QPoint start, QPoint end, bool clip){

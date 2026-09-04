@@ -220,6 +220,12 @@ void KomportApp::initToolBar()
 {
   mainToolBar = addToolBar( tr("Main Toolbar") );
   mainToolBar->setObjectName( QStringLiteral("mainToolBar") );
+  // A larger, explicit icon size and icon-only buttons read as a modern
+  // toolbar under current desktop themes (Breeze etc.) - the previous
+  // default (whatever QStyle picks, typically 16px) looked dated next to
+  // the rest of the UI.
+  mainToolBar->setIconSize( QSize(24, 24) );
+  mainToolBar->setToolButtonStyle( Qt::ToolButtonIconOnly );
   mainToolBar->addAction( fileOpen );
   mainToolBar->addAction( fileSave );
   mainToolBar->addAction( filePrint );
@@ -520,6 +526,7 @@ void KomportApp::saveProfile(const QString &_name)
   config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
   config->setValue( QStringLiteral("LineEnding"), strLineEnding );
   macroBar->saveSettings(config); // ends up nested under Profiles/<name>/Macros
+  hexView->saveSettings(config);  // ends up nested under Profiles/<name>/HexMonitor
   config->endGroup();
   config->endGroup();
 
@@ -593,6 +600,7 @@ void KomportApp::loadProfile(const QString &_name)
   strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), strScrollBuffer ).toString();
   strLineEnding = config->value( QStringLiteral("LineEnding"), strLineEnding ).toString();
   macroBar->loadSettings(config); // reads Profiles/<name>/Macros
+  hexView->loadSettings(config);  // reads Profiles/<name>/HexMonitor
   config->endGroup();
   config->endGroup();
 

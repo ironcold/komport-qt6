@@ -21,9 +21,11 @@
 #include <QHBoxLayout>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QLabel>
 #include <QFontDatabase>
 #include <QTimer>
+#include <QSettings>
 
 KomportHexView::KomportHexView(QWidget *parent)
 : QWidget(parent)
@@ -39,8 +41,18 @@ KomportHexView::KomportHexView(QWidget *parent)
   auto *clearButton = new QPushButton( tr("Clear"), this );
   connect( clearButton, &QPushButton::clicked, this, &KomportHexView::clearLog );
 
+  mRxCheck = new QCheckBox( tr("RX"), this );
+  mRxCheck->setChecked(true);
+  mRxCheck->setToolTip( tr("Show received bytes") );
+  mTxCheck = new QCheckBox( tr("TX"), this );
+  mTxCheck->setChecked(true);
+  mTxCheck->setToolTip( tr("Show sent bytes") );
+
   auto *topBar = new QHBoxLayout();
-  topBar->addWidget( new QLabel( tr("Hex Monitor (RX/TX)"), this ) );
+  topBar->addWidget( new QLabel( tr("Hex Monitor"), this ) );
+  topBar->addSpacing(12);
+  topBar->addWidget( mRxCheck );
+  topBar->addWidget( mTxCheck );
   topBar->addStretch(1);
   topBar->addWidget( clearButton );
 
@@ -70,6 +82,8 @@ void KomportHexView::appendByte(Direction _dir, char _ch)
   // a persistent log (that's what the session logger is for), so there is
   // no backlog to catch up on once the panel is shown again.
   if ( !isVisible() ) return;
+  if ( _dir == Direction::Rx && !mRxCheck->isChecked() ) return;
+  if ( _dir == Direction::Tx && !mTxCheck->isChecked() ) return;
 
   QByteArray &buf = (_dir == Direction::Rx) ? mRxBuffer : mTxBuffer;
   buf.append(_ch);
@@ -92,6 +106,28 @@ void KomportHexView::flushLine(Direction _dir)
   mLog->appendPlainText( formatRow( _dir == Direction::Rx ? "RX" : "TX", offset, buf ) );
   offset += static_cast<quint64>( buf.size() );
   buf.clear();
+}
+
+void KomportHexView::saveSettings(QSettings *_settings) const
+{
+  if ( !_settings ) return;
+  _settings->beginGroup( QStringLiteral("HexMonitor") );
+  _settings->setValue( QStringLiteral("RxEnabled"), mRxCheck->isChecked() );
+  _settings->setValue( QStringLiteral("TxEnabled"), mTxCheck->isChecked() );
+  _settings->endGroup();
+}
+
+void KomportHexView::loadSettings(QSettings *_settings)
+{
+  if ( !_settings ) return;
+  _settings->beginGroup( QStringLiteral("HexMonitor") );
+  // No contains()-guard, same reasoning as KomportMacroBar::loadSettings():
+  // a profile without its own "HexMonitor" group must reset to the
+  // default (both checked), not keep whatever the previously loaded
+  // profile left these checkboxes at.
+  mRxCheck->setChecked( _settings->value( QStringLiteral("RxEnabled"), true ).toBool() );
+  mTxCheck->setChecked( _settings->value( QStringLiteral("TxEnabled"), true ).toBool() );
+  _settings->endGroup();
 }
 
 void KomportHexView::clearLog()

@@ -58,6 +58,8 @@ add_executable(komport-qt6
   komport/komportmacrobar.h
   komport/komportsessionlogger.cpp
   komport/komportsessionlogger.h
+  komport/komportminimap.cpp
+  komport/komportminimap.h
   komport/komport.qrc
 )
 
