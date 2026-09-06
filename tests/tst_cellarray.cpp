@@ -33,6 +33,7 @@ private slots:
   void regrowAfterNegativeIsUsable();
   void hugeWidthDoesNotCrashAndGetsClamped();
   void cellRejectsOutOfRangeCoordinatesIndividually();
+  void copyIgnoresNullSource();
 };
 
 void TstCellArray::negativeHeightDoesNotCrash()
@@ -121,6 +122,24 @@ void TstCellArray::cellRejectsOutOfRangeCoordinatesIndividually()
   // Still works normally for actually in-range coordinates.
   QVERIFY( arr.cell(0, 0) != nullptr );
   QVERIFY( arr.cell(79, 24) != nullptr );
+}
+
+void TstCellArray::copyIgnoresNullSource()
+{
+  // Defensive fix: copy() dereferenced _other unconditionally. No current
+  // call site actually passes a null cell (their loop bounds keep it
+  // in-range), but cell() (see the tests above) does hand back nullptr
+  // for any out-of-range coordinate, so this is one dereference away from
+  // a crash if that ever changes. Not observed as a live bug, just closed
+  // to match this codebase's existing defense-in-depth style elsewhere.
+  KomportCellArray arr;
+  KomportCell *target = arr.cell(0, 0);
+  QVERIFY( target != nullptr );
+  target->setCharacter( QChar('X') );
+
+  target->copy(nullptr); // must not crash
+
+  QCOMPARE( target->character(), QChar('X') ); // untouched
 }
 
 QTEST_MAIN(TstCellArray)

@@ -686,6 +686,58 @@ Durchsicht der noch nie im Fokus gestandenen Bereiche
 `komportfilescrollbuffer.cpp`, `komportminimap.cpp`) sinnvoller sein als
 ein weiterer vollautomatischer Review-Durchlauf.
 
+## 0.6 Gezielte manuelle Durchsicht der bislang unfokussierten Bereiche (2026-09-06)
+
+Wie in der Anmerkung zu Abschnitt 0.5 vorgeschlagen: statt einer weiteren
+automatisierten Full-Review-Runde eine gezielte manuelle Durchsicht der
+Dateien, die in keiner der 5 bisherigen Runden im Fokus standen —
+`komporthexview.{h,cpp}`, `komportsessionlogger.{h,cpp}`,
+`komportmacrobar.{h,cpp}`, `komportfilescrollbuffer.{h,cpp}`,
+`komportminimap.{h,cpp}`, dazu `komportdoc.{h,cpp}`, `komportcell.{h,cpp}`,
+`komportscript.h`, `settingsdialog.h` und ein systematischer Scan über
+alle nicht-geparenteten `new`-Allokationen im gesamten Projekt (auf der
+Suche nach weiteren Lecks wie dem `KomportEmulation`-Fund aus
+Abschnitt 0.4).
+
+**Ergebnis: deutlich ruhiger als die letzten 5 automatisierten Runden —
+nur ein Fund, und der ist rein defensiv (kein aktueller Reproduktionspfad),
+anders als alle bisherigen Findings.** Ein gutes Konvergenz-Signal.
+
+- [x] **`KomportCell::copy(KomportCell* _other)` prüfte `_other` nicht auf
+  `nullptr`.** `komportcell.cpp` `copy()` (~Z. 75): griff direkt auf
+  `_other->select()`/`_other->character()` etc. zu. Die beiden aktuellen
+  Aufrufstellen (`KomportView::slotAboutToScrollUp()`/`resizeGridRows()`,
+  jeweils beim Verschieben einer Zeile in den Scroll-Buffer) übergeben
+  nach Prüfung **aktuell nie** einen Null-Pointer — ihre Schleifengrenzen
+  bleiben innerhalb der tatsächlichen `cellArray()`-Größe. Kein konkreter
+  Reproduktionspfad wie bei allen bisherigen Findings, aber `cell()`
+  (siehe Abschnitt 0.5) liefert für jede außerhalb liegende Koordinate
+  `nullptr` zurück — `copy()` selbst hatte dagegen keine eigene
+  Absicherung, wäre also nur einen Aufruf von einem Crash entfernt, sollte
+  sich das je ändern.
+  **Gefixt (2026-09-06):** `if (!_other) return;` ergänzt, passend zum
+  bereits etablierten Verteidigungsmuster dieses Projekts (`cell()`
+  selbst, `setArraySize()`s Clamps, `getDocument()`s `qFatal()`, ...).
+  Verifiziert per neuem `tst_cellarray`-Testfall: gegen den ungefixten
+  Stand reproduzierbar (Absturz), gegen den gefixten Stand grün.
+- Sonst nichts Nennenswertes: `komporthexview`, `komportsessionlogger`,
+  `komportmacrobar`, `komportminimap` — sauber, korrekt geparentet, keine
+  Bounds-/Lifetime-Probleme gefunden. `komportfilescrollbuffer` bleibt
+  bewusster, nirgends instanziierter Stub (bereits in `CLAUDE.md`/oben in
+  Abschnitt 6 dokumentiert). Kein weiteres un-geparentetes `new` ohne
+  zugehöriges `delete` gefunden — der `KomportEmulation`-Leak aus
+  Abschnitt 0.4 war der einzige.
+- **Nebenbefund, kein Fix:** `komportdoc.cpp` `saveModified()`s gesamter
+  "Datei geändert?"-Zweig ist seit dem `newDocument()`-Fix (Abschnitt 0.1)
+  faktisch unerreichbarer Code, da nichts mehr `setModified(true)`
+  aufruft. Harmlos (keine Fehlfunktion), aber erwähnenswert für eine
+  künftige Aufräumrunde — bewusst nicht angefasst, da kein Bug, nur totes
+  Gerüst.
+
+**Verifikation:** alle 6 `ctest`-Targets grün (1 neu). Clean-Build mit
+`-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test grün,
+echtes `~/.config/Komport-Qt6/`-Profil unangetastet.
+
 
 ## 1. Produktvision und Architektur-Gate
 
