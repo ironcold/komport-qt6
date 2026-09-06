@@ -89,6 +89,7 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   connect( view->getSerial(), &KomportSerial::receivedChar, hexView, &KomportHexView::appendRx );
   connect( view->getSerial(), &KomportSerial::sentChar, hexView, &KomportHexView::appendTx );
   connect( view->getSerial(), &KomportSerial::receivedChar, sessionLogger, &KomportSessionLogger::logChar );
+  connect( view->getSerial(), &KomportSerial::settingsFailed, this, &KomportApp::slotSerialSettingsFailed );
 
   readOptions();
   seedBuiltinProfiles();
@@ -335,6 +336,7 @@ void KomportApp::initStatusBar()
   // share of space up front and never asks it for a size hint again, so
   // setText() here is a plain repaint, never a relayout.
   hoverHintLabel = new QLabel( tr("Ready."), statusBar() );
+  hoverHintLabel->setObjectName( QStringLiteral("hoverHintLabel") ); // lets tests find it via findChild()
   hoverHintLabel->setSizePolicy( QSizePolicy::Ignored, QSizePolicy::Preferred );
   statusBar()->addWidget( hoverHintLabel, 1 );
 
@@ -678,11 +680,22 @@ void KomportApp::loadProfile(const QString &_name)
   mCurrentProfile = _name;
   config->setValue( QStringLiteral("LastProfile"), _name );
 
+  mSerialErrorPending = false; // see slotSerialSettingsFailed()
   applyConnectionSettings();
   lineEndingCombo->setCurrentText( strLineEnding ); // triggers slotLineEndingChanged() if it actually changed
 
   refreshProfileCombo( _name );
-  slotStatusMsg( tr("Loaded profile \"%1\"").arg(_name) );
+  // Don't stomp on a serial error applyConnectionSettings() may have just
+  // reported (e.g. the profile's device doesn't exist) with our own
+  // unconditional success message. Unlike slotShowPreferences() below, no
+  // extra reconciliation against serial->isOpen() is needed here:
+  // applyConnectionSettings() always closes the port before touching any
+  // setting, so its single open() call at the end is the only thing that
+  // can set mSerialErrorPending - there's no earlier, transient,
+  // partially-updated-combination failure to second-guess.
+  if ( !mSerialErrorPending ) {
+    slotStatusMsg( tr("Loaded profile \"%1\"").arg(_name) );
+  }
 }
 
 void KomportApp::slotSaveProfile()
@@ -1032,6 +1045,13 @@ void KomportApp::slotViewStatusBar()
 void KomportApp::slotShowPreferences()
 {
   slotStatusMsg(tr("Open settings form..."));
+  // Reset here, at the very start - not just before the settings are
+  // applied below - so an error reported while the modal dialog itself is
+  // still open (a device disconnect event, say: settingsDialog.exec()
+  // still runs a nested event loop) also survives to be seen, rather than
+  // getting silently cleared by a stale flag from some earlier, unrelated
+  // failure or overwritten by this method's own trailing "Ready.".
+  mSerialErrorPending = false;
   ///////////////////////////////////////////////////////////////////
   // open the settings dialog...
   SettingsDialog settingsDialog(this);
@@ -1065,9 +1085,29 @@ void KomportApp::slotShowPreferences()
       serial->setDeviceName( strDevice );
       serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
       serial->setFlowControl( strFlowControl );
+      // Each of the setters above (setDeviceName()'s internal reopen
+      // included) re-applies the *entire current* field combination to an
+      // already-open port immediately - so setFraming()/setFlowControl()
+      // above can transiently fail on a still-partially-updated
+      // combination (new data bits with the still-old flow control, say),
+      // a false alarm that has nothing to do with the combination the
+      // user actually asked for. setBaudRate() is the last call that
+      // touches the port's settings before open() below, so by the time
+      // it runs every field already has its final value - resetting the
+      // flag immediately before it means only *this* call's result (the
+      // true, fully-applied combination) is what's left standing
+      // afterwards, discarding the earlier calls' transient noise instead
+      // of trusting a weaker proxy like serial->isOpen() (a rejected
+      // setting does not necessarily close an already-open port).
+      mSerialErrorPending = false; // see slotSerialSettingsFailed()
       serial->setBaudRate( strBaudRate );
       serial->setRxQueue( strRxQueue.toInt() );
       serial->setFlushRate( strFlushRate.toInt() );
+      // If the port wasn't open at all (nothing above actually applied
+      // anything, since every setter's re-apply is itself gated on
+      // isOpen()), this open() call is what performs the one and only
+      // real application attempt, and its own settingsFailed() (via
+      // slotPortError()) is what will have the final say on the flag.
       if ( !serial->isOpen() ) serial->open();
 
       // Persist the tweak into the active profile, so it isn't silently
@@ -1077,7 +1117,12 @@ void KomportApp::slotShowPreferences()
       updateConnectionStatusLabel();
   }
 
-  slotStatusMsg(tr("Ready."));
+  // Don't stomp on a serial error just reported above (or the dialog was
+  // cancelled and mSerialErrorPending is still whatever it was before -
+  // false unless a previous, still-unacknowledged error is pending).
+  if ( !mSerialErrorPending ) {
+    slotStatusMsg(tr("Ready."));
+  }
 }
 
 void KomportApp::slotStatusMsg(const QString &text)
@@ -1100,6 +1145,25 @@ void KomportApp::slotStatusMsg(const QString &text)
 
 /** Document has changed.  */
 void KomportApp::slotDocumentModified(){
+}
+void KomportApp::slotSerialSettingsFailed(const QString &_reason){
+  // Previously this only reached qWarning() (see KomportSerial::
+  // slotPortError()/applyPortSettings()) - a device that's unplugged,
+  // permission-denied, or given an unsupported baud/framing combination
+  // failed silently as far as the UI was concerned. slotStatusMsg() rather
+  // than a modal QMessageBox: settingsFailed() can fire repeatedly for a
+  // flaky connection, and a stream of blocking dialogs would be far worse
+  // than a status-bar message that's simply overwritten by the next one.
+  //
+  // mSerialErrorPending: this can fire synchronously from inside
+  // loadProfile()/slotShowPreferences() while they're still applying the
+  // new settings (KomportSerial::open() et al. can emit settingsFailed()
+  // directly) - without this flag, their own unconditional trailing
+  // "Loaded profile ..."/"Ready." message would immediately overwrite the
+  // error we just showed here, and the user would never actually see it.
+  mSerialErrorPending = true;
+  slotStatusMsg( tr("Serial port error: %1").arg(_reason) );
+  updateConnectionStatusLabel();
 }
 /** No descriptions */
 void KomportApp::slotViewModified(KomportView* _v){

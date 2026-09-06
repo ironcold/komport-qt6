@@ -111,8 +111,12 @@ public slots: // Public slots
 signals: // Signals
   /** Whenever a communications port setting is changed such as baud rate, etc. */
   void settingsChanged();
-  /** could not apply the current settings to the open port */
-  void settingsFailed();
+  /** could not apply the current settings to the open port, or the port
+   *  reported an error while open (including failing to open at all -
+   *  QSerialPort::open() itself surfaces failures via errorOccurred(), see
+   *  slotPortError() below). _reason is a human-readable message suitable
+   *  for showing directly to the user. */
+  void settingsFailed(const QString &_reason);
   /** received a char */
   void receivedChar(char _ch);
   /** a char was actually written to the port (for e.g. the hex monitor) */

@@ -161,7 +161,11 @@ void KomportSerial::applyPortSettings(){
   // used it either. It is kept only so the settings dialog/config file keep
   // their existing "Start bits" field.
 
-  if ( !ok ) emit settingsFailed();
+  if ( !ok ) {
+    emit settingsFailed( tr("Could not apply the requested port settings "
+                            "(baud rate/data bits/parity/flow control) - "
+                            "the device may not support this combination.") );
+  }
 }
 
 /** put a character */
@@ -189,7 +193,13 @@ void KomportSerial::putStr(const char* str){
 
 /** set size of the internal RX buffer high-water mark */
 int KomportSerial::setRxQueue(int _i){
-  mRxQueueMax = _i;
+  // A high-water mark of 0 or less makes slotDataAvailable()'s overflow
+  // trim ("remove everything past mRxQueueMax bytes") discard every byte
+  // that arrives - silent, total data loss. The settings dialog's spinbox
+  // only allows 1024..32768, but a hand-edited profile in QSettings isn't
+  // range-checked at all before reaching here; clamp to a sane minimum so
+  // this setter is safe regardless of where the value came from.
+  mRxQueueMax = qMax(1, _i);
   return mRxQueueMax;
 }
 
@@ -207,22 +217,34 @@ void KomportSerial::slotDataAvailable(){
 void KomportSerial::slotPortError(QSerialPort::SerialPortError error){
   if ( error != QSerialPort::NoError ) {
     qWarning() << "KomportSerial:" << mPort.errorString();
-    emit settingsFailed();
+    emit settingsFailed( mPort.errorString() );
   }
 }
 
 /** periodic flush of mRxBuffer into receivedChar() signals */
 void KomportSerial::slotFlushRxBuffer(){
-  while ( !mRxBuffer.isEmpty() ) {
-    char ch = mRxBuffer.front();
-    mRxBuffer.remove(0, 1);
+  if ( mRxBuffer.isEmpty() ) return;
+  // Snapshot-and-clear rather than removing the front byte one at a time:
+  // QByteArray::remove(0, 1) shifts every remaining byte down by one
+  // position on every call, so a loop of them is O(n^2) for an n-byte
+  // buffer - expensive on bursts at high baud rates, and it's competing
+  // directly with the GUI/emulation for CPU time right when there's the
+  // most data to process. QByteArray is implicitly shared, so this copy is
+  // just a refcount bump, not a deep copy.
+  const QByteArray data = mRxBuffer;
+  mRxBuffer.clear();
+  for ( const char ch : data ) {
     emit receivedChar(ch);
   }
 }
 
 /** set the rate at which the Rx buffer is flushed */
 void KomportSerial::setFlushRate(int _i){
-  mFlushRate = _i;
+  // Same reasoning as setRxQueue(): the settings dialog's spinbox only
+  // allows 0..4096, but a hand-edited profile isn't range-checked before
+  // reaching here, and a negative interval isn't a meaningful QTimer
+  // interval.
+  mFlushRate = qMax(0, _i);
   mFlushTimer.start( mFlushRate );
 }
 

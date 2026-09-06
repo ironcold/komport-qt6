@@ -25,6 +25,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QDebug>
 
 // application specific includes
 #include "komportview.h"
@@ -95,7 +96,27 @@ KomportDoc *KomportView::getDocument() const
   // window. window() walks all the way up to the top-level widget, which
   // is still KomportApp regardless of how many container widgets sit in
   // between.
-  KomportApp *theApp=(KomportApp *) window();
+  //
+  // KomportView is architecturally only meant to be used with a KomportApp
+  // as its top-level window (it's not a general-purpose reusable widget) -
+  // getSerial() calls getDocument()->getSerial() unconditionally, and the
+  // constructor calls getSerial() immediately, so there is no safe/partial
+  // way to carry on if that assumption doesn't hold; returning nullptr
+  // here would just move the crash one call further out, into an
+  // unrelated null-pointer dereference with no indication of the real
+  // cause. qobject_cast rather than a blind C-style cast (which used to
+  // reinterpret whatever window() returned as a KomportApp
+  // unconditionally - undefined behaviour, i.e. potentially silent memory
+  // corruption, if that assumption is ever wrong) still buys something
+  // real: it lets us fail loudly and exactly here, at the actual
+  // precondition violation, instead of via UB or a mystery crash
+  // elsewhere.
+  KomportApp *theApp = qobject_cast<KomportApp *>( window() );
+  if ( !theApp ) {
+    qFatal( "KomportView::getDocument(): not embedded under a KomportApp "
+            "top-level window - this view requires one." );
+    return nullptr; // unreachable: qFatal() aborts
+  }
 
   return theApp->getDocument();
 }
@@ -224,7 +245,11 @@ void KomportView::paintEvent(QPaintEvent* _e){
 void KomportView::timerEvent(QTimerEvent* _e) {
   if ( _e->timerId() == mBlinkTimer ) {
     mBlinkState = !mBlinkState;
-    int w = cellArray()->cellWidth();
+    // arrayWidth() (column count), not cellWidth() (a single glyph's pixel
+    // width, e.g. 5-10) - the latter made this loop only ever re-check
+    // blink state for the first handful of columns instead of the whole
+    // screen width.
+    int w = cellArray()->arrayWidth();
     int h = cellArray()->arrayHeight();
     for ( int x=0; x < w; x++ ) {
       for ( int y=0; y < h; y++ ) {

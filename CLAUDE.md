@@ -192,6 +192,11 @@ KDevelop-1.2-generiert, KDE-2/3-typisch) wurde komplett durch ein Top-Level
 SerialPort REQUIRED)`, `CMAKE_AUTOMOC`/`CMAKE_AUTORCC`, C++17). Alle Autotools-
 Dateien und die KDevelop-1.x-Projektdateien sind entfernt (siehe `TODO-ARCHIVE.md`
 Abschnitt 3 für die vollständige Liste). Bauen: `cmake -B build && cmake --build build`.
+Der Hauptcode liegt in einer Objekt-Library `komport_core` (alles außer
+`main.cpp`), gegen die sowohl das `komport-qt6`-Executable als auch die
+`Qt6::Test`-basierten Regressionstests in `tests/` linken (`ctest` im
+Build-Verzeichnis nach dem Build; `BUILD_TESTING` via `include(CTest)`,
+Default an). Siehe `TODO.md` Abschnitt 0.1 für den Anlass.
 
 ## Was NICHT im Scope ist (sofern nicht anders vom Nutzer gewünscht)
 

@@ -22,8 +22,12 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets PrintSupport SerialPort)
 
 qt_standard_project_setup()
 
-add_executable(komport-qt6
-  komport/main.cpp
+# Everything except main.cpp, as an object library: lets tests/ link against
+# the exact same compiled application classes (KomportCellArray,
+# KomportEmulation, KomportSerial, KomportApp, ...) without a second,
+# separately-compiled copy of the sources, and without main() itself pulling
+# in a conflicting entry point.
+add_library(komport_core OBJECT
   komport/komport.cpp
   komport/komport.h
   komport/komportdoc.cpp
@@ -63,17 +67,20 @@ add_executable(komport-qt6
   komport/komport.qrc
 )
 
-target_include_directories(komport-qt6 PRIVATE komport)
+target_include_directories(komport_core PUBLIC komport)
 
-target_compile_definitions(komport-qt6 PRIVATE
+target_compile_definitions(komport_core PUBLIC
   KOMPORT_VERSION="${PROJECT_VERSION}"
 )
 
-target_link_libraries(komport-qt6 PRIVATE
+target_link_libraries(komport_core PUBLIC
   Qt6::Widgets
   Qt6::PrintSupport
   Qt6::SerialPort
 )
+
+add_executable(komport-qt6 komport/main.cpp)
+target_link_libraries(komport-qt6 PRIVATE komport_core)
 
 install(TARGETS komport-qt6 RUNTIME DESTINATION bin)
 install(FILES komport/komport.desktop DESTINATION share/applications)
@@ -85,3 +92,14 @@ install(FILES komport/lo16-app-komport.png
   DESTINATION share/icons/hicolor/16x16/apps
   RENAME komport-qt6.png
 )
+
+# Regression tests for crash classes past code reviews already found and
+# fixed once (profile/array-size validation, unbounded escape-sequence
+# buffers, window lifetime/serial-port teardown, ...) - see TODO.md's
+# Codex-review section for the incidents these guard against. BUILD_TESTING
+# is defined by include(CTest) below (default ON); pass
+# -DBUILD_TESTING=OFF to skip needing Qt6::Test.
+include(CTest)
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()

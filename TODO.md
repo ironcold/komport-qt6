@@ -158,22 +158,65 @@ am Ende dieses Abschnitts.
 
 ### Mittel
 
-- [ ] `QSerialPort`-Fehler (`settingsFailed()`) sind nirgends mit der UI
+- [x] `QSerialPort`-Fehler (`settingsFailed()`) sind nirgends mit der UI
   verbunden — Port-/Framing-/Permission-Probleme landen nur in
   `qWarning()`, nicht als Status-/Fehlerdialog. (`komportserial.cpp`
   `slotPortError()` ~Z. 206, `komport.cpp` `applyConnectionSettings()`
   ~Z. 586 ignoriert den `open()`-Rückgabewert.)
-- [ ] RX-Flush ist bei Bursts unnötig teuer — `slotFlushRxBuffer()`
+  **Gefixt (2026-09-06):** `KomportSerial::settingsFailed()` trägt jetzt
+  einen `const QString &reason`-Parameter (befüllt aus `mPort.errorString()`
+  bzw. einer festen Meldung bei fehlgeschlagenem `applyPortSettings()`);
+  neuer Slot `KomportApp::slotSerialSettingsFailed()` verbindet das Signal
+  und zeigt die Meldung über `slotStatusMsg()` in der Statusleiste (bewusst
+  kein `QMessageBox`, da das Signal bei einer instabilen Verbindung
+  wiederholt feuern kann). `open()`s ignorierter Rückgabewert wird
+  darüber indirekt mit abgedeckt, da ein fehlgeschlagenes `mPort.open()`
+  bereits `errorOccurred()` → `slotPortError()` → `settingsFailed()`
+  auslöst.
+  **Nachgebessert über drei weitere Codex-Review-Runden:** (1) neues
+  Member `mSerialErrorPending` verhindert, dass `loadProfile()`s/
+  `slotShowPreferences()`s eigene abschließende Erfolgsmeldung
+  ("Loaded profile ..."/"Ready.") eine gerade erst synchron gemeldete
+  Fehlermeldung sofort wieder überschreibt (Codex-Fund: `applyPortSettings()`
+  kann mitten in `loadProfile()`/`slotShowPreferences()` synchron
+  `settingsFailed()` auslösen, bevor die Methode ihre eigene
+  "Erfolg"-Statusmeldung setzt). (2) In `slotShowPreferences()` wenden
+  `setFraming()`/`setFlowControl()` auf einen bereits offenen Port sofort
+  eine noch unvollständig aktualisierte Zwischenkombination an — kann
+  transient fehlschlagen, obwohl die tatsächlich gewünschte Endkombination
+  gültig ist. Reset von `mSerialErrorPending` deshalb nicht pauschal an den
+  Anfang des Setter-Blocks gelegt, sondern gezielt direkt vor
+  `setBaudRate()` (dem in der Aufrufreihenfolge letzten Setter, der die
+  Portoptionen berührt, mit bereits vollständig aktualisierten Feldern) —
+  verwirft so gezielt nur den "Lärm" der früheren Zwischenaufrufe.
+  (3) Ein erster Versuch, den Erfolg stattdessen über `serial->isOpen()`
+  zu verifizieren (`mSerialErrorPending = !serial->isOpen()`), war selbst
+  ein Fehlschluss: eine von `QSerialPort` abgelehnte Einstellung schließt
+  den Port nicht zwangsläufig — der Port kann offen bleiben, obwohl die
+  gewünschte Kombination nicht übernommen wurde. Diese Zeile wieder
+  entfernt; die vierte Review-Runde war dann sauber (keine Findings mehr).
+  `applyConnectionSettings()`/`loadProfile()`s Pfad brauchte diese
+  Nachbesserung nicht, da dort der Port vor jedem Setter-Aufruf immer
+  erst geschlossen wird (siehe Kommentar dort) — keine Zwischenzustände,
+  kein `isOpen()`-Fehlschluss möglich.
+- [x] RX-Flush ist bei Bursts unnötig teuer — `slotFlushRxBuffer()`
   (`komportserial.cpp` ~Z. 214) leert den Buffer byteweise mit
   `remove(0, 1)`, was bei hohen Baudraten/Bursts O(n²) kostet.
-- [ ] Ungültige `RXQueue`/`FlushRate`-Werte aus Profilen werden ungeprüft
+  **Gefixt (2026-09-06):** Snapshot-and-Clear statt Byte-für-Byte-`remove()`
+  — `mRxBuffer` wird einmal kopiert (implizit geteilt, kein Deep-Copy) und
+  sofort geleert, dann wird über die Kopie iteriert. O(n) statt O(n²).
+- [x] Ungültige `RXQueue`/`FlushRate`-Werte aus Profilen werden ungeprüft
   übernommen (`komport.cpp` ~Z. 600, `komportserial.cpp` ~Z. 190/223) —
   die GUI begrenzt Werte, `QSettings`-Import nicht; `RXQueue<=0` wirft
   empfangene Daten effektiv weg.
-- [ ] Blink-Update iteriert über Pixelbreite statt Spaltenzahl —
+  **Gefixt (2026-09-06):** `KomportSerial::setRxQueue()` klemmt jetzt auf
+  `qMax(1, _i)`, `setFlushRate()` auf `qMax(0, _i)` — direkt im Setter,
+  schützt also jeden Aufrufer, nicht nur den Profil-Ladepfad.
+- [x] Blink-Update iteriert über Pixelbreite statt Spaltenzahl —
   `komportview.cpp` `timerEvent()` (~Z. 223) nutzt `cellArray()->cellWidth()`
   als Spaltenlimit statt `arrayWidth()`; blinkende Zellen rechts davon
   werden nicht regelmäßig neu gezeichnet.
+  **Gefixt (2026-09-06):** Ein-Zeilen-Fix, `cellWidth()` → `arrayWidth()`.
 - [x] Statische View-Liste `pViewList` wird nie bereinigt
   (`komportdoc.cpp` ~Z. 30/49/55) — `removeView()` wird nirgends
   aufgerufen. Aktuell durch das "Hoch"-Finding zu Fensterlebenszeit
@@ -183,14 +226,51 @@ am Ende dieses Abschnitts.
   **Gefixt (2026-09-06) zusammen mit dem Hoch-Finding oben:**
   `~KomportApp()` ruft jetzt `doc->removeView(view)` auf — siehe
   Verifikation dort.
-- [ ] `KomportView::getDocument()` castet `window()` hart zu `KomportApp*`
+- [x] `KomportView::getDocument()` castet `window()` hart zu `KomportApp*`
   (`komportview.cpp` ~Z. 90) und dereferenziert sofort — crasht außerhalb
   dieses Einbettungskontexts (Tests, Preview-Container).
-- [ ] Keine dauerhaften Tests/CTest-Targets im Repo (nur temporäre,
+  **Gefixt (2026-09-06):** C-Style-Cast durch `qobject_cast<KomportApp*>`
+  ersetzt. **Nachgebessert nach Codex-Review:** die erste Version gab bei
+  Nichtübereinstimmung `nullptr` zurück (plus `qWarning()`) — Codex wies
+  zu Recht darauf hin, dass das den Crash nur eine Ebene weiter
+  verschiebt, da `KomportView::getSerial()` `getDocument()->getSerial()`
+  ungeprüft aufruft und der Konstruktor `getSerial()` sofort aufruft; ein
+  Null-Return "löst" hier nichts, es tauscht nur UB gegen einen
+  Null-Pointer-Crash an unzusammenhängender Stelle. Da `KomportView`
+  architekturell zwingend an ein `KomportApp`-Top-Level-Fenster gebunden
+  ist (kein Rewrite zu einem allgemein wiederverwendbaren Widget, keine
+  sinnvolle Teilfunktion ohne Dokument), gibt es hier keinen "sauberen"
+  Fallback — stattdessen jetzt `qFatal()` direkt an der eigentlichen
+  Verletzungsstelle: lauter, aber mit einer klaren Diagnosemeldung genau
+  dort, wo die Annahme bricht, statt eines mysteriösen Absturzes an
+  anderer Stelle ohne Hinweis auf die Ursache.
+- [x] Keine dauerhaften Tests/CTest-Targets im Repo (nur temporäre,
   wieder gelöschte Test-Targets laut `TODO-ARCHIVE.md`) — genau die
   bereits gefixten Crash-Klassen (Cursor-Clamping, Escape-Parsing,
   Profilwechsel, serieller Roundtrip) können regressieren, ohne dass es
   auffällt.
+  **Gefixt (2026-09-06):** `CMakeLists.txt` in eine Objekt-Library
+  `komport_core` (alle Quellen außer `main.cpp`) plus dünnes
+  `komport-qt6`-Executable aufgeteilt; neues `tests/`-Verzeichnis mit
+  `Qt6::Test`-basierten Regressionstests, die gegen exakt dieselben
+  kompilierten Klassen linken. Fünf permanente Test-Targets (`ctest`
+  nach dem Build, `BUILD_TESTING` via `include(CTest)`, Default an):
+  `tst_cellarray` (negative `setArraySize()`-Dimensionen), `tst_emulation`
+  (unbounded CSI-Buffer + Cursor-Clamping an allen vier Rändern),
+  `tst_serial` (RXQueue/FlushRate-Clamping), `tst_windowlifetime`
+  (`WA_DeleteOnClose`, `pViewList`-Bereinigung, `slotFileClose()`
+  greift nicht auf ein bereits akzeptiert geschlossenes Fenster zu),
+  `tst_profileerror` (ein synchron gemeldeter Serial-Fehler in
+  `loadProfile()` übersteht dessen eigene abschließende
+  "Loaded profile ..."-Erfolgsmeldung — Regressionstest für die
+  `mSerialErrorPending`-Nachbesserung beim `settingsFailed()`-Finding
+  oben). `tst_windowlifetime`/`tst_profileerror` leiten `QSettings`
+  jeweils auf eine eigene Organisation/App
+  ("Komport-Qt6-Test"/"Komport-Qt6-Test-ProfileError") um, damit
+  Testläufe nie das echte `~/.config/Komport-Qt6/`-Profil eines Nutzers
+  anfassen, und räumen ihre Test-Config-Datei/ihr Verzeichnis in
+  `cleanupTestCase()` wieder auf. Alle 5 Tests grün, Clean-Build mit
+  `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler.
 
 ### Nitpick
 
