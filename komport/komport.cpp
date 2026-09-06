@@ -913,8 +913,14 @@ void KomportApp::slotFileOpen()
     {
       KomportTransfer transfer( view->getSerial(), view );
       transfer.setFileName(fileName);
-      transfer.upload();
-      addRecentFile( QUrl::fromLocalFile(fileName) );
+      // Only remember it as a recent file if the upload actually
+      // completed - a cancelled or failed transfer (transfer.upload()
+      // already shows its own QMessageBox for a real error) previously
+      // still landed in the recent-files list exactly as if it had
+      // succeeded.
+      if ( transfer.upload() ) {
+        addRecentFile( QUrl::fromLocalFile(fileName) );
+      }
     }
   slotStatusMsg(tr("Ready."));
 }
@@ -926,8 +932,9 @@ void KomportApp::slotFileOpenRecent(const QUrl& url)
     {
       KomportTransfer transfer( view->getSerial(), view );
       transfer.setFileName( url.toLocalFile() );
-      transfer.upload();
-      addRecentFile( url );
+      if ( transfer.upload() ) {
+        addRecentFile( url );
+      }
     }
   slotStatusMsg(tr("Ready."));
 }
@@ -945,8 +952,13 @@ void KomportApp::slotFileSaveAs()
     {
       KomportTransfer transfer( view->getSerial(), view );
       transfer.setFileName(fileName);
-      transfer.download();
-      addRecentFile( QUrl::fromLocalFile(fileName) );
+      // Only remember it as a recent file if the download actually
+      // completed (Ctrl-D received) - previously a cancelled or failed
+      // download landed in the recent-files list exactly as if it had
+      // succeeded, since download() always returned true.
+      if ( transfer.download() ) {
+        addRecentFile( QUrl::fromLocalFile(fileName) );
+      }
     }
   slotStatusMsg(tr("Ready."));
 }

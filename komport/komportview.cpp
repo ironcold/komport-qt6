@@ -195,6 +195,17 @@ void KomportView::drawChar(QChar _c,int _x, int _y){
 
 /** re-draw a cell */
 void KomportView::updateCell(int _x,int _y){
+  // mPixmap only gets its actual size in resizeEvent() (see there) - before
+  // this widget has ever been resized (e.g. profile-loading during
+  // KomportApp's constructor, well before show()), it's still a
+  // default-constructed null QPixmap. Painting into a null QPixmap is a
+  // silent no-op as far as pixels go, but QPainter still complains loudly
+  // ("Paint device returned engine == 0") - and there's nothing meaningful
+  // to draw into yet anyway. Once resizeEvent() does give mPixmap a real
+  // size, it finishes with cellArray()->update(), which re-triggers this
+  // for every cell - so nothing is lost by skipping here, only redundant
+  // work and warning spam.
+  if ( mPixmap.isNull() ) return;
   int cellWidth = cellArray()->cellWidth();
   int cellHeight = cellArray()->cellHeight();
   QRect cellRect( _x*cellWidth, _y*cellHeight, cellWidth, cellHeight );
@@ -434,6 +445,10 @@ void KomportView::resizeGridRows(int _newRows){
 }
 /** notification that the cell array has scrolled up so we need to scroll visually */
 void KomportView::slotScrolledUp(){
+    // see the comment in updateCell() - same null-mPixmap guard, needed
+    // here since a line feed can arrive (and scroll the cell array) before
+    // this widget's first resizeEvent() has ever given mPixmap a size.
+    if ( mPixmap.isNull() ) return;
     int rowHeight = cellArray()->cellHeight();
     // scroll the offscreen pixels up one row: copy the pixmap's lower
     // portion into a temporary buffer first, since painting a QPixmap onto
@@ -580,6 +595,12 @@ void KomportView::slotSimKeyPressed(QChar _c){
 /** scroll bar moved */
 void KomportView::slotScroll(int _value){
     Q_UNUSED(_value);
+    // see the comment in updateCell() - same null-mPixmap guard, needed
+    // here too since this can be reached via resetScroll()'s
+    // setValue()/valueChanged() before the first resizeEvent() ever runs
+    // (e.g. applyConnectionSettings() -> setScrollBuffer() -> resetScroll()
+    // during profile loading in KomportApp's constructor).
+    if ( mPixmap.isNull() ) return;
     int cellWidth = cellArray()->cellWidth();
     int cellHeight = cellArray()->cellHeight();
     QPainter paint( &mPixmap );

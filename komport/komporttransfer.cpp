@@ -64,13 +64,26 @@ bool KomportTransfer::upload(){
            QThread::msleep( 250 );
        }
     }
+    // sent == size, not mFile.atEnd(): getChar() already advances the read
+    // position before the loop condition's "&& !progress.wasCanceled()" is
+    // even evaluated, so a Cancel click landing on the very last byte can
+    // leave the file at EOF (that byte was *read*) while it was never
+    // actually handed to putChar() (the loop body never ran for it, sent
+    // wasn't incremented) - atEnd() alone would then misreport that as a
+    // complete upload. Comparing bytes actually sent against the file size
+    // isn't vulnerable to that read-vs-send-order race.
+    const bool finishedNormally = ( sent == size );
     mFile.close();
     if ( writeFailed ) {
         QMessageBox::warning( mParent, tr("Upload"),
             tr("Lost the connection to the serial port after sending %1 of %2 bytes.").arg(sent).arg(size) );
         return false;
     }
-    return true;
+    // A cancelled upload isn't an error worth a dialog for (the user asked
+    // for it), but it's still not a completed upload - previously this
+    // returned true unconditionally, so callers had no way to tell
+    // "finished" from "gave up partway" (see slotFileOpen() et al.).
+    return finishedNormally;
 }
 /** run the download file transfer */
 bool KomportTransfer::download(){
@@ -79,6 +92,7 @@ bool KomportTransfer::download(){
             tr("Could not open \"%1\" for writing:\n%2").arg(mFile.fileName(), mFile.errorString()) );
         return false;
     }
+    mDownloadWriteError = false;
     QObject::connect(mSerial,SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(char)));
     qint64 received=0;
     QProgressDialog progress( tr("Download Progress"), tr("Cancel"), 0, 0, mParent );
@@ -86,7 +100,7 @@ bool KomportTransfer::download(){
     progress.setWindowModality( Qt::WindowModal );
     progress.show();
     progress.raise();
-    while( mFile.isOpen() && !progress.wasCanceled() ) {
+    while( mFile.isOpen() && !progress.wasCanceled() && !mDownloadWriteError ) {
         received = mFile.size();
         progress.setMaximum( static_cast<int>(received+1) );
         progress.setValue( static_cast<int>(received) );
@@ -99,17 +113,38 @@ bool KomportTransfer::download(){
         // download that's just waiting on the remote side.
         QCoreApplication::processEvents( QEventLoop::WaitForMoreEvents );
     }
+    // Ctrl-D (a genuine, complete transfer) is the only path that closes
+    // mFile itself (see slotReceivedChar() below) - the loop above exiting
+    // any other way (Cancel, or a write failure) leaves it open here, so
+    // this distinguishes "actually finished" from "gave up partway".
+    const bool finishedNormally = !mFile.isOpen();
     mFile.close();
     QObject::disconnect(mSerial,SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(char)));
-    return true;
+
+    if ( mDownloadWriteError ) {
+        QMessageBox::warning( mParent, tr("Download"),
+            tr("Could not write to \"%1\": %2").arg(mFile.fileName(), mFile.errorString()) );
+        return false;
+    }
+    // A cancelled transfer isn't an error worth a dialog for (the user
+    // asked for it), but it's still not a completed download - previously
+    // this returned true unconditionally, so callers had no way to tell
+    // "finished" from "gave up partway" (see slotFileSaveAs()).
+    return finishedNormally;
 }
 /** No descriptions */
 void KomportTransfer::slotReceivedChar(char _ch){
     if ( mFile.isOpen() )  {
         if ( _ch == ('D'-0x40) )  { // end of text (Ctrl-D)
             mFile.close();
-        } else {
-            mFile.putChar( _ch );
+        } else if ( !mFile.putChar( _ch ) ) {
+            // Leave mFile open here rather than closing it immediately -
+            // download()'s loop condition checks mDownloadWriteError and
+            // will exit and report this on its next iteration; closing it
+            // from inside a slot invoked via a signal connection that
+            // download() itself is about to disconnect is more fragile
+            // than letting the one method that owns the loop handle it.
+            mDownloadWriteError = true;
         }
     }
 }

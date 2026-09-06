@@ -42,10 +42,23 @@ private slots:
 
   void windowManagerCloseDestroysWindow();
   void slotFileCloseDoesNotTouchFreedWindow();
+  void constructionBeforeShowProducesNoPaintWarnings();
 
 private:
   QString mTestConfigFile;
 };
+
+namespace {
+  // Accumulates messages seen while a custom handler is installed (see
+  // constructionBeforeShowProducesNoPaintWarnings() below). A plain
+  // function pointer/static, not a capturing lambda: qInstallMessageHandler()
+  // takes a QtMessageHandler function pointer, which can't carry captured
+  // state.
+  QStringList g_capturedMessages;
+  void captureMessageHandler(QtMsgType, const QMessageLogContext &, const QString &msg) {
+    g_capturedMessages << msg;
+  }
+}
 
 void TstWindowLifetime::initTestCase()
 {
@@ -123,6 +136,53 @@ void TstWindowLifetime::slotFileCloseDoesNotTouchFreedWindow()
   // above.
   QTRY_VERIFY2( guard.isNull(), "slotFileClose() should result in the "
                             "window being destroyed for an accepted close" );
+}
+
+void TstWindowLifetime::constructionBeforeShowProducesNoPaintWarnings()
+{
+  // Regression test: mPixmap only gets an actual size in
+  // KomportView::resizeEvent() - before this widget has ever been shown/
+  // resized, it's still a default-constructed null QPixmap.
+  // KomportApp's constructor loads a profile (initProfiles() ->
+  // loadProfile() -> applyConnectionSettings() -> view->setScrollBuffer()
+  // -> resetScroll()) well before show()/the first resizeEvent(), and
+  // resetScroll()'s scrollbar setValue() *can* (depending on whether the
+  // value actually changes) synchronously reach KomportView::slotScroll()
+  // via valueChanged() - which used to unconditionally paint into that
+  // still-null mPixmap. Rather than depend on the scroll buffer happening
+  // to be in a state where that value actually changes (it doesn't for a
+  // freshly seeded profile with no scrollback content yet, so the
+  // construction-time path alone doesn't reliably reproduce this), call
+  // the vulnerable methods directly - this is what actually exercises the
+  // fix regardless of scroll-buffer state, and is exactly what a real
+  // host sending a line feed early (slotScroll()'s sibling
+  // slotScrolledUp(), reached the same way) or the paintCell() family
+  // (updateCell()) would trigger.
+  KomportApp *win = new KomportApp(); // deliberately not shown yet
+  QPointer<KomportApp> guard(win);
+  KomportView *view = win->findChild<KomportView *>();
+  QVERIFY( view != nullptr );
+
+  g_capturedMessages.clear();
+  QtMessageHandler previousHandler = qInstallMessageHandler(captureMessageHandler);
+
+  view->updateCell(0, 0);
+  view->slotScroll(0);
+
+  qInstallMessageHandler(previousHandler);
+
+  const QStringList paintWarnings = g_capturedMessages.filter(
+      QStringLiteral("Paint device returned engine"), Qt::CaseInsensitive );
+  QVERIFY2( paintWarnings.isEmpty(),
+            qPrintable( QStringLiteral("expected no QPainter warnings painting into an "
+                                       "unresized (null) mPixmap, got %1: %2")
+                            .arg(paintWarnings.size())
+                            .arg(paintWarnings.join(QStringLiteral(" | "))) ) );
+
+  // Doesn't need to be shown for this test's purpose, but close it the
+  // same way the other tests in this file do rather than leaking it.
+  win->close();
+  QTRY_VERIFY( guard.isNull() );
 }
 
 QTEST_MAIN(TstWindowLifetime)

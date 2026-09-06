@@ -308,6 +308,138 @@ Logger-/Transfer-Busy-Loop und stille Fehler entschärfen → danach
 dauerhafte PTY- und Emulations-Regressionstests in CMake/CTest aufnehmen.
 Erst danach Meilenstein 4/5/6/7 angehen.
 
+## 0.2 Zweiter Full-Review nach den Fixes aus 0.1 (2026-09-06)
+
+Auf Nutzerwunsch ein zweiter, unabhängiger `codex:codex-rescue`-Adversarial-
+Review über den Stand nach allen 15 Fixes aus Abschnitt 0.1 (Branch
+`fix/codex-review-critical-high-findings`, neuer Codex-Thread statt
+Fortsetzung des ersten) — Ziel: prüfen, ob die Fixes selbst sauber sind und
+ob dabei neue Probleme eingeführt wurden. Ergebnis: keine Kritisch-/Hoch-
+Blocker, aber 3 neue Mittel-Findings, alle durch die vorherigen Fixes
+selbst verursacht bzw. davon unberührt gebliebene Nachbarstellen. Alle 3
+gefixt, verifiziert, per Codex-Review gegengeprüft (keine weiteren
+Findings).
+
+- [x] **Uninitialisiertes `mPixmap` beim Profil-Laden im Konstruktor.**
+  `komportview.cpp` `slotScroll()` (~Z. 592), `updateCell()` (~Z. 197),
+  `slotScrolledUp()` (~Z. 447): `mPixmap` bekommt seine tatsächliche Größe
+  erst in `resizeEvent()`. `KomportApp`s Konstruktor lädt ein Profil
+  (`initProfiles()` → `loadProfile()` → `applyConnectionSettings()` →
+  `view->setScrollBuffer()` → `resetScroll()`) schon vor `show()`/dem
+  ersten `resizeEvent()`; `resetScroll()`s `setValue()` kann (abhängig vom
+  Scroll-Buffer-Zustand) synchron über `valueChanged()` `slotScroll()`
+  erreichen, das bis dahin bedingungslos `QPainter paint(&mPixmap)` auf
+  ein noch null-großes `QPixmap` ausgeführt hat — funktional ein No-op,
+  aber mit lauten `QPainter::begin: Paint device returned engine == 0`-
+  Warnungen bei jedem Start.
+  **Gefixt (2026-09-06):** `if (mPixmap.isNull()) return;`-Guard an allen
+  drei Stellen. Sicher, weil `resizeEvent()` am Ende immer
+  `cellArray()->update()` aufruft, was jede Zelle über die normale
+  Signal-Kette (`slotRowChanged()`/`slotCellChanged()` → `updateCell()`)
+  neu zeichnet, sobald `mPixmap` eine echte Größe hat — es geht also
+  nichts verloren, nur redundante Arbeit/Warnungen werden vermieden.
+  Verifiziert per neuem `tst_windowlifetime`-Testfall: gegen den
+  ungefixten Stand reproduzierbar (`FAIL!` mit exakt der erwarteten
+  `QPainter`-Warnung, 2×), gegen den gefixten Stand grün.
+  **Nebenbefund beim Testschreiben:** der natürliche Konstruktions-Pfad
+  allein triggert das *nicht* zuverlässig (ein frisch geladenes Profil
+  hat einen leeren Scroll-Buffer, `resetScroll()`s `setValue(0)` ändert
+  dann nichts am bereits-0 stehenden Scrollbar-Wert, `valueChanged()`
+  feuert nicht) — der Test ruft `updateCell()`/`slotScroll()` deshalb
+  direkt auf, statt sich auf den zufälligen Trigger-Zustand beim Start zu
+  verlassen.
+- [x] **Neue Transfer-Fehlerrückgaben wurden von der UI ignoriert.**
+  `komporttransfer.cpp` `download()` (~Z. 76), `slotReceivedChar()`
+  (~Z. 107), `komport.cpp` `slotFileOpen()`/`slotFileOpenRecent()`/
+  `slotFileSaveAs()`: `upload()`/`download()` geben seit dem ersten
+  Fix-Durchlauf (Abschnitt 0.1, Hoch) sinnvoll `false` bei Fehlern
+  zurück, aber (a) `download()` gab nach einem Cancel weiterhin `true`
+  zurück und prüfte `mFile.putChar()`s Rückgabewert in
+  `slotReceivedChar()` nicht, und (b) die UI-Aufrufstellen ignorierten
+  den Rückgabewert komplett und riefen trotzdem `addRecentFile()` auf —
+  ein abgebrochener/fehlgeschlagener Transfer landete so wie ein
+  erfolgreicher in der Recent-Files-Liste.
+  **Gefixt (2026-09-06):** neues Member `mDownloadWriteError`, gesetzt in
+  `slotReceivedChar()` bei fehlgeschlagenem `mFile.putChar()`, geprüft in
+  `download()`s Polling-Schleife (bricht die Schleife mit ab) und danach
+  (zeigt einen `QMessageBox::warning()`). `download()` unterscheidet jetzt
+  "Ctrl-D empfangen" (echter Abschluss, `mFile` wird dabei selbst
+  geschlossen) von "Cancel/Fehler" (Schleife bricht anders ab, `mFile`
+  bleibt bis zum expliziten `close()` offen) und gibt entsprechend
+  `true`/`false` zurück. Alle drei UI-Aufrufstellen rufen
+  `addRecentFile()` jetzt nur noch bei `true` auf.
+  **Nachgebessert nach Codex-Review-Runde 2:** dieselbe Lücke bestand
+  unverändert auch in `upload()` — bei Cancel gab es weiterhin
+  bedingungslos `true` zurück (`writeFailed` blieb `false`), obwohl der
+  Upload nicht vollständig war. `upload()` unterscheidet jetzt ebenfalls
+  "wirklich fertig" (zunächst `mFile.atEnd()` direkt nach der Schleife,
+  vor `close()`) von "Cancel/Fehler" und gibt entsprechend zurück.
+  **Nachgebessert nach Codex-Review-Runde 3:** `mFile.atEnd()` selbst war
+  noch nicht ganz richtig — `getChar()` rückt die Leseposition bereits
+  vor, *bevor* die Schleifenbedingung `&& !progress.wasCanceled()`
+  überhaupt geprüft wird. Ein Cancel-Klick exakt beim letzten Byte kann
+  also dazu führen, dass dieses Byte zwar schon *gelesen* (Datei damit
+  auf `atEnd()`), aber nie an `putChar()` übergeben wurde (die
+  Schleifenkörper-Ausführung für dieses Byte entfällt, `sent` wird nicht
+  erhöht) — `atEnd()` hätte das fälschlich als vollständig gemeldet.
+  Jetzt `sent == size` statt `mFile.atEnd()` als Kriterium — unabhängig
+  von dieser Lese-vs-Sende-Reihenfolge-Race, da es die tatsächlich
+  gesendete Byte-Anzahl mit der Dateigröße vergleicht statt der
+  Leseposition.
+- [x] **`setArraySize()`-Fix schützte vor negativen Werten, nicht vor
+  Integer-Overflow.** `komportcellarray.cpp` `setArraySize()` (~Z. 55):
+  `newcnt = _sz.width()*_sz.height()` als `int`-Multiplikation kann bei
+  sehr großen positiven Dimensionen überlaufen und (undefiniertes
+  Verhalten, praktisch oft) negativ/falsch klein werden — dann kann der
+  Shrink-Pfad wieder mehr Zellen per `takeFirst()` entfernen als
+  existieren, exakt dieselbe Absturzklasse wie beim ursprünglichen
+  negativen-Werte-Fix, nur über eine andere Route.
+  **Gefixt (2026-09-06):** die Multiplikation läuft jetzt zuerst in
+  `qint64` (`wanted`); überschreitet sie eine neue Konstante `MaxCells`
+  (10.000.000 — weit über jeder plausiblen Terminal-/Scrollback-Größe),
+  wird `height` so weit heruntergeklemmt, dass das Produkt wieder passt,
+  *bevor* die eigentliche `int newcnt`-Berechnung läuft. Eine zweite,
+  bis dahin übersehene Stelle im selben Vorher-leer-Zweig
+  (`for (index=0; index < mArraySize.width()*mArraySize.height(); ...)`,
+  dieselbe unsichere Multiplikation ein zweites Mal) auf das jetzt
+  sichere `newcnt` umgestellt statt sie erneut zu berechnen.
+  Verifiziert per `tst_cellarray`-Testfall: gegen den ungefixten Stand
+  reproduzierbar (Absturz), gegen den gefixten Stand grün.
+  **Nachgebessert nach Codex-Review-Runde 2 (P2/P3):** der erste Fix
+  klemmte nur `height` auf Basis des Produkts, ließ aber eine extrem
+  große `width` unverändert in `mArraySize` stehen — andere öffentliche
+  Methoden (`size()`, `arrayWidth()`, Iterationen bis `arrayWidth()`)
+  nutzen die Dimensionen direkt, nicht nur die Zellzahl, könnten also
+  weiterhin überlaufen oder exzessiv viel arbeiten, obwohl `newcnt`
+  selbst sicher war. Neue Konstante `MaxDimension` (100.000) klemmt jetzt
+  *zuerst* jede Dimension einzeln, bevor das Produkt überhaupt betrachtet
+  wird. Beim Implementieren selbst noch eine zweite, subtilere Lücke
+  gefunden und geschlossen, bevor sie in eine weitere Review-Runde ging:
+  die `MaxCells`-basierte `height`-Reduktion (`MaxCells / width`) kann
+  rechnerisch selbst wieder über `MaxDimension` hinausschießen, wenn
+  `width` klein ist — mit den aktuellen Konstanten (`MaxCells` ist ein
+  glattes Vielfaches von `MaxDimension`) ist das nicht tatsächlich
+  erreichbar (siehe Kommentar im Code für die Herleitung), aber der Cap
+  wird nach der Reduktion trotzdem defensiv erneut angewendet, damit die
+  Invariante "Dimensionen bleiben immer ≤ `MaxDimension`" nicht still von
+  dieser zahlentheoretischen Zufälligkeit zwischen den beiden Konstanten
+  abhängt, falls eine davon später unabhängig geändert wird.
+  `tst_cellarray`s Testfall bewusst mit extrem großer Breite statt großer
+  Höhe gewählt (Breite wird auf `MaxDimension` geklemmt, Höhe bleibt
+  klein) — ein Test, der tatsächlich den vollen `MaxCells`-Ergebniszweig
+  durchläuft, hätte ~10 Mio. `KomportCell`-Objekte alloziert (~1,9s
+  gemessen, selbst mit `-O2`); für einen einzelnen Unit-Test-Fall nicht
+  gerechtfertigt, wenn eine deutlich billigere Eingabe (Breite allein
+  jenseits von `MaxDimension`) den Clamp genauso direkt nachweist.
+
+**Verifikation (gesamt):** alle 5 `ctest`-Targets grün. Clean-Build mit
+`-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test grün.
+Drei Codex-Review-Runden auf dem finalen Diff: Runde 1 fand die
+`upload()`-Cancel-Lücke (P2) und die fehlende Breiten-Klemmung (P3),
+beide gefixt; Runde 2 fand eine subtilere Restlücke in genau diesem
+Cancel-Fix (P2, `atEnd()` vs. tatsächlich gesendete Bytes), ebenfalls
+gefixt; Runde 3 fand keine weiteren Findings.
+
 
 ## 1. Produktvision und Architektur-Gate
 

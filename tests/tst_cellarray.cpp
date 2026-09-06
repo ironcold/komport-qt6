@@ -31,6 +31,7 @@ class TstCellArray : public QObject
 private slots:
   void negativeHeightDoesNotCrash();
   void regrowAfterNegativeIsUsable();
+  void hugeWidthDoesNotCrashAndGetsClamped();
 };
 
 void TstCellArray::negativeHeightDoesNotCrash()
@@ -55,6 +56,38 @@ void TstCellArray::regrowAfterNegativeIsUsable()
   arr.setArraySize( QSize(80, 25) );
   QCOMPARE( arr.arraySize(), QSize(80, 25) );
   QVERIFY( arr.cell(0, 0) != nullptr );
+  QVERIFY( arr.cell(79, 24) != nullptr );
+}
+
+void TstCellArray::hugeWidthDoesNotCrashAndGetsClamped()
+{
+  KomportCellArray arr;
+  // An extreme width alone (height stays small/sane) exercises two things
+  // at once, cheaply (the clamped width keeps the actual cell count in
+  // the hundreds of thousands, not the ~4.3 billion this would be
+  // unguarded):
+  //  1. width*height as plain int would itself already overflow computing
+  //     this product (1'073'741'823 * 4 is far past INT_MAX) - the
+  //     int-overflow guard inside setArraySize() must not let a garbage
+  //     newcnt through and reintroduce the same takeFirst()-overshoot
+  //     crash the negative-value fix addressed, just via a different
+  //     route.
+  //  2. mArraySize itself must not be left holding the huge width
+  //     unclamped - public methods like size()/arrayWidth() use it
+  //     directly, not just the eventual cell count, so a caller that only
+  //     checked "did the allocation stay small" could still be handed an
+  //     absurd width back out of arraySize().
+  arr.setArraySize( QSize(1'073'741'823, 4) ); // ~4.3G cells if fully unguarded
+  QVERIFY2( arr.arraySize().width() <= 100000,
+            qPrintable(QStringLiteral("width should have been clamped to a sane maximum, got %1")
+                           .arg(arr.arraySize().width())) );
+  QCOMPARE( arr.arraySize().height(), 4 ); // small to begin with, not itself clamped
+  QVERIFY( arr.cell(0, 0) != nullptr );
+  QVERIFY( arr.cell(arr.arraySize().width()-1, 3) != nullptr );
+
+  // Must still be usable afterwards for a normal, sane size.
+  arr.setArraySize( QSize(80, 25) );
+  QCOMPARE( arr.arraySize(), QSize(80, 25) );
   QVERIFY( arr.cell(79, 24) != nullptr );
 }
 
