@@ -165,12 +165,12 @@ void KomportSerial::applyPortSettings(){
 }
 
 /** put a character */
-void KomportSerial::putChar(char _ch){
-  if ( isOpen() ) {
-    if ( mPort.putChar( _ch ) ) {
-      emit sentChar( _ch );
-    }
+bool KomportSerial::putChar(char _ch){
+  if ( isOpen() && mPort.putChar( _ch ) ) {
+    emit sentChar( _ch );
+    return true;
   }
+  return false;
 }
 
 /** transmit a string */

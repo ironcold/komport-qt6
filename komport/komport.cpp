@@ -57,6 +57,17 @@ static const int MAX_RECENT_FILES = 10;
 
 KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
 {
+  // Without this, closing a window via the window manager's close button
+  // only hides it - the QMainWindow object (and everything it owns: the
+  // serial port, doc, view, timers, signal/slot connections) stays alive
+  // for the rest of the process. With multiple windows open, a "closed"
+  // one could keep holding its serial port exclusively forever. File ->
+  // Close/Quit already worked around this by calling close() on the port
+  // explicitly (see slotFileClose()/closeEvent() below), but the window
+  // manager path bypassed that. WA_DeleteOnClose makes a real close()
+  // actually destroy the window once closeEvent() accepts it.
+  setAttribute( Qt::WA_DeleteOnClose );
+
   setWindowIcon( QIcon(QStringLiteral(":/icons/lo32-app-komport.png")) );
 
   config = new QSettings(this);
@@ -86,7 +97,13 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
 
 KomportApp::~KomportApp()
 {
-
+  // pViewList is a static list shared across all KomportApp windows (see
+  // KomportDoc::slotUpdateAllViews()). It was never pruned before, which
+  // used to be masked by windows never actually being destroyed (see
+  // WA_DeleteOnClose above) - now that they are, unregister this window's
+  // view here, while doc/view are still valid, rather than leaving a
+  // dangling pointer behind for the next slotUpdateAllViews() broadcast.
+  doc->removeView( view );
 }
 
 void KomportApp::initActions()
@@ -585,7 +602,13 @@ void KomportApp::saveProfile(const QString &_name)
 
 void KomportApp::applyConnectionSettings()
 {
-  view->setScrollBuffer( strScrollBuffer.toInt() );
+  // strScrollBuffer comes straight from QSettings (see loadProfile()) and is
+  // only range-checked when it goes through the settings dialog's spinbox
+  // (0..4096, see settingsdialog.cpp). A hand-edited config file can still
+  // contain a negative or absurdly large value; clamp to the same range
+  // here so a bad profile can't crash KomportCellArray::setArraySize() or
+  // balloon its memory use.
+  view->setScrollBuffer( qBound( 0, strScrollBuffer.toInt(), 4096 ) );
   KomportSerial* serial = view->getSerial();
   // Cleanly disconnect first: a profile switch commonly means switching to
   // a completely different device, so always close/reapply/reopen rather
@@ -792,6 +815,12 @@ void KomportApp::closeEvent(QCloseEvent *event)
 {
   if ( doc->saveModified() ) {
     saveOptions();
+    // Close the port here, once, for every close path (window-manager
+    // close button, File > Close, File > Quit all end up here) -
+    // slotFileClose() used to close it itself before calling close(), but
+    // that meant serial teardown depended on which path was used.
+    // KomportSerial::close() is safe to call again regardless.
+    view->getSerial()->close();
     event->accept();
   } else {
     event->ignore();
@@ -913,10 +942,16 @@ void KomportApp::slotFileClose()
 {
   slotStatusMsg(tr("Closing file..."));
 
-  view->getSerial()->close();
-  close();
-
-  slotStatusMsg(tr("Ready."));
+  // Do not touch `this` after a close() that succeeds: with
+  // Qt::WA_DeleteOnClose set (see the constructor), an accepted close()
+  // means this object is on its way out - Qt's own documentation for
+  // WA_DeleteOnClose only promises deletion on an accepted close, not that
+  // the widget stays usable afterwards within the same call. Only run the
+  // trailing status update for the case where the user (or saveModified())
+  // aborted the close, i.e. this window is still here.
+  if ( !close() ) {
+    slotStatusMsg(tr("Ready."));
+  }
 }
 
 void KomportApp::slotFilePrint()

@@ -560,6 +560,16 @@ namespace {
   // closes that off regardless of screen size.
   constexpr int MaxCtlParam = 10000;
 
+  // Hard cap on the raw, not-yet-parsed CSI sequence buffer
+  // (KomportEmulation::mCtlSequence) itself, applied in sequence() below.
+  // Without it, a host that sends "ESC[" followed by an endless run of
+  // digits/semicolons and never a final letter would make mCtlSequence grow
+  // without bound (adversarial or simply malfunctioning device) - unbounded
+  // memory growth, and the terminal never processes another character while
+  // it happens. No real VT100/VT102/xterm control sequence approaches this
+  // length, so aborting the sequence past this point is always safe.
+  constexpr int MaxCtlSequenceLength = 256;
+
   // Split a CSI parameter string (already stripped of any leading "?") on
   // ';' into its fields. Shared by ctlParam(), doCursorTo(), doGraphics()
   // and doSetMode(), which used to each duplicate this same loop.
@@ -1143,6 +1153,13 @@ void KomportEmulation::sequence(char _ch)
     mSawESC = false;
     mInCtlSequence = false;
     mCtlSequence.resize(0);
+  } else if ( mCtlSequence.size() >= MaxCtlSequenceLength ) {
+    // Malformed/adversarial sequence - a real terminal control sequence
+    // never gets remotely this long. Abort it instead of growing
+    // mCtlSequence without bound; see MaxCtlSequenceLength above.
+    mSawESC = false;
+    mInCtlSequence = false;
+    mCtlSequence.clear();
   } else {
     mCtlSequence += _ch;
   }

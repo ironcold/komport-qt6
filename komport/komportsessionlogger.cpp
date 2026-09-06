@@ -19,6 +19,17 @@
 
 #include <QDateTime>
 
+namespace {
+  // mLineBuffer only ever gets flushed to disk on '\n' (see logChar()
+  // below) - a device that sends a very long line, a binary/non-text
+  // stream, or one that only ever uses bare '\r' without '\n' would
+  // otherwise make it grow without bound for as long as logging stays on.
+  // Force a flush once a single line gets implausibly long for a terminal
+  // session; the log still records everything, just split across more
+  // timestamped lines than usual.
+  constexpr int MaxLineBufferLength = 4096;
+}
+
 KomportSessionLogger::KomportSessionLogger(QObject *parent)
 : QObject(parent)
 {
@@ -65,6 +76,9 @@ void KomportSessionLogger::logChar(char _ch)
     // in the terminal streams this logs, and drawing a lone '\r' inside a
     // text-file line reads as noise rather than content.
     mLineBuffer.append(_ch);
+    if ( mLineBuffer.size() >= MaxLineBufferLength ) {
+      flushLine();
+    }
   }
 }
 

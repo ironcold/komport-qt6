@@ -101,8 +101,11 @@ public slots: // Public slots
   void setBaudRate(qint32 _baud);
   /** Set the baud rate, parsed from a string (as used by the settings dialog / config file). */
   void setBaudRate(const QString &_baud);
-  /** put a character */
-  void putChar(char _ch);
+  /** put a character. Returns false if the port isn't open or the
+   *  underlying write failed (nothing was sent) - callers that need to
+   *  know whether a byte actually made it out (e.g. file transfers) can
+   *  check this instead of assuming success. */
+  bool putChar(char _ch);
   /** transmit a string */
   void putStr(const char* str);
 signals: // Signals

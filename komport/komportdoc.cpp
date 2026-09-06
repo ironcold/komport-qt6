@@ -139,10 +139,21 @@ bool KomportDoc::newDocument()
   /////////////////////////////////////////////////
   // TODO: Add your document initialization code here
   /////////////////////////////////////////////////
-  modified=false;
   doc_url = QUrl::fromLocalFile( QStringLiteral("untitled.kom") );
 
-  setModified(true);
+  // Deliberately NOT setModified(true) here: this used to mark every fresh
+  // window as "modified" from the moment it was created, and nothing else
+  // in this codebase ever clears it back to false except answering "No" in
+  // saveModified()'s dialog - so closing *any* window (File > Close, File >
+  // Quit, or just the window manager's close button), even one that never
+  // received a byte, popped a blocking "The current file has been modified.
+  // Do you want to save it?" prompt. That made sense in the original
+  // KDevelop Document/View template this class is based on (a real
+  // document that starts dirty until first saved), but komportdoc's
+  // save/open document methods are permanently unimplemented TODO stubs
+  // (see CLAUDE.md) - there is no real "document" to protect here, only a
+  // spurious modal on every close.
+  modified=false;
 
   return true;
 }

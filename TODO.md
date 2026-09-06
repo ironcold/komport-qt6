@@ -11,7 +11,7 @@ Unten stehen nur die bewusst offen gelassenen/verschobenen Punkte.
 
 ## 0. Review-Gate vor weiterer Feature-Arbeit
 
-- [ ] Vor neuen funktionalen Meilensteinen einen kompletten Codex-/Adversarial-Review
+- [x] Vor neuen funktionalen Meilensteinen einen kompletten Codex-/Adversarial-Review
   des aktuellen Stands durchfuehren. Hintergrund: Die Qt6-Portierung und die
   Admin-Tool-Features sind auf einem anderen Rechner entstanden und noch nicht
   nach den strengeren Template-Vorgaben dieses Arbeitsbereichs gesteuert
@@ -20,6 +20,193 @@ Unten stehen nur die bewusst offen gelassenen/verschobenen Punkte.
   Persistenz, UI-Lifetime/Signal-Slot-Verbindungen, Build-/Install-Pfade,
   Lizenz-/Header-Konsistenz und fehlende Tests/Smoke-Checks. Findings vor
   Meilenstein 4/5/6/7 priorisieren und als konkrete TODOs schneiden.
+  Durchgeführt am 2026-09-06 via `codex:codex-rescue` (Codex-Adversarial-Review,
+  rein lesend, keine Code-Änderungen) — Ergebnis siehe Abschnitt 0.1.
+
+## 0.1 Findings aus dem Codex-Adversarial-Review (2026-09-06)
+
+Statischer Review (kein Build/Smoke-Test möglich, read-only Sandbox ohne
+`build/`) über den kompletten Stand von `komport/`. Kritisch/Hoch zuerst
+abarbeiten, bevor Meilenstein 4 (VT220/xterm) startet — siehe Priorisierung
+am Ende dieses Abschnitts.
+
+### Kritisch
+
+- [x] **Manipulierte/kaputte Profilwerte können beim Start abstürzen.**
+  `komport.cpp` `applyConnectionSettings()` (~Z. 586), `komportview.cpp`
+  `setScrollBuffer()` (~Z. 575), `komportcellarray.cpp` `setArraySize()`
+  (~Z. 55): `strScrollBuffer.toInt()` aus `QSettings` geht ungeprüft in
+  `setArraySize(QSize(width, value))`. Negative Werte erzeugen negative
+  Zellzahlen; `setArraySize()` ruft dann öfter `takeFirst()` auf als Zellen
+  existieren. Große Werte können zudem massiven Speicherverbrauch auslösen.
+  Reproduktion: `Profiles/<name>/ScrollBuffer=-1` (oder sehr groß) in der
+  Konfiguration setzen, Profil laden.
+  **Gefixt (2026-09-06), zwei Ebenen:** `applyConnectionSettings()` klemmt
+  `strScrollBuffer.toInt()` jetzt mit `qBound(0, ..., 4096)` auf denselben
+  Bereich wie das Settings-Dialog-Spinbox (`ScrollBufferSpinBox`), *und*
+  `KomportCellArray::setArraySize()` selbst klemmt negative Breite/Höhe
+  defensiv auf 0 — schützt so auch vor jedem anderen künftigen Aufrufer mit
+  Schrott-Eingabe, nicht nur dem Profil-Ladepfad. Verifiziert per
+  temporärem Testprogramm (gegen die Objektdateien des Builds gelinkt):
+  gegen den ungefixten Stand reproduzierbarer Absturz (`SIGABRT` in
+  `QList::takeFirst()`), nach dem Fix läuft `setArraySize(QSize(80,-1))`
+  sauber durch. Voller Clean-Build mit `-Wall -Wextra`: 0 Warnungen/Fehler;
+  Offscreen-Smoke-Test der App weiterhin grün.
+- [x] **Unbounded CSI-Escape-Buffer durch seriellen Input.**
+  `komportemulation.cpp` `sequence()` (~Z. 1073), `slotReceivedChar()`
+  (~Z. 1181): nach `ESC [` hängt jedes nicht-alphabetische Byte unbegrenzt
+  an `mCtlSequence` — keine Maximallänge, kein Timeout/Abort außer neuem
+  ESC oder Endbuchstaben. Ein angeschlossenes Gerät kann so mit endlosen
+  Ziffern/Semikolons Speicher wachsen lassen und die Ausgabe blockieren.
+  Reproduktion: seriell `\x1b[` gefolgt von vielen MB `0` ohne
+  Endbuchstaben senden.
+  **Gefixt (2026-09-06):** neue Konstante `MaxCtlSequenceLength` (256, im
+  anonymen Namespace neben dem bereits vorhandenen `MaxCtlParam`-Cap) in
+  `komportemulation.cpp`; `sequence()` bricht die laufende Sequenz ab
+  (State-Reset wie beim regulären Abschluss) statt `mCtlSequence`
+  unbegrenzt wachsen zu lassen, sobald das Limit erreicht ist. Verifiziert
+  per temporärem Testprogramm: `ESC[` + 100.000 Ziffern ohne
+  Endbuchstaben verarbeitet ohne Hänger/OOM, anschließende normale
+  CSI-Sequenz danach weiterhin korrekt verarbeitet (State sauber
+  zurückgesetzt). Clean-Build mit `-Wall -Wextra`: 0 Warnungen/Fehler.
+
+### Hoch
+
+- [x] **Geschlossene Fenster bleiben leben und können den seriellen Port
+  offen halten.** `main.cpp` (~Z. 42), `komport.cpp` `closeEvent()`
+  (~Z. 791), `slotFileNewWindow()` (~Z. 838): kein `WA_DeleteOnClose`,
+  `closeEvent()` schließt den Serial-Port nicht. Ein per Fenstermanager
+  geschlossenes Fenster wird nur versteckt, nicht zerstört — Objekte,
+  Timer, Signalverbindungen und ggf. der exklusive Port-Zugriff bleiben
+  aktiv.
+  **Gefixt (2026-09-06), drei Teile in `komport.cpp`:**
+  `KomportApp`-Konstruktor setzt jetzt `Qt::WA_DeleteOnClose`, sodass ein
+  akzeptiertes `close()` das Fenster tatsächlich zerstört statt nur zu
+  verstecken; `closeEvent()` schließt zusätzlich explizit den Serial-Port
+  (`view->getSerial()->close()`, idempotent); `~KomportApp()` ruft jetzt
+  `doc->removeView(view)` auf, um das zugehörige Mittel-Finding
+  (`pViewList` wird nie bereinigt) im selben Zug zu beheben — sonst hätte
+  das jetzt tatsächlich greifende `WA_DeleteOnClose` einen Dangling
+  Pointer in `slotUpdateAllViews()` erzeugt.
+  **Nebenbefund beim Verifizieren:** `KomportDoc::newDocument()`
+  (`komportdoc.cpp`) markierte jedes frisch erzeugte Fenster unconditional
+  als `modified` — dadurch zeigte *jedes* Schließen eines Fensters (auch
+  eines unberührten) einen blockierenden "Datei wurde geändert,
+  speichern?"-Dialog. War von Codex nicht gefunden, blockierte aber direkt
+  den Verifikationstest für diesen Fix. Nutzer hat Mitfixen bestätigt:
+  `setModified(true)` in `newDocument()` entfernt (openDocument/
+  saveDocument bleiben laut `CLAUDE.md` bewusst Stubs, es gibt kein echtes
+  "Dokument" zum Schützen).
+  Verifiziert per temporärem Testprogramm: zwei `KomportApp`-Fenster
+  erzeugt, eines per `close()` geschlossen (simuliert Fenstermanager-X),
+  `QPointer`-Guard bestätigt tatsächliche Zerstörung, anschließender
+  `slotUpdateAllViews()`-Broadcast auf dem verbleibenden Fenster crasht
+  nicht. Clean-Build mit `-Wall -Wextra`: 0 Warnungen/Fehler.
+  **Nachbesserung nach Codex-Review-Runde 2 (`node codex-companion.mjs
+  review`):** Codex bemängelte (P1), `slotFileClose()` greife nach
+  `close()` mit `WA_DeleteOnClose` noch per `slotStatusMsg(tr("Ready."))`
+  auf `this` zu. Eigene Gegenprobe zeigte zwar, dass Qt hier
+  `deleteLater()` statt sofortiger Zerstörung nutzt (Objekt bleibt bis zum
+  nächsten Event-Loop-Durchlauf gültig) — auf Vorschlag des Nutzers aber
+  bewusst trotzdem defensiv gepatcht, statt sich auf dieses (von der
+  Qt-Doku nicht als Vertrag zugesicherte) Detail zu verlassen:
+  `slotFileClose()` greift jetzt nach einem *erfolgreichen* `close()`
+  nicht mehr auf `this` zu (`if (!close()) slotStatusMsg(...)`), und das
+  bisher dort stehende `view->getSerial()->close()` wurde entfernt, da
+  `closeEvent()` den Port bei akzeptiertem Close bereits für jeden
+  Close-Pfad einheitlich schließt. Erneut verifiziert per temporärem
+  Testprogramm (`slotFileClose()` über `QMetaObject::invokeMethod`
+  aufgerufen wie die verbundene `QAction`): Fenster wird zerstört, Port
+  ist danach geschlossen, kein Zugriff auf `this` nach akzeptiertem Close.
+  Clean-Build mit `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler.
+- [x] **Session-Logger puffert unbegrenzt bis zum nächsten LF.**
+  `komportsessionlogger.cpp` `logChar()` (~Z. 58): `mLineBuffer` wächst bis
+  `\n` kommt oder Logging gestoppt wird — binäre Streams, lange
+  Statuszeilen oder nur-`\r`-Geräte werden nie periodisch geflusht (RAM-Risiko).
+  **Gefixt (2026-09-06):** neue Konstante `MaxLineBufferLength` (4096) in
+  `komportsessionlogger.cpp`; `logChar()` erzwingt einen `flushLine()`,
+  sobald der Puffer diese Grenze erreicht, auch ohne `\n`. Verifiziert per
+  temporärem Testprogramm: 500.000 Bytes ohne jedes LF ergaben 125
+  geflushte Log-Zeilen statt eines unbegrenzt wachsenden Puffers.
+- [x] **Download-Transfer ist eine Busy-Loop und prüft den Dateiöffnen-Fehler
+  nicht.** `komporttransfer.cpp` `download()` (~Z. 62): `mFile.open()`-
+  Rückgabewert wird ignoriert; danach läuft eine `processEvents()`-Schleife
+  ohne Sleep/Wait bis Cancel/Ctrl-D — dreht CPU-lastig, wenn keine Daten
+  kommen, und behandelt einen fehlgeschlagenen Dateiöffnen-Versuch still
+  als Erfolg.
+  **Gefixt (2026-09-06):** `download()` prüft jetzt `mFile.open()` und
+  zeigt bei Fehlschlag einen `QMessageBox::warning()` statt still
+  weiterzulaufen; die Polling-Schleife nutzt jetzt
+  `QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents)` statt
+  `AllEvents` — wartet auf das nächste Ereignis (eingehendes Byte,
+  Cancel-Klick, Ctrl-D) statt CPU-lastig zu drehen, wenn nichts ankommt.
+- [x] **Upload-Transfer ignoriert Open-/Write-Fehler.** `komporttransfer.cpp`
+  `upload()` (~Z. 39), `komportserial.cpp` `putChar()` (~Z. 167):
+  `mFile.open()` und serielle Write-Fehler werden nicht an den Aufrufer
+  gemeldet; `upload()` gibt immer `true` zurück.
+  **Gefixt (2026-09-06):** `KomportSerial::putChar()` gibt jetzt `bool`
+  zurück (Erfolg/Misserfolg) statt `void`; `upload()` prüft sowohl
+  `mFile.open()` als auch jeden `putChar()`-Aufruf und zeigt bei
+  Fehlschlag einen `QMessageBox::warning()` (inkl. Byte-Fortschritt bei
+  Verbindungsabbruch) statt `true` zu faken.
+  Beide Transfer-Fixes verifiziert durch Clean-Build mit `-Wall -Wextra`
+  (die vorher vorhandenen `-Wunused-result`-Warnungen zu den ignorierten
+  `mFile.open()`-Rückgabewerten sind jetzt weg, da beide Stellen den
+  Rückgabewert jetzt auswerten); `KomportUpload`/`KomportDownload` sind
+  reine Passthrough-Subklassen ohne eigene Overrides, profitieren also
+  automatisch mit.
+
+### Mittel
+
+- [ ] `QSerialPort`-Fehler (`settingsFailed()`) sind nirgends mit der UI
+  verbunden — Port-/Framing-/Permission-Probleme landen nur in
+  `qWarning()`, nicht als Status-/Fehlerdialog. (`komportserial.cpp`
+  `slotPortError()` ~Z. 206, `komport.cpp` `applyConnectionSettings()`
+  ~Z. 586 ignoriert den `open()`-Rückgabewert.)
+- [ ] RX-Flush ist bei Bursts unnötig teuer — `slotFlushRxBuffer()`
+  (`komportserial.cpp` ~Z. 214) leert den Buffer byteweise mit
+  `remove(0, 1)`, was bei hohen Baudraten/Bursts O(n²) kostet.
+- [ ] Ungültige `RXQueue`/`FlushRate`-Werte aus Profilen werden ungeprüft
+  übernommen (`komport.cpp` ~Z. 600, `komportserial.cpp` ~Z. 190/223) —
+  die GUI begrenzt Werte, `QSettings`-Import nicht; `RXQueue<=0` wirft
+  empfangene Daten effektiv weg.
+- [ ] Blink-Update iteriert über Pixelbreite statt Spaltenzahl —
+  `komportview.cpp` `timerEvent()` (~Z. 223) nutzt `cellArray()->cellWidth()`
+  als Spaltenlimit statt `arrayWidth()`; blinkende Zellen rechts davon
+  werden nicht regelmäßig neu gezeichnet.
+- [x] Statische View-Liste `pViewList` wird nie bereinigt
+  (`komportdoc.cpp` ~Z. 30/49/55) — `removeView()` wird nirgends
+  aufgerufen. Aktuell durch das "Hoch"-Finding zu Fensterlebenszeit
+  verdeckt; sobald Fenster korrekt gelöscht werden, drohen Dangling
+  Pointers in `slotUpdateAllViews()`. **Zusammen mit dem Fenster-Lifetime-
+  Fix oben beheben, nicht isoliert.**
+  **Gefixt (2026-09-06) zusammen mit dem Hoch-Finding oben:**
+  `~KomportApp()` ruft jetzt `doc->removeView(view)` auf — siehe
+  Verifikation dort.
+- [ ] `KomportView::getDocument()` castet `window()` hart zu `KomportApp*`
+  (`komportview.cpp` ~Z. 90) und dereferenziert sofort — crasht außerhalb
+  dieses Einbettungskontexts (Tests, Preview-Container).
+- [ ] Keine dauerhaften Tests/CTest-Targets im Repo (nur temporäre,
+  wieder gelöschte Test-Targets laut `TODO-ARCHIVE.md`) — genau die
+  bereits gefixten Crash-Klassen (Cursor-Clamping, Escape-Parsing,
+  Profilwechsel, serieller Roundtrip) können regressieren, ohne dass es
+  auffällt.
+
+### Nitpick
+
+- [ ] `komport.desktop`: veraltete Shebang-Zeile (`#!/usr/bin/env
+  xdg-open`) und `Encoding=UTF-8` sind für moderne `.desktop`-Dateien
+  unüblich.
+- [ ] Debug-`printf()` in `komportemulation.cpp` (~Z. 920, ~Z. 1139) bei
+  unbekannten SGR/CSI-Sequenzen geht nach stdout statt z.B. `qDebug()`.
+
+### Empfohlene Reihenfolge
+
+Profilwert-Validierung/Array-Größen absichern → CSI-Buffer begrenzen →
+Fenster-Close/Serial-Lifetime korrigieren (inkl. `pViewList`-Bereinigung) →
+Logger-/Transfer-Busy-Loop und stille Fehler entschärfen → danach
+dauerhafte PTY- und Emulations-Regressionstests in CMake/CTest aufnehmen.
+Erst danach Meilenstein 4/5/6/7 angehen.
 
 
 ## 1. Produktvision und Architektur-Gate

@@ -53,6 +53,17 @@ void KomportCellArray::initSettings(){
 /** set the cell array size .
  */
 void KomportCellArray::setArraySize(QSize _sz){
+  // Defensive clamp: callers ultimately derive this from user-editable
+  // QSettings/profile values (e.g. KomportApp::applyConnectionSettings()'s
+  // "ScrollBuffer" entry), which the GUI's spinbox limits but a hand-edited
+  // config file does not. A negative width/height would make newcnt below
+  // negative while mCells may already hold plenty of cells from a previous
+  // call - diff = curcnt - newcnt then overshoots curcnt and the shrink
+  // branch calls takeFirst() on an already-empty list. Clamping here (not
+  // just at the profile-loading call site) makes setArraySize() itself
+  // safe against bad input regardless of caller.
+  if ( _sz.width() < 0 )  _sz.setWidth(0);
+  if ( _sz.height() < 0 ) _sz.setHeight(0);
   mArraySize = _sz;
   int curcnt = mCells.count();
   int newcnt = _sz.width()*_sz.height();
