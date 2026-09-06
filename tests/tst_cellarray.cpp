@@ -32,6 +32,7 @@ private slots:
   void negativeHeightDoesNotCrash();
   void regrowAfterNegativeIsUsable();
   void hugeWidthDoesNotCrashAndGetsClamped();
+  void cellRejectsOutOfRangeCoordinatesIndividually();
 };
 
 void TstCellArray::negativeHeightDoesNotCrash()
@@ -88,6 +89,37 @@ void TstCellArray::hugeWidthDoesNotCrashAndGetsClamped()
   // Must still be usable afterwards for a normal, sane size.
   arr.setArraySize( QSize(80, 25) );
   QCOMPARE( arr.arraySize(), QSize(80, 25) );
+  QVERIFY( arr.cell(79, 24) != nullptr );
+}
+
+void TstCellArray::cellRejectsOutOfRangeCoordinatesIndividually()
+{
+  KomportCellArray arr; // 80x25 by default
+  QCOMPARE( arr.arraySize(), QSize(80, 25) );
+
+  // cell() used to only bounds-check the *flat* index (arrayWidth()*y+x),
+  // not x and y individually - an out-of-range x could still land on an
+  // in-bounds flat index as long as y compensated for it, silently
+  // returning a cell from a *neighbouring row* instead of the
+  // out-of-range signal (nullptr) callers actually expect.
+  // cell(-1, 1): 80*1 + (-1) = 79, a "valid" flat index - but that's
+  // really row 0's last column, not anything belonging to row 1.
+  QCOMPARE( arr.cell(-1, 1), static_cast<KomportCell*>(nullptr) );
+  // cell(80, 0): 80*0 + 80 = 80, likewise "valid" - actually row 1,
+  // column 0.
+  QCOMPARE( arr.cell(80, 0), static_cast<KomportCell*>(nullptr) );
+  // Sanity check: those *would* have been non-null if cell() only
+  // checked the flat index, proving this isn't just an already-null
+  // result for an unrelated reason.
+  QVERIFY( arr.cell(79, 0) != nullptr ); // the row-0/row-1 boundary cell cell(-1,1) would have wrongly returned
+  QVERIFY( arr.cell(0, 1) != nullptr );  // the row-1/row-2 boundary cell cell(80,0) would have wrongly returned
+
+  // Negative y and y past the last row must be rejected too.
+  QCOMPARE( arr.cell(0, -1), static_cast<KomportCell*>(nullptr) );
+  QCOMPARE( arr.cell(0, 25), static_cast<KomportCell*>(nullptr) );
+
+  // Still works normally for actually in-range coordinates.
+  QVERIFY( arr.cell(0, 0) != nullptr );
   QVERIFY( arr.cell(79, 24) != nullptr );
 }
 

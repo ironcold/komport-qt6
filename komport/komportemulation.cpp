@@ -1100,7 +1100,19 @@ void KomportEmulation::doDeviceAttributes()
 // received part of an escape sequence
 void KomportEmulation::sequence(char _ch)
 {
-  bool completed=(_ch>='a'&&_ch<='z')||(_ch>='A'&&_ch<='Z');
+  // Per ECMA-48/ANSI X3.64 (which VT100/VT102 CSI sequences follow), the
+  // final byte of a CSI sequence is any byte in 0x40-0x7E ('@' through
+  // '~'), not just letters - e.g. Insert Character is "CSI Pn @". Letters
+  // alone used to miss '@' (and the handful of other punctuation final
+  // bytes in that range): the sequence never completed, so it kept
+  // absorbing bytes until it happened to hit an actual letter later in
+  // the host's *unrelated* output, which then got misinterpreted as this
+  // sequence's final byte instead of being printed. Unrecognised final
+  // bytes (this emulation implements none of the punctuation ones, e.g.
+  // '@' - insert character isn't implemented at all) still fall through
+  // to the same "consume harmlessly, log it" default case below as an
+  // unrecognised letter always did.
+  bool completed = ( _ch >= 0x40 && _ch <= 0x7E );
   
   if ( completed ) {
    // debug( "ESC[%s%c",  mCtlSequence.data()==NULL?"": mCtlSequence.data(),_ch);
@@ -1201,6 +1213,7 @@ void KomportEmulation::shortEscape(char _ch)
     case '7': doSaveCursor(); break;
     case '8': doRestoreCursor(); break;
     case 'c': doReset(); break;
+    case 'Z': doDeviceAttributes(); break; // classic VT100 "identify" request - CSI c/CSI 0c is the newer form (also handled), but this older one is still real VT100 protocol
     case 'H': break; // set horizontal tab stop - tab stops are fixed at every 8th column, ignored
     case '(': case ')': // select G0/G1 character set - consume the designator that follows
       mPendingCharsetChar = true;

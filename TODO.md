@@ -565,6 +565,127 @@ Fix-Fokus bestehende Lücken.
 `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test grün,
 echtes `~/.config/Komport-Qt6/`-Profil unangetastet.
 
+## 0.5 Fünfter Full-Review (2026-09-06)
+
+Wieder neuer, unabhängiger Codex-Thread, diesmal explizit mit der Frage,
+ob sich das Muster der letzten beiden Runden (vorherige Runde bestätigt
+sauber, aber 1-2 neue Findings in bislang wenig fokussierten
+Randbereichen) fortsetzt, oder ob jetzt Konvergenz erreicht ist —
+inklusive der ausdrücklichen Anweisung, trotz mehrerer sauberer Runden
+nicht nachlässiger zu werden. Ergebnis: die Runde-4-Fixes (Scrollback-
+Auswahl, `KomportEmulation`-Lifetime) wurden als sauber bestätigt, keine
+neuen Kritisch-/Hoch-Funde — aber wieder 4 neue Mittel-Findings, diesmal
+in der Emulation, dem Zell-Bounds-Checking und der seriellen
+Konfiguration. **Konvergenz ist damit weiterhin nicht erreicht**, das
+Muster setzt sich fort — siehe Anmerkung am Ende dieses Abschnitts.
+
+- [x] **CSI-Abschlusserkennung akzeptierte nur Buchstaben als Finalbyte.**
+  `komportemulation.cpp` `sequence()` (~Z. 1103): `completed = (_ch>='a'
+  && _ch<='z') || (_ch>='A' && _ch<='Z')` — nach ECMA-48/ANSI X3.64 (dem
+  Standard, dem VT100/VT102-CSI-Sequenzen folgen) ist das Finalbyte einer
+  CSI-Sequenz aber jedes Byte im Bereich `0x40`–`0x7E` (`@` bis `~`), nicht
+  nur Buchstaben — z.B. ist `CSI Pn @` (Insert Character) eine echte
+  VT102-Sequenz. Traf ein solches Sonderzeichen als Finalbyte ein, blieb
+  die Sequenz "offen" und verschluckte das nächste vom Host gesendete
+  alphabetische Nutzzeichen als vermeintliches Finalbyte — echte
+  Protokoll-Korrektheitslücke, kein reiner Edge-Case.
+  **Gefixt (2026-09-06):** `completed` prüft jetzt `_ch >= 0x40 && _ch <=
+  0x7E`. Nicht implementierte Finalbytes (z.B. `@` — Insert Character ist
+  in dieser Emulation nicht umgesetzt) fallen weiterhin harmlos in den
+  bereits vorhandenen `default:`-Zweig (verworfen, geloggt via `qDebug()`)
+  statt die Sequenz offen zu lassen. Verifiziert per neuem
+  `tst_emulation`-Testfall: `CSI 5 @` gefolgt von `A` — gegen den
+  ungefixten Stand reproduzierbar (`A` wurde als Finalbyte verschluckt,
+  Cursor bewegte sich statt den Buchstaben zu drucken), gegen den
+  gefixten Stand grün.
+- [x] **`KomportCellArray::cell(x,y)` prüfte nur den linearen Index, nicht
+  `x`/`y` einzeln — Zellzugriffe außerhalb der Spalten-/Zeilengrenzen
+  konnten in eine Nachbarzeile "wrappen" statt `nullptr` zu liefern.**
+  `komportcellarray.cpp` `cell(int,int)` (~Z. 184): `index =
+  arrayWidth()*_y + _x` wurde nur als Ganzes gegen `[0, mCells.count())`
+  geprüft. Bei 80 Spalten lieferte z.B. `cell(-1, 1)` (`index = 80*1-1 =
+  79`) fälschlich die letzte Zelle von Zeile 0 statt `nullptr`, und
+  `cell(80, 0)` (`index = 80*0+80 = 80`) fälschlich Zeile 1, Spalte 0.
+  Erreichbar über `KomportView::selectStart()`/`selectEnd()` (~Z. 617/622
+  vor dem Fix), die rohe, ungeclampte Maus-Pixelpositionen in
+  Zellkoordinaten umrechnen — eine Drag-Selektion knapp außerhalb des
+  Textbereichs konnte dadurch falsche Zellen markieren/kopieren.
+  **Gefixt (2026-09-06), zwei Ebenen:** `cell(int,int)` validiert jetzt
+  `_x`/`_y` einzeln gegen die tatsächlichen Grid-Grenzen, *bevor* der
+  flache Index berechnet wird (schützt alle Aufrufer, nicht nur die
+  Maus-Selektion). Zusätzlich neue `KomportView::clampToGrid()`-Methode,
+  von `selectStart()`/`selectEnd()` genutzt, um Mauspositionen direkt auf
+  gültige Zellkoordinaten zu klemmen (verhindert, dass ungültige
+  Koordinaten überhaupt erst entstehen). Verifiziert per neuem
+  `tst_cellarray`-Testfall: `cell(-1,1)`/`cell(80,0)` — gegen den
+  ungefixten Stand reproduzierbar (lieferten fälschlich Nachbarzellen
+  statt `nullptr`), gegen den gefixten Stand grün. Kein dedizierter Test
+  für `clampToGrid()`/`selectStart()`/`selectEnd()` selbst (`protected`,
+  nur über echte `QMouseEvent`-Drag-Simulation testbar) — der
+  `cell()`-Fix ist die tiefere, wichtigere Schutzebene und deckt die
+  Regression bereits ab, unabhängig davon, wie ungültige Koordinaten
+  entstehen.
+- [x] **`FlushRate=0` war über den Einstellungsdialog direkt wählbar und
+  erzeugte einen dauerfeuernden 0-ms-Timer.** `komportserial.cpp`
+  `setFlushRate()` (~Z. 256), `settingsdialog.cpp`
+  `FlushRateSpinBox->setRange(0, 4096)` (~Z. 94): der vorherige Fix
+  klemmte negative Werte auf `qMax(0, ...)`, aber `0` selbst ist ein
+  gültiger, aber unsinniger `QTimer`-Intervall — `QTimer::start(0)`
+  feuert bei jedem einzelnen Durchlauf der Event-Loop erneut, ein
+  waschechtes Idle-Busy-Polling (`slotFlushRxBuffer()` bricht zwar bei
+  leerem Puffer früh ab, aber der Timer-Dispatch selbst läuft trotzdem
+  ununterbrochen). Anders als bei den meisten anderen Findings war das
+  hier nicht nur über ein hand-editiertes Profil erreichbar, sondern
+  direkt über den normalen Einstellungsdialog wählbar.
+  **Gefixt (2026-09-06):** `setFlushRate()` klemmt jetzt auf `qMax(1,
+  ...)`; `FlushRateSpinBox`s Minimum auf `1` gesetzt, damit der Dialog
+  gar nicht erst einen Wert anbietet, den er ohnehin nur stillschweigend
+  hochklemmen würde. Neuer Getter `KomportSerial::flushRate()` ergänzt
+  (rein für Testbarkeit — `setFlushRate()` hatte vorher keinen
+  Rückgabewert und keinen Weg, den geklemmten Wert von außen zu prüfen).
+  `tst_serial`s bestehender Test entsprechend erweitert/umbenannt
+  (`flushRateClampsToNonNegative` → `flushRateClampsToPositive`) und
+  gegen den ungefixten Stand gegengeprüft.
+- [x] **`ESC Z` (klassische VT100-Geräteidentifikation) war dokumentiert,
+  aber nicht implementiert.** `komportemulation.cpp` `shortEscape()`
+  (~Z. 1195 vor dem Fix): der VT102-Referenz-Header dieser Datei
+  dokumentiert `ESC Z` selbst als Alternative zu `CSI c`/`CSI 0c` (mit
+  dem zeitgenössischen Hinweis "esc Z may not be supported in future") —
+  `CSI c`/`CSI 0c` sind über `doDeviceAttributes()` bereits implementiert,
+  `ESC Z` fiel aber im `default:`-Zweig von `shortEscape()` durch und tat
+  nichts. Hosts, die noch die ältere Identifikationsform senden, bekamen
+  keine Antwort.
+  **Gefixt (2026-09-06):** `case 'Z': doDeviceAttributes(); break;`
+  ergänzt — dieselbe Antwort wie `CSI c`/`CSI 0c`. Bewusst umgesetzt statt
+  nur dokumentiert: klein, sicher, passt direkt in den dokumentierten
+  VT100/VT102-Scope dieser Emulation (`CLAUDE.md`), und der Referenz-Text
+  selbst deutet `ESC Z` nur als möglicherweise *künftig* wegfallend an,
+  nicht als bereits obsolet. Verifiziert per neuem `tst_emulation`-Testfall
+  (kann die tatsächliche Antwort nicht direkt beobachten, da der
+  Serial-Port im Test nie geöffnet ist und `putStr()` auf einem
+  geschlossenen Port ein No-op ist — prüft stattdessen, dass `ESC Z` als
+  vollständige, erkannte Sequenz behandelt wird und die Emulation danach
+  wieder normal auf Eingaben reagiert, statt in einem "wartet auf mehr"
+  -Zustand hängen zu bleiben).
+
+**Verifikation:** alle 6 `ctest`-Targets grün (2 erweitert). Clean-Build
+mit `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test
+grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet.
+
+**Anmerkung zur Konvergenz:** Nach jetzt 5 Runden ist das wiederkehrende
+Muster (vorherige Runde bestätigt sauber, 1-2-4 neue Mittel-Findings in
+Randbereichen) noch nicht abgerissen. Alle Findings seit Runde 1 waren
+aber Mittel oder niedriger (keine neuen Kritisch/Hoch seit Runde 1), und
+jede Runde bestätigt explizit, dass die *vorherige* Runde sauber war —
+d.h. die Fixes selbst sind stabil, nur die Review-Abdeckung selbst
+erweitert sich noch mit jeder Runde auf neue Codebereiche. Das ist beim
+nächsten Review-Lauf im Auge zu behalten: wenn sich das Muster fortsetzt,
+könnte statt weiterer Einzel-Runden eine gezielte, vollständige manuelle
+Durchsicht der noch nie im Fokus gestandenen Bereiche
+(`komporthexview.cpp`, `komportsessionlogger.cpp`, `komportmacrobar.cpp`,
+`komportfilescrollbuffer.cpp`, `komportminimap.cpp`) sinnvoller sein als
+ein weiterer vollautomatischer Review-Durchlauf.
+
 
 ## 1. Produktvision und Architektur-Gate
 

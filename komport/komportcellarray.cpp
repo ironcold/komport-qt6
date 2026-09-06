@@ -183,6 +183,19 @@ int KomportCellArray::cellHeight(){
 
 /** get a pointer to the cell from location (x,y) */
 KomportCell* KomportCellArray::cell(int _x,int _y){
+  // _x and _y must each be validated individually, not just the resulting
+  // flat index: an out-of-range _x (negative, or >= arrayWidth()) still
+  // produces an in-bounds *flat* index as long as _y compensates for it,
+  // silently returning a cell from a neighbouring row instead of the
+  // out-of-range signal (nullptr) callers actually expect. E.g. with an
+  // 80-column grid, cell(-1, 1) computed index 80*1-1=79 - a "valid"
+  // index, but that's row 0's last column, not anything belonging to row
+  // 1. Concretely reachable via KomportView::selectStart()/selectEnd(),
+  // which convert raw (unclamped) mouse pixel positions to cell
+  // coordinates.
+  if ( _x < 0 || _x >= arrayWidth() || _y < 0 || _y >= arrayHeight() ) {
+    return nullptr;
+  }
   int index = (arrayWidth()*_y)+_x;
   if ( index >= 0 && index < mCells.count() ) {
     return mCells.at( index );

@@ -114,7 +114,9 @@ protected: // Protected methods
   void mousePressEvent( QMouseEvent* _e ) override;
   /** mouse wheel scrolls the scrollback, same as dragging the minimap */
   void wheelEvent( QWheelEvent* _e ) override;
- /** begin a selection by pixel coordinate */
+ /** clamp a raw pixel-derived cell coordinate to the actual grid bounds */
+  QPoint clampToGrid( QPoint _cell );
+  /** begin a selection by pixel coordinate */
   void selectStart( QPoint _pt );
   /** end a selection by pixel coordinate */
   void selectEnd( QPoint _pt );

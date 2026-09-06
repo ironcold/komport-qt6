@@ -613,14 +613,23 @@ void KomportView::deselect(){
     mHasSelection = false;
     emit viewModified( this );
 }
+/** clamp a raw pixel-derived cell coordinate to the actual grid - dragging
+ *  a selection past the right/bottom edge of the text area (or, during an
+ *  active mouse grab, even outside the widget entirely - Qt keeps
+ *  delivering move events with negative/oversized local coordinates then)
+ *  must not hand select()/getCell() an out-of-range column or row. */
+QPoint KomportView::clampToGrid( QPoint _cell ){
+    return QPoint( qBound(0, _cell.x(), cellArray()->arrayWidth()-1),
+                   qBound(0, _cell.y(), cellArray()->arrayHeight()-1) );
+}
 /** begin a selection by pixel coordinate */
 void KomportView::selectStart( QPoint _pt ){
-    mSelectStart = QPoint( _pt.x()  / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() );
+    mSelectStart = clampToGrid( QPoint( _pt.x() / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() ) );
     mSelectEnd = mSelectStart;
 }
 /** end a selection by pixel coordinate */
 void KomportView::selectEnd( QPoint _pt ){
-    mSelectEnd = QPoint( _pt.x()  / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() );
+    mSelectEnd = clampToGrid( QPoint( _pt.x() / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() ) );
 }
 /** No descriptions */
 void KomportView::slotSelectionChanged() {

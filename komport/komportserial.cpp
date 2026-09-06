@@ -254,11 +254,17 @@ void KomportSerial::slotFlushRxBuffer(){
 
 /** set the rate at which the Rx buffer is flushed */
 void KomportSerial::setFlushRate(int _i){
-  // Same reasoning as setRxQueue(): the settings dialog's spinbox only
-  // allows 0..4096, but a hand-edited profile isn't range-checked before
-  // reaching here, and a negative interval isn't a meaningful QTimer
-  // interval.
-  mFlushRate = qMax(0, _i);
+  // qMax(1, ...), not qMax(0, ...): 0 is a legal QTimer interval, but not
+  // a *sane* one here - QTimer::start(0) re-fires on every single trip
+  // through the event loop for as long as the timer is active, which is
+  // effectively a busy-poll. slotFlushRxBuffer() early-returns when
+  // mRxBuffer is empty, but the timer still dispatches (and this object
+  // starts one in its constructor and keeps it running for its whole
+  // lifetime) - a real idle-CPU/responsiveness cost, not just a
+  // theoretical one. The settings dialog's spinbox previously allowed 0
+  // directly (not just a hand-edited profile), so this was reachable from
+  // the ordinary UI.
+  mFlushRate = qMax(1, _i);
   mFlushTimer.start( mFlushRate );
 }
 

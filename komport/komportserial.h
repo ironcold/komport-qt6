@@ -55,6 +55,8 @@ public:
   int setRxQueue(int _i);
   /** set the rate (ms) at which the Rx buffer is flushed into receivedChar() signals */
   void setFlushRate(int _i);
+  /** the current flush rate (ms), after setFlushRate()'s clamping */
+  int flushRate() const { return mFlushRate; }
   /** set the character framing. Start bits is kept for UI/config compatibility
    *  only - a UART always uses a single start bit, QSerialPort has no such
    *  setting, so it is not applied to the hardware (same as the original,

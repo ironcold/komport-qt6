@@ -5,11 +5,13 @@
     copyright            : (C) 2026 by Harald Stürmer
     email                : ironcold@ironcold.de
 
-    Regression test for KomportSerial::setRxQueue()/setFlushRate(): a
-    hand-edited profile isn't range-checked by the settings dialog's
-    spinboxes, and a value <= 0 for RXQueue used to make
-    slotDataAvailable()'s overflow trim discard every byte that arrives
-    (see TODO.md's Codex-review section).
+    Regression tests for KomportSerial::setRxQueue()/setFlushRate()/
+    putChar()/putStr(): a value <= 0 for RXQueue used to make
+    slotDataAvailable()'s overflow trim discard every byte that arrives,
+    and a FlushRate of 0 (previously reachable from the settings dialog's
+    spinbox directly, not just a hand-edited profile) turned the RX flush
+    timer into an idle busy-poll (QTimer::start(0) re-fires on every
+    single event-loop iteration) - see TODO.md's Codex-review section.
  ***************************************************************************/
 
 /***************************************************************************
@@ -30,7 +32,7 @@ class TstSerial : public QObject
   Q_OBJECT
 private slots:
   void rxQueueClampsToPositive();
-  void flushRateClampsToNonNegative();
+  void flushRateClampsToPositive();
   void putCharAndPutStrReportFailureWhenClosed();
 };
 
@@ -43,14 +45,20 @@ void TstSerial::rxQueueClampsToPositive()
   QCOMPARE( serial.setRxQueue(4096), 4096 );
 }
 
-void TstSerial::flushRateClampsToNonNegative()
+void TstSerial::flushRateClampsToPositive()
 {
   KomportSerial serial;
-  // setFlushRate() has no return value to inspect directly, but it must
-  // not crash/assert on a negative interval (QTimer::start() only accepts
-  // non-negative intervals) and must leave the timer running afterwards.
+  // 0 used to be accepted (both here and by the settings dialog's
+  // spinbox) - QTimer::start(0) re-fires on every single event-loop
+  // iteration for as long as the timer is running, an idle busy-poll
+  // rather than a "flush immediately" setting.
   serial.setFlushRate(-1);
+  QCOMPARE( serial.flushRate(), 1 );
+  serial.setFlushRate(0);
+  QCOMPARE( serial.flushRate(), 1 );
+  // A normal, already-valid value must pass through unchanged.
   serial.setFlushRate(100);
+  QCOMPARE( serial.flushRate(), 100 );
 }
 
 void TstSerial::putCharAndPutStrReportFailureWhenClosed()

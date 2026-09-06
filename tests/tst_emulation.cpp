@@ -37,6 +37,8 @@ private slots:
   void unboundedCsiSequenceDoesNotHang();
   void cursorMovementClampsToScreenBounds();
   void eraseInDisplayStopsAtCursorAndNotifies();
+  void csiFinalByteRecognizesFullAnsiRange();
+  void escZRespondsLikeDeviceAttributes();
 };
 
 void TstEmulation::unboundedCsiSequenceDoesNotHang()
@@ -147,6 +149,64 @@ void TstEmulation::eraseInDisplayStopsAtCursorAndNotifies()
   // erased region.
   QVERIFY2( cellChangedSpy.count() > 0,
             "CSI 1 J must notify via cellChanged() for the cells it clears" );
+}
+
+void TstEmulation::csiFinalByteRecognizesFullAnsiRange()
+{
+  KomportSerial serial;
+  KomportCellArray cellArray; // 80x25 by default
+  KomportEmulation emu(&serial, &cellArray);
+
+  auto sendCsi = [&](const QByteArray &params, char finalByte) {
+    emu.slotReceivedChar(0x1B);
+    emu.slotReceivedChar('[');
+    for ( char c : params ) emu.slotReceivedChar(c);
+    emu.slotReceivedChar(finalByte);
+  };
+
+  // Move away from the default (0,0) first so a stray doCursorUp() (see
+  // below) is actually observable.
+  sendCsi( "5;5", 'H' ); // CUP - cursor to (row 5, col 5), 1-indexed
+  QCOMPARE( cellArray.cursor(), QPoint(4, 4) );
+
+  // CSI 5 @ (Insert Character - not implemented by this emulation at all,
+  // but must still be recognised as a *complete* sequence: per ECMA-48/
+  // ANSI X3.64, any byte in 0x40-0x7E ends a CSI sequence, not just
+  // letters). sequence() used to only recognise a-z/A-Z as a final byte,
+  // so this sequence never completed - it kept absorbing bytes, and the
+  // plain letter 'A' right after it got swallowed as *this* sequence's
+  // final byte (CSI ... A = cursor up) instead of being printed as text.
+  emu.slotReceivedChar(0x1B);
+  emu.slotReceivedChar('[');
+  emu.slotReceivedChar('5');
+  emu.slotReceivedChar('@');
+  emu.slotReceivedChar('A');
+
+  QCOMPARE( cellArray.cell(4,4)->character(), QChar('A') );
+  QCOMPARE( cellArray.cursor(), QPoint(5,4) ); // advanced by printing 'A', not moved up
+}
+
+void TstEmulation::escZRespondsLikeDeviceAttributes()
+{
+  // The serial port is never opened in this test, so putStr() (which
+  // doDeviceAttributes() would use to send the actual reply) is a no-op
+  // and the reply bytes themselves aren't observable here - this only
+  // verifies that ESC Z is recognised as a complete, handled escape
+  // sequence (it used to fall through shortEscape()'s default case and do
+  // nothing at all) rather than crashing or leaving the emulation stuck
+  // waiting for more of a sequence that will never come.
+  KomportSerial serial;
+  KomportCellArray cellArray;
+  KomportEmulation emu(&serial, &cellArray);
+
+  emu.slotReceivedChar(0x1B);
+  emu.slotReceivedChar('Z'); // classic VT100 "identify" request
+
+  // Must be ready for normal input again right afterwards.
+  emu.slotReceivedChar(0x1B);
+  emu.slotReceivedChar('[');
+  emu.slotReceivedChar('H'); // cursor home
+  QCOMPARE( cellArray.cursor(), QPoint(0, 0) );
 }
 
 QTEST_MAIN(TstEmulation)
