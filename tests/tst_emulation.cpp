@@ -28,6 +28,7 @@
 #include "komportserial.h"
 
 #include <QTest>
+#include <QSignalSpy>
 
 class TstEmulation : public QObject
 {
@@ -35,6 +36,7 @@ class TstEmulation : public QObject
 private slots:
   void unboundedCsiSequenceDoesNotHang();
   void cursorMovementClampsToScreenBounds();
+  void eraseInDisplayStopsAtCursorAndNotifies();
 };
 
 void TstEmulation::unboundedCsiSequenceDoesNotHang()
@@ -91,6 +93,60 @@ void TstEmulation::cursorMovementClampsToScreenBounds()
 
   sendCsi( "999999999", 'A' ); // cursor up
   QCOMPARE( cellArray.cursor().y(), 0 );
+}
+
+void TstEmulation::eraseInDisplayStopsAtCursorAndNotifies()
+{
+  KomportSerial serial;
+  KomportCellArray cellArray; // 80x25 by default
+  KomportEmulation emu(&serial, &cellArray);
+
+  // Fill the whole grid with a known, non-blank character directly (no
+  // need to route this through the emulation).
+  for ( int y = 0; y < cellArray.arrayHeight(); ++y ) {
+    for ( int x = 0; x < cellArray.arrayWidth(); ++x ) {
+      cellArray.drawChar( QChar('X'), x, y );
+    }
+  }
+
+  auto sendCsi = [&](const QByteArray &params, char finalByte) {
+    emu.slotReceivedChar(0x1B);
+    emu.slotReceivedChar('[');
+    for ( char c : params ) emu.slotReceivedChar(c);
+    emu.slotReceivedChar(finalByte);
+  };
+
+  const int cursorX = 10;
+  const int cursorY = 5;
+  sendCsi( QByteArray::number(cursorY+1) + ";" + QByteArray::number(cursorX+1), 'H' ); // CUP
+
+  QSignalSpy cellChangedSpy( &cellArray, &KomportCellArray::cellChanged );
+  sendCsi( "1", 'J' ); // CSI 1 J - erase from start of screen through cursor, inclusive
+
+  // Every cell strictly *below* the cursor's row must be untouched - this
+  // is the exact bug: the old code cleared the whole screen instead of
+  // stopping at the cursor.
+  for ( int x = 0; x < cellArray.arrayWidth(); ++x ) {
+    QCOMPARE( cellArray.cell(x, cursorY+1)->character(), QChar('X') );
+    QCOMPARE( cellArray.cell(x, cellArray.arrayHeight()-1)->character(), QChar('X') );
+  }
+  // Every cell on an earlier row, and up to and including the cursor on
+  // its own row, must be cleared (space).
+  for ( int x = 0; x < cellArray.arrayWidth(); ++x ) {
+    QCOMPARE( cellArray.cell(x, 0)->character(), QChar(' ') );
+  }
+  for ( int x = 0; x <= cursorX; ++x ) {
+    QCOMPARE( cellArray.cell(x, cursorY)->character(), QChar(' ') );
+  }
+  // And past the cursor on its own row, unaffected.
+  QCOMPARE( cellArray.cell(cursorX+1, cursorY)->character(), QChar('X') );
+
+  // The other bug fixed alongside this: clearing cells directly instead
+  // of through cellArray()->clear() skipped cellChanged() entirely, so
+  // KomportView (which only repaints via that signal) never redrew the
+  // erased region.
+  QVERIFY2( cellChangedSpy.count() > 0,
+            "CSI 1 J must notify via cellChanged() for the cells it clears" );
 }
 
 QTEST_MAIN(TstEmulation)

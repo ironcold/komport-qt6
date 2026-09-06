@@ -752,7 +752,12 @@ void KomportEmulation::doClearEOL()
     {
       QPoint save = cellArray()->cursor();
       for( int x=0; x<=save.x();x++ ) {
-        cellArray()->cell(x,save.y())->clear();
+        // cellArray()->clear(), not cell()->clear() directly - the
+        // latter mutates the cell but skips updateCell()/cellChanged(),
+        // so KomportView (which paints from mPixmap, only refreshed via
+        // that signal) never redrew the cleared cells until some
+        // unrelated later repaint happened to touch them.
+        cellArray()->clear(x,save.y());
       }
       cellArray()->setCursor(save);
      }
@@ -786,12 +791,24 @@ void KomportEmulation::doClearScreen()
     break;
    case 1: // BOD to cursor
      {
+      // Two bugs fixed here together:
+      //  - cell()->clear() mutated cells directly without going through
+      //    cellArray()->clear(), which is what actually emits
+      //    cellChanged() / calls updateCell() - KomportView paints from
+      //    mPixmap and only refreshes it via that signal, so the cleared
+      //    region stayed visually stale until an unrelated repaint.
+      //  - the `break` only ever exited the inner (column) loop once it
+      //    reached the cursor's exact (x,y); the outer (row) loop then
+      //    kept going regardless, so this actually cleared every row
+      //    below the cursor too - the whole screen, not "start of screen
+      //    through the cursor, inclusive" as CSI 1 J means. Looping only
+      //    up to save.y(), with the last row stopping at save.x(), gets
+      //    the boundary right without needing a loop-exiting break at all.
       QPoint save = cellArray()->cursor();
-      for( int y=0; y < cellArray()->arrayHeight(); y++ ) {
-        for (int x=0; x < cellArray()->arrayWidth();x++ ) {
-          cellArray()->cell(x,y)->clear();
-          if ( x==save.x() && y==save.y() )
-            break;
+      for( int y=0; y <= save.y(); y++ ) {
+        const int lastX = ( y == save.y() ) ? save.x() : cellArray()->arrayWidth()-1;
+        for (int x=0; x <= lastX; x++ ) {
+          cellArray()->clear(x,y);
         }
       }
       cellArray()->setCursor(save);

@@ -31,6 +31,7 @@ class TstSerial : public QObject
 private slots:
   void rxQueueClampsToPositive();
   void flushRateClampsToNonNegative();
+  void putCharAndPutStrReportFailureWhenClosed();
 };
 
 void TstSerial::rxQueueClampsToPositive()
@@ -50,6 +51,24 @@ void TstSerial::flushRateClampsToNonNegative()
   // non-negative intervals) and must leave the timer running afterwards.
   serial.setFlushRate(-1);
   serial.setFlushRate(100);
+}
+
+void TstSerial::putCharAndPutStrReportFailureWhenClosed()
+{
+  // Regression test for putStr(): it used to be void, silently dropping a
+  // partial/failed write with no way for a caller to notice (see TODO.md's
+  // Codex-review section, third full review). This sandbox has no real
+  // serial device to actually exercise a genuine partial hardware write,
+  // but the closed-port early-return path is the one piece of that
+  // contract that's reliably testable without one - both putChar() and
+  // putStr() must report failure (not silently claim success) when there
+  // is nowhere for the bytes to go.
+  KomportSerial serial; // never opened
+  QVERIFY( !serial.isOpen() );
+  QCOMPARE( serial.putChar('x'), false );
+  QCOMPARE( serial.putStr("hello"), false );
+  // Must not crash on a null string either.
+  QCOMPARE( serial.putStr(nullptr), false );
 }
 
 QTEST_MAIN(TstSerial)

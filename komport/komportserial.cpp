@@ -178,17 +178,31 @@ bool KomportSerial::putChar(char _ch){
 }
 
 /** transmit a string */
-void KomportSerial::putStr(const char* str){
+bool KomportSerial::putStr(const char* str){
   // A single batched write() rather than looping putChar() per byte - one
   // syscall/QSerialPort call instead of N. sentChar() (for the hex
   // monitor) is still emitted once per byte actually written, just not
   // tangled up with how the bytes got onto the wire.
-  if ( str == nullptr || !isOpen() ) return;
+  if ( str == nullptr || !isOpen() ) return false;
   const qint64 len = static_cast<qint64>( strlen(str) );
   const qint64 written = mPort.write( str, len );
   for ( qint64 i = 0; i < written; ++i ) {
     emit sentChar( str[i] );
   }
+  if ( written != len ) {
+    // write() returning less than the full length (a partial write, or -1
+    // on error - written defaults to -1 there, so the loop above simply
+    // didn't run) used to be silently swallowed: the untransmitted
+    // remainder was dropped with no retry and no way for any caller to
+    // even find out. This covers macro commands/line endings, keyboard
+    // escape sequences and the device-status-report/device-attributes
+    // replies the emulation sends back - none of those retry on their
+    // own, so at minimum this should be diagnosable.
+    qWarning() << "KomportSerial::putStr(): wrote" << written << "of" << len
+               << "bytes (" << mPort.errorString() << ")";
+    return false;
+  }
+  return true;
 }
 
 /** set size of the internal RX buffer high-water mark */

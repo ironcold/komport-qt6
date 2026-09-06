@@ -440,6 +440,72 @@ beide gefixt; Runde 2 fand eine subtilere Restlücke in genau diesem
 Cancel-Fix (P2, `atEnd()` vs. tatsächlich gesendete Bytes), ebenfalls
 gefixt; Runde 3 fand keine weiteren Findings.
 
+## 0.3 Dritter Full-Review (2026-09-06)
+
+Wieder auf Nutzerwunsch, wieder neuer, unabhängiger Codex-Thread statt
+Fortsetzung. Diesmal explizit angewiesen, den kompletten Code frisch zu
+prüfen statt nur die zuletzt geänderten Stellen — Ziel: prüfen, ob beim
+wiederholten Fokussieren auf einzelne Findings andere Bereiche
+vernachlässigt wurden. Ergebnis: keine Kritisch-/Hoch-Funde, 2 neue
+Mittel-Findings — beide in Code, der in Runde 1/2 nicht angefasst wurde
+(Erase-Sequenzen der Emulation, `putStr()`), also echte, bisher
+unentdeckte Lücken und keine durch die vorherigen Fixes verursachten
+Regressionen. Codex bestätigte explizit: "Statisch sehe ich keine neuen
+Kritisch-/Hoch-Probleme in den Runde-2-Fixes selbst" — `mPixmap.isNull()`-
+Guards, `sent == size`, `mDownloadWriteError`, `WA_DeleteOnClose` und die
+`MaxDimension`/`MaxCells`-Logik wurden als konsistent eingestuft.
+
+- [x] **`CSI 1 K`/`CSI 1 J` (Erase Line/Display "Anfang bis Cursor")
+  aktualisierten das sichtbare Terminal nicht, und `CSI 1 J` löschte zu
+  viel.** `komportemulation.cpp` `doClearEOL()` Fall 1 (~Z. 751),
+  `doClearScreen()` Fall 1 (~Z. 792): beide riefen `cell(x,y)->clear()`
+  direkt auf `KomportCell` auf statt über `KomportCellArray::clear()`,
+  welches zusätzlich `updateCell()`/das `cellChanged`-Signal auslöst, auf
+  das `KomportView` (malt aus `mPixmap`, aktualisiert nur darüber)
+  angewiesen ist — die gelöschten Zellen blieben also visuell "stale",
+  bis ein unabhängiges späteres Repaint sie zufällig mit erfasste.
+  Zusätzlich in `doClearScreen()` Fall 1 ein eigenständiger Logikfehler:
+  das `break` verließ nur die innere Spalten-Schleife bei Erreichen der
+  Cursor-Position, die äußere Zeilen-Schleife lief unverändert weiter und
+  löschte danach *alle* Zeilen unterhalb des Cursors mit — `CSI 1 J`
+  ("Anfang des Bildschirms bis einschließlich Cursor") hat sich damit wie
+  `CSI 2 J` (kompletter Bildschirm) verhalten.
+  **Gefixt (2026-09-06):** beide Stellen nutzen jetzt
+  `cellArray()->clear(x,y)` statt `cell(x,y)->clear()`;
+  `doClearScreen()` Fall 1 zusätzlich auf eine korrekte Zeilen-Grenze
+  umgestellt (äußere Schleife nur bis einschließlich der Cursor-Zeile,
+  auf der Cursor-Zeile selbst nur bis zur Cursor-Spalte) statt sich auf
+  ein bedingtes `break` zu verlassen, das die äußere Schleife nie
+  beendet hätte. Verifiziert per neuem `tst_emulation`-Testfall: gegen
+  den ungefixten Stand reproduzierbar (`FAIL!` — Zeilen unterhalb des
+  Cursors wurden ebenfalls gelöscht), gegen den gefixten Stand grün
+  (inkl. `QSignalSpy` auf `cellChanged`, um auch die fehlende
+  Benachrichtigung abzudecken).
+- [x] **`KomportSerial::putStr()` konnte partielle/fehlgeschlagene Writes
+  still verlieren.** `komportserial.cpp` `putStr()` (~Z. 181): ein
+  einzelner `mPort.write(str, len)`-Aufruf, `sentChar()` wurde nur für
+  tatsächlich geschriebene Bytes emittiert, der Rest bei einem Partial-
+  Write oder `-1` bei Fehler wurde stillschweigend verworfen — kein
+  Retry, kein Rückgabewert zur Prüfung. Betroffen: Makro-Kommandos/
+  Zeilenenden (`komport.cpp`), Tastatur-Escape-Sequenzen und Device-
+  Status-Report/Device-Attributes-Antworten (`komportemulation.cpp`).
+  **Gefixt (2026-09-06):** `putStr()` gibt jetzt `bool` zurück (analog
+  zum bereits vorher auf `bool` umgestellten `putChar()`) und loggt einen
+  `qWarning()` bei Partial-/Fehl-Write. Bewusst *nicht* jede einzelne
+  Aufrufstelle (u.a. viele knappe Tastatur-Escape-Sequenzen in einem
+  `switch`) einzeln auf den Rückgabewert umgestellt — anders als bei den
+  Datei-Transfers, wo Datenintegrität kritisch ist, sind das reine
+  Fire-and-Forget-Pfade; die `qWarning()` in `putStr()` selbst macht das
+  Problem für alle Aufrufer gleichermaßen diagnostizierbar, ohne jede
+  Stelle einzeln umbauen zu müssen. Verifiziert per neuem
+  `tst_serial`-Testfall (geschlossener Port als einzig zuverlässig ohne
+  echtes Gerät reproduzierbarer Fehlerfall): `putChar()`/`putStr()` geben
+  jetzt korrekt `false` zurück statt stillschweigend Erfolg vorzugeben.
+
+**Verifikation:** alle 5 `ctest`-Targets grün (2 erweitert). Clean-Build
+mit `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test
+grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet (md5 identisch).
+
 
 ## 1. Produktvision und Architektur-Gate
 

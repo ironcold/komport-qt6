@@ -106,8 +106,12 @@ public slots: // Public slots
    *  know whether a byte actually made it out (e.g. file transfers) can
    *  check this instead of assuming success. */
   bool putChar(char _ch);
-  /** transmit a string */
-  void putStr(const char* str);
+  /** transmit a string. Returns false if the port isn't open or the write
+   *  was partial/failed (logged via qWarning() either way) - most callers
+   *  (keyboard escape sequences, device-status replies) are fire-and-
+   *  forget and don't check this, but it's available for callers that
+   *  want to. */
+  bool putStr(const char* str);
 signals: // Signals
   /** Whenever a communications port setting is changed such as baud rate, etc. */
   void settingsChanged();
