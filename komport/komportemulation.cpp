@@ -540,7 +540,7 @@ ESC[Ps;...;Psm
 #include "komportemulation.h"
 
 #include <QApplication>
-#include <cstdio>
+#include <QDebug>
 
 #define ASCII_BEL   0x07
 #define ASCII_BS    0x08
@@ -928,7 +928,7 @@ void KomportEmulation::doGraphics(){
         case 107: cellArray()->setBackgroundColor(QColor(255,255,255));              break;
 
         default:
-          printf( "?attr? %d\n", attr);
+          qDebug( "?attr? %d", attr);
           break;
       }
     }
@@ -1147,7 +1147,7 @@ void KomportEmulation::sequence(char _ch)
                   // printed as garbage.
         break;
       default:
-        printf( "?ctl? '%c'\n ", _ch );
+        qDebug( "?ctl? '%c'", _ch );
         break;
     }
     mSawESC = false;

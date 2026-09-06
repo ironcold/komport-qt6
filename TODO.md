@@ -30,6 +30,13 @@ Statischer Review (kein Build/Smoke-Test möglich, read-only Sandbox ohne
 abarbeiten, bevor Meilenstein 4 (VT220/xterm) startet — siehe Priorisierung
 am Ende dieses Abschnitts.
 
+**Stand:** Alle 15 Findings (2 Kritisch, 4 Hoch, 7 Mittel, 2 Nitpick) sind
+abgearbeitet, jeweils per temporärem Testprogramm oder (Kritisch/Hoch/Mittel)
+per dauerhaftem `ctest`-Regressionstest verifiziert, und über mehrere
+Runden `node codex-companion.mjs review` gegen den finalen Diff
+gegengeprüft (Details je Finding unten). Das Review-Gate ist damit
+vollständig erfüllt — Meilenstein 4/5/6/7 kann angegangen werden.
+
 ### Kritisch
 
 - [x] **Manipulierte/kaputte Profilwerte können beim Start abstürzen.**
@@ -274,11 +281,24 @@ am Ende dieses Abschnitts.
 
 ### Nitpick
 
-- [ ] `komport.desktop`: veraltete Shebang-Zeile (`#!/usr/bin/env
+- [x] `komport.desktop`: veraltete Shebang-Zeile (`#!/usr/bin/env
   xdg-open`) und `Encoding=UTF-8` sind für moderne `.desktop`-Dateien
   unüblich.
-- [ ] Debug-`printf()` in `komportemulation.cpp` (~Z. 920, ~Z. 1139) bei
+  **Gefixt (2026-09-06):** beide Zeilen entfernt. Verifiziert mit
+  `desktop-file-validate`: vorher eine Warnung ("key \"Encoding\" ... is
+  deprecated"), danach `VALID, no warnings`.
+- [x] Debug-`printf()` in `komportemulation.cpp` (~Z. 920, ~Z. 1139) bei
   unbekannten SGR/CSI-Sequenzen geht nach stdout statt z.B. `qDebug()`.
+  **Gefixt (2026-09-06):** beide Stellen auf `qDebug()` umgestellt,
+  `#include <cstdio>` (sonst ungenutzt) durch `#include <QDebug>` ersetzt.
+  Verifiziert per temporärem Testprogramm mit unbekannter SGR- (`ESC[999m`)
+  und CSI-Sequenz (`ESC[z`) — beide Meldungen erscheinen korrekt
+  (`?attr? 999` / `?ctl? 'z'`). **Nebenbefund bei der Verifikation:**
+  dieses Sandbox-Environment läuft unter systemd (`JOURNAL_STREAM`
+  gesetzt) — Qt routet `qDebug()`/`qWarning()` dort standardmäßig ins
+  systemd-Journal statt nach stderr, sichtbar erst mit
+  `QT_FORCE_STDERR_LOGGING=1`. Reine Environment-Eigenheit dieser
+  Sandbox, kein Verhalten der Anwendung selbst.
 
 ### Empfohlene Reihenfolge
 
