@@ -86,6 +86,15 @@ KomportView::~KomportView()
   // mScrollBar is a real child widget now (parent == this), so Qt's
   // parent-child ownership already destroys it - deleting it again here
   // would double-free.
+  //
+  // mEmulation, unlike mScrollBar, is *not* parented (its constructor
+  // doesn't even take a QObject* parent) and nothing else owns/deletes
+  // it, so it needs an explicit delete here - one leaked KomportEmulation
+  // per KomportView used to just live for the rest of the process (a
+  // single top-level window's whole lifetime), but became a real,
+  // repeatable leak once Qt::WA_DeleteOnClose (see komport.cpp) started
+  // actually destroying windows on close instead of only hiding them.
+  delete mEmulation;
 }
 
 KomportDoc *KomportView::getDocument() const
@@ -531,9 +540,25 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
       QString str;
       for( int y=startY; y <= endY; y++ ) {
           for( int x=startX; x <= endX; x++ ) {
-              cell = cellArray()->cell(x,y);
+              // getCell(), not cellArray()->cell() directly: (x,y) here
+              // are screen positions, and while scrolled back into
+              // history getCell() can resolve one to a cell in
+              // mScrollBuffer rather than the live cellArray() - see
+              // getCell() above. Selecting via cellArray()->cell()
+              // unconditionally mutated (and, for clip, read the
+              // character of) whatever the live grid happened to have at
+              // that raw coordinate, not the scroll-buffer content
+              // actually visible on screen - copying while scrolled back
+              // silently grabbed the wrong text.
+              cell = getCell(x,y);
               if ( cell != nullptr ) {
-                  cellArray()->cell(x,y)->setSelect( true );
+                  cell->setSelect( true );
+                  // Still cellArray()->updateCell(): its emitted
+                  // cellChanged(QPoint) is just a "repaint screen
+                  // position (x,y)" trigger reaching KomportView::
+                  // updateCell() -> paintCell(), which re-resolves the
+                  // correct cell via getCell() itself at paint time - it
+                  // doesn't matter which object's signal fired it.
                   cellArray()->updateCell(x,y);
                   if ( clip )
                       str += cell->character();
@@ -552,14 +577,38 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
 }
 /** clear selection */
 void KomportView::deselect(){
+    // Clear select() on both the live grid *and* the scroll buffer - now
+    // that select() can flag cells in either one depending on scroll
+    // position at the time (see getCell()/select()), this can't just
+    // sweep cellArray() alone without leaving stale, invisible-but-still-
+    // flagged-selected cells behind in mScrollBuffer.
+    bool anyCleared = false;
     for( int y=0; y < cellArray()->arrayHeight(); y++ ) {
         for( int x=0; x < cellArray()->arrayWidth(); x++ ) {
             KomportCell* cell = cellArray()->cell(x,y);
             if ( cell->select() ) {
                 cell->setSelect(false);
-                cellArray()->updateCell(x,y);
+                anyCleared = true;
             }
         }
+    }
+    for( int y=0; y < mScrollBuffer.arrayHeight(); y++ ) {
+        for( int x=0; x < mScrollBuffer.arrayWidth(); x++ ) {
+            KomportCell* cell = mScrollBuffer.cell(x,y);
+            if ( cell->select() ) {
+                cell->setSelect(false);
+                anyCleared = true;
+            }
+        }
+    }
+    // One full repaint instead of a per-cell updateCell() while clearing:
+    // cellArray()->update() re-notifies every currently visible row
+    // through the normal (scroll-aware, via getCell()/paintCell())
+    // signal chain, which is what's actually needed here regardless of
+    // whether the cleared cells came from the live grid or the scroll
+    // buffer.
+    if ( anyCleared ) {
+        cellArray()->update();
     }
     mHasSelection = false;
     emit viewModified( this );

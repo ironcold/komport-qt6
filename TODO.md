@@ -506,6 +506,65 @@ Guards, `sent == size`, `mDownloadWriteError`, `WA_DeleteOnClose` und die
 mit `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test
 grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet (md5 identisch).
 
+## 0.4 Vierter Full-Review (2026-09-06)
+
+Wieder neuer, unabhängiger Codex-Thread, diesmal explizit mit der Frage,
+ob nach drei vorherigen Fix-Runden echte Konvergenz erreicht ist oder ob
+die wiederholte Fokussierung auf einzelne Findings zu verzerrter
+Testabdeckung geführt hat. Ergebnis: **die Runde-3-Fixes selbst wurden
+explizit als sauber bestätigt** ("Die beiden Runde-3-Fixes sehen sauber
+aus ... Kein neuer Bounds-/Notify-Fehler sichtbar"; `putStr()`
+"konsistent"). 2 neue Mittel-Findings, wieder beide in bis dahin
+unangefasstem Code (Textauswahl beim Zurückscrollen,
+`KomportEmulation`-Lifetime) — echte, unabhängig vom bisherigen
+Fix-Fokus bestehende Lücken.
+
+- [x] **Auswahl/Copy war bei zurückgescrollter Ansicht falsch (falscher
+  Zellinhalt, und ein potenziell dauerhaft "selektiert" bleibender,
+  unsichtbarer Live-Grid-Cell).** `komportview.cpp` `select()` (~Z. 523),
+  `deselect()` (~Z. 554): Rendering (`paintCell()`) und Minimap lesen
+  Scrollback-Inhalte korrekt über das scroll-bewusste `getCell()`
+  (berücksichtigt, ob Bildschirmposition `(x,y)` gerade auf den
+  Scroll-Buffer oder das Live-Grid zeigt), aber `select()`/`deselect()`
+  griffen weiterhin direkt auf `cellArray()->cell(x,y)` zu — beim
+  Zurückscrollen in die Historie wurden also Zellen aus dem aktuellen
+  Live-Bildschirm markiert/kopiert, nicht die tatsächlich sichtbaren
+  Scrollback-Zellen. Zusätzlich fegte `deselect()` nur über das Live-Grid,
+  sodass eine fälschlich markierte Scroll-Buffer-Zelle nie wieder
+  zurückgesetzt worden wäre.
+  **Gefixt (2026-09-06):** `select()` nutzt jetzt `getCell(x,y)` statt
+  `cellArray()->cell(x,y)` zum Lesen/Markieren (der Repaint-Trigger
+  `cellArray()->updateCell(x,y)` bleibt unverändert — er ist nur ein
+  "Bildschirmposition (x,y) neu zeichnen"-Signal, das über die normale,
+  scroll-bewusste Repaint-Kette bei `paintCell()`/`getCell()` ohnehin
+  wieder korrekt aufgelöst wird). `deselect()` fegt jetzt zusätzlich über
+  `mScrollBuffer` und löst nur bei tatsächlich etwas Zurückgesetztem einen
+  einzelnen `cellArray()->update()`-Vollrepaint aus (statt vorher pro
+  Zelle einzeln). Verifiziert per neuem `tst_selection`-Testfall: Inhalt
+  über die echte Emulation geschrieben (mehr Zeilen als Bildschirmhöhe,
+  treibt echtes Scrollen), zurückgescrollt, `select()` aufgerufen — gegen
+  den ungefixten Stand reproduzierbar (Live-Grid-Zelle statt
+  Scroll-Buffer-Zelle markiert), gegen den gefixten Stand grün. (Die
+  Prüfung stützt sich bewusst auf Zell-Identität/Flags statt auf einen
+  Roundtrip über `QApplication::clipboard()`s `Selection`-Modus, da die
+  hier für Tests verwendete `offscreen`-QPA-Plattform diesen
+  X11-spezifischen Clipboard-Modus gar nicht unterstützt — reine
+  Plattform-Einschränkung, kein Code-Bug.)
+- [x] **`KomportEmulation` wurde pro `KomportView` geleakt.**
+  `komportview.cpp` Konstruktor (~Z. 77): `mEmulation = new
+  KomportEmulation(...)` — kein `QObject`-Parent möglich (der Konstruktor
+  nimmt keinen entgegen) und `~KomportView()` löschte es nie. Vor dem
+  Fenster-Lifetime-Fix (Abschnitt 0.1, Hoch) faktisch harmlos (Fenster
+  wurden ohnehin nie zerstört, der Leak lebte nur bis Prozessende); seit
+  `Qt::WA_DeleteOnClose` Fenster wirklich zerstört, wird bei jedem
+  geschlossenen Fenster real Speicher verloren.
+  **Gefixt (2026-09-06):** `delete mEmulation;` in `~KomportView()`
+  ergänzt.
+
+**Verifikation:** alle 6 `ctest`-Targets grün (1 neu). Clean-Build mit
+`-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test grün,
+echtes `~/.config/Komport-Qt6/`-Profil unangetastet.
+
 
 ## 1. Produktvision und Architektur-Gate
 
