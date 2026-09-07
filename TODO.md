@@ -892,28 +892,73 @@ Verdrahtung "moot"/"unconfirmed"; der Kommentar-Nit (irreführender
 4096-Bezug) wurde korrigiert.
 
 
-## 1. Produktvision und Architektur-Gate
+## 1. Produktvision und Architektur-Gate — ✅ erledigt (2026-09-07)
 
-- [ ] Produktvision festhalten und bei kuenftigen Features gegenpruefen: Komport-Qt6
+- [x] Produktvision festhalten und bei kuenftigen Features gegenpruefen: Komport-Qt6
   soll ein spezialisiertes serielles Werkstatt-Terminal werden, nicht noch ein
   allgemeines Shell-Terminal. Kernnutzen: die schwierigen Faelle, fuer die man
   sonst mehrere halb passende Tools sucht: Netzwerk-/Industriegeraete, alte
   Rechner, ungewoehnliche Zeilenenden, rohe Steuerzeichen, Hex-Diagnose,
   Mitschnitte, Makros, Profile und Retro-/Industrie-Zeichensaetze.
-- [ ] Terminal-Engine-ADR vor Meilenstein 4 finalisieren: eigene Emulation weiter
-  ausbauen vs. `QTermWidget` als optionales Backend. Entwurf liegt in
-  `docs/architecture-decisions/ADR-001-terminal-engine-strategy.md`.
-  Entscheidungsfrage ist nicht "koennen wir etwas wiederverwenden?", sondern
-  ob Wiederverwendung die
+  Festgehalten im Abschnitt "Produktvision / Daseinsberechtigung" in
+  `CLAUDE.md`.
+- [x] Terminal-Engine-ADR vor Meilenstein 4 finalisieren: eigene Emulation weiter
+  ausbauen vs. `QTermWidget` als optionales Backend. Entscheidungsfrage war
+  nicht "koennen wir etwas wiederverwenden?", sondern ob Wiederverwendung die
   seriellen Spezialfeatures einfacher, stabiler und wartbarer macht.
-- [ ] Kleinen Spike fuer `QTermWidget` planen, bevor VT220/xterm-Komfort tief in
+  **Ergebnis (2026-09-07): `ADR-001` auf `Rejected` entschieden — bei der
+  eigenen Emulation bleiben.** Der Spike (siehe nächster Punkt) hat gezeigt,
+  dass ein `QTermWidget`-Backend technisch ginge, aber der Nutzer hat sich
+  bewusst dagegen entschieden: die eigene Emulation ist nach sechs
+  Review-Runden (Abschnitt 0.1–0.7) bereits ausgereift und exakt auf die
+  seriellen Spezialfälle dieses Projekts zugeschnitten; ein Backend-Wechsel
+  wäre ein großer, riskanter Eingriff für Vorteile (fertige Farbschemata,
+  geschenktes Copy/Paste), die sich günstiger direkt in der bestehenden
+  Architektur nachbauen lassen (Meilenstein 5 plant ohnehin einen
+  Appearance-Tab). Details/Begründung in
+  `docs/architecture-decisions/ADR-001-terminal-engine-strategy.md`
+  ("Spike Results"/"Final decision"). Meilenstein 4 baut damit direkt auf
+  `komportemulation.cpp` weiter, kein Backend-Wechsel nötig.
+- [x] Kleinen Spike fuer `QTermWidget` planen, bevor VT220/xterm-Komfort tief in
   die eigene Emulation eingebaut wird: RX/TX-Bridge, Tastatureingaben,
   Scrollback, Farbschemata, Cursor, Copy/Paste und Performance pruefen. Die
   Zeichensatz-Uebersetzung muss dabei weiterhin vor der Terminal-Interpretation
   auf Byte-Ebene moeglich bleiben.
-- [ ] `KonsolePart` nur als dokumentierte Gegenprobe aufnehmen, nicht als
+  **Durchgeführt (2026-09-07):** eigenständiges, per `-DKOMPORT_BUILD_SPIKES=ON`
+  optional baubares CMake-Target `spike/qtermwidget-bridge/` (Paket
+  `qtermwidget-devel` 2.4.0, Qt6-Build von `QTermWidget`). Bridged einen
+  `QSerialPort` mit einem `QTermWidget` im `startTerminalTeletype()`-Modus
+  (kein Shell-Kindprozess) über dessen internen Pty-Slave-Fd
+  (`getPtySlaveFd()`) und das `sendData()`-Signal, mit Stub-Hookpunkten an
+  exakt der Stelle, die `CLAUDE.md`s Datenfluss-Vorgabe verlangt
+  (Diagnose/Zeichensatz-Übersetzung vor bzw. nach dem Terminal-Backend).
+  Verifiziert end-to-end gegen ein echtes `socat`-Pty-Paar (derselbe
+  Trick wie in mehreren bestehenden `tests/tst_*.cpp`): RX-Bytes an die
+  simulierte Gegenstelle geschickt landeten korrekt im Bildschirmbild
+  (`selectedText()` geprüft); von der Emulation verarbeiteter Text kam
+  korrekt an der simulierten Gegenstelle an. 14 Farbschemata und
+  konfigurierbare Scrollback-Größe sofort nutzbar, Copy/Paste
+  funktioniert ohne Zusatzcode. Ein bislang unbekannter Stolperstein
+  gefunden: neue `connect(sender, &Class::signal, ...)`-Syntax schlägt zur
+  Laufzeit ("signal not found") speziell bei `QTermWidget`s eigenen
+  Signalen gegen dieses Distro-Paket fehl, alte `SIGNAL()/SLOT()`-Syntax
+  funktioniert. Font-Rendering, Cursor-Optik, Maus-Drag-Auswahl und echte
+  Performance unter Last blieben in dieser Headless-Sandbox ungeprüft.
+  Vollständiger Befund in `spike/qtermwidget-bridge/README.md`, in
+  `ADR-001` übernommen. Haupt-Build/Tests bewusst unberührt (Spike-Target
+  nur mit explizitem CMake-Flag gebaut, `qtermwidget-devel` keine neue
+  Pflicht-Abhängigkeit). **Nicht durch das Review-Gate aus Abschnitt 0
+  gelaufen** (anders als jeder Commit dort) — bewusst ausgelassen, auf
+  Nutzernachfrage bestätigt: reiner, standardmäßig nicht gebauter
+  Wegwerf-Spike ohne Berührung des Kern-Codepfads, kein Kernfeature. Falls
+  `spike/qtermwidget-bridge/` später doch als Ausgangspunkt für echte
+  Arbeit dient (z.B. bei einer künftigen Neubewertung von `ADR-001`),
+  sollte es dann alsbald nachgeholt werden.
+- [x] `KonsolePart` nur als dokumentierte Gegenprobe aufnehmen, nicht als
   bevorzugten Pfad: zu viele KDE-/KF6-Abhaengigkeiten und PTY-/Shell-Fokus fuer
-  ein schlankes Qt6-Serial-Tool.
+  ein schlankes Qt6-Serial-Tool. Bereits im "Decision"-Abschnitt von
+  `ADR-001` dokumentiert; durch den Spike unverändert (wurde bewusst nicht
+  prototypisiert, da explizit die nicht bevorzugte Vergleichsoption).
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 

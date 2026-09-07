@@ -1,4 +1,5 @@
 /build/
+/build-spike/
 *.o
 *.obj
 CMakeCache.txt
