@@ -45,6 +45,8 @@ private slots:
   void cleanupTestCase();
 
   void selectWhileScrolledBackReadsScrollBufferNotLiveGrid();
+  void cellAtHistoryRowMatchesFullyScrolledBackGetCell();
+  void oldestRowStillReadableOnceScrollBufferIsSaturated();
 
 private:
   QString mTestConfigFile;
@@ -114,16 +116,18 @@ void TstSelection::selectWhileScrolledBackReadsScrollBufferNotLiveGrid()
   QVERIFY2( scrollBufferChar != liveGridChar,
             "test setup didn't produce distinct scroll-buffer vs. live-grid "
             "content at (0,0) - can't exercise the bug this way" );
+  const QChar scrollBufferChar1 = view->getCell(1, 0)->character(); // for the selectedText() check below
 
   // The actual regression: select() at screen position (0,0) while
   // scrolled back must read/flag the scroll-buffer cell that's actually
   // visible there, not the live grid's cell at the same raw coordinate.
   // clip=true to exercise the same code path real usage does (it also
-  // sets the X11 "Selection" clipboard) - not asserted on directly, since
-  // the "offscreen" QPA platform used for these tests doesn't support
-  // that clipboard mode at all (QApplication::clipboard()->text(Selection)
-  // reads back empty regardless of what was set, platform limitation, not
-  // a code bug); the cell-identity checks below are what actually prove
+  // sets the X11 "Selection" clipboard, which isn't asserted on directly
+  // since the "offscreen" QPA platform used for these tests doesn't
+  // support that clipboard mode at all - platform limitation, not a code
+  // bug). selectedText(), unlike QClipboard::Selection, *is* directly
+  // checkable regardless of platform (that's the whole point of it - see
+  // its doc comment in komportview.h) and is what actually proves
   // select() operated on the same cell that assembled the copied text.
   // start != end: select() treats an equal start/end as "no selection at
   // all" (a zero-size drag), so (0,0) alone would never even reach the
@@ -135,11 +139,150 @@ void TstSelection::selectWhileScrolledBackReadsScrollBufferNotLiveGrid()
   QVERIFY2( !view->cellArray()->cell(0,0)->select(),
             "the live grid's cell at the same raw coordinate must not be "
             "flagged selected - it was never actually selected on screen" );
+  QCOMPARE( view->selectedText(), QString(scrollBufferChar) + QString(scrollBufferChar1) + QChar('\n') );
 
   // deselect() must clear the scroll-buffer cell's flag too (not just
   // sweep the live grid, which would leave this stale forever).
   view->deselect();
   QVERIFY( !view->getCell(0,0)->select() );
+  QVERIFY( view->selectedText().isEmpty() );
+
+  win->close();
+  QTRY_VERIFY( guard.isNull() );
+}
+
+void TstSelection::cellAtHistoryRowMatchesFullyScrolledBackGetCell()
+{
+  // Regression test for cellAtHistoryRow()'s off-by-one: it used to skip
+  // the actual oldest scrollback row and return a permanently-blank row
+  // at the newest end instead of real content (see TODO.md's Codex-review
+  // section, sixth full review) - visible directly in the minimap
+  // silhouette and its hover preview, both of which read history rows
+  // exclusively through this function.
+  //
+  // getCell()'s own scroll-buffer indexing was independently verified
+  // correct in an earlier review round (it's exercised, among other
+  // things, by selectWhileScrolledBackReadsScrollBufferNotLiveGrid()
+  // above), so rather than re-deriving mScrollBuffer's raw row layout
+  // here too, this checks cellAtHistoryRow() against it directly: with
+  // the view scrolled all the way back (scrollbar value 0), viewport row
+  // _y and absolute history row _row=_y denote the exact same on-screen
+  // position by definition, so getCell(x, row) and cellAtHistoryRow(x,
+  // row) must return cells with identical content for every row that's
+  // actually in the scroll buffer (row < depth).
+  KomportApp *win = new KomportApp();
+  win->show();
+  QCoreApplication::processEvents();
+  QPointer<KomportApp> guard(win);
+
+  KomportView *view = win->findChild<KomportView *>();
+  QVERIFY( view != nullptr );
+  KomportMinimapScrollBar *scrollBar = view->findChild<KomportMinimapScrollBar *>( QStringLiteral("scroll_bar") );
+  QVERIFY( scrollBar != nullptr );
+
+  const int rows = view->cellArray()->arrayHeight();
+  const int totalLines = rows + 5;
+  for ( int i = 0; i < totalLines; ++i ) {
+    const char rowChar = 'A' + (i % 26);
+    view->mEmulation->slotReceivedChar(rowChar);
+    view->mEmulation->slotReceivedChar('\r');
+    view->mEmulation->slotReceivedChar('\n');
+  }
+
+  scrollBar->setValue(0); // fully scrolled back
+  const int depth = scrollBar->maximum();
+  QVERIFY2( depth > 0, "test setup needs actual scrollback content" );
+
+  for ( int row = 0; row < depth; ++row ) {
+    KomportCell *viaHistory = view->cellAtHistoryRow(0, row);
+    KomportCell *viaGetCell = view->getCell(0, row);
+    QVERIFY( viaHistory != nullptr );
+    QVERIFY( viaGetCell != nullptr );
+    QCOMPARE( viaHistory->character(), viaGetCell->character() );
+  }
+
+  // Out-of-range rows must still be rejected cleanly.
+  QCOMPARE( view->cellAtHistoryRow(0, -1), static_cast<KomportCell*>(nullptr) );
+  QCOMPARE( view->cellAtHistoryRow(0, view->totalHistoryRows()), static_cast<KomportCell*>(nullptr) );
+
+  win->close();
+  QTRY_VERIFY( guard.isNull() );
+}
+
+void TstSelection::oldestRowStillReadableOnceScrollBufferIsSaturated()
+{
+  // Regression test for the saturated-scroll-buffer edge case: once the
+  // scroll buffer has accumulated at least as many pushed rows as it has
+  // capacity for, KomportScrollBuffer::depth() used to report one row
+  // more than actually has real content (see komportscrollbuffer.cpp) -
+  // arithmetic keyed off depth() in both getCell() and
+  // cellAtHistoryRow() then computed an out-of-range negative index for
+  // the oldest row and silently returned nullptr (rendered as blank in
+  // the minimap) instead of the real content still sitting right there.
+  // This only shows up once the buffer is genuinely full, which is why
+  // none of the other tests here (which only push a handful of rows)
+  // caught it.
+  KomportApp *win = new KomportApp();
+  win->show();
+  QCoreApplication::processEvents();
+  QPointer<KomportApp> guard(win);
+
+  KomportView *view = win->findChild<KomportView *>();
+  QVERIFY( view != nullptr );
+  KomportMinimapScrollBar *scrollBar = view->findChild<KomportMinimapScrollBar *>( QStringLiteral("scroll_bar") );
+  QVERIFY( scrollBar != nullptr );
+
+  const int rows = view->cellArray()->arrayHeight();
+  // The "Default" profile's ScrollBuffer is 1024 (see komport.cpp) -
+  // push comfortably past that so the scroll buffer is definitely
+  // saturated, not just close to it, without needing to know its exact
+  // configured size here. (applyConnectionSettings() separately clamps
+  // ScrollBuffer to at most 4096 regardless of what a profile requests -
+  // that's a much higher ceiling than this test needs to clear.)
+  const int totalLines = rows + 1500;
+  for ( int i = 0; i < totalLines; ++i ) {
+    const char rowChar = 'A' + (i % 26);
+    view->mEmulation->slotReceivedChar(rowChar);
+    view->mEmulation->slotReceivedChar('\r');
+    view->mEmulation->slotReceivedChar('\n');
+  }
+
+  scrollBar->setValue(0); // fully scrolled back
+  const int depthBeforeResize = scrollBar->maximum();
+  QVERIFY2( depthBeforeResize > 1000, "test setup needs a genuinely saturated scroll buffer" );
+
+  // Saturating the buffer purely by scrolling can't reproduce the bug on
+  // its own: KomportCellArray::scrollUp() (which KomportScrollBuffer::
+  // scrollUp() calls into) shrinks the array by one row and immediately
+  // grows it back by one, and both of those setArraySize() calls dispatch
+  // virtually back into KomportScrollBuffer::setArraySize() - so every
+  // scrollUp() re-clamps depth() against arrayHeight() twice, which keeps
+  // depth() pinned at arrayHeight()-1 no matter how long the session runs,
+  // regardless of whether the cap constant here is arrayHeight() or
+  // arrayHeight()-1. The real, user-reachable trigger is a *profile
+  // switch* (or a Settings change) that resizes the scroll buffer via a
+  // single, un-paired setArraySize() call - e.g. switching to a profile
+  // whose configured ScrollBuffer size happens to equal the current
+  // depth(). setScrollBuffer() below simulates exactly that: resize to
+  // depthBeforeResize itself, so the unfixed clamp ("if depth >
+  // arrayHeight()") sees depth == the *new* arrayHeight() and leaves it
+  // unchanged, landing depth() == arrayHeight() exactly - the
+  // out-of-range state cellAtHistoryRow()/getCell() can't index into.
+  view->setScrollBuffer( depthBeforeResize );
+  scrollBar->setValue(0); // fully scrolled back again after the resize
+
+  // The actual assertion: the oldest history row must still be real
+  // content, not the nullptr a negative index would have produced.
+  KomportCell *oldestViaHistory = view->cellAtHistoryRow(0, 0);
+  KomportCell *oldestViaGetCell = view->getCell(0, 0);
+  QVERIFY2( oldestViaHistory != nullptr,
+            "cellAtHistoryRow(0, 0) returned nullptr for the oldest row "
+            "after a scroll-buffer resize lands depth() == arrayHeight()" );
+  QVERIFY2( oldestViaGetCell != nullptr,
+            "getCell(0, 0) returned nullptr for the oldest row after a "
+            "scroll-buffer resize lands depth() == arrayHeight(), at full "
+            "scrollback" );
+  QCOMPARE( oldestViaHistory->character(), oldestViaGetCell->character() );
 
   win->close();
   QTRY_VERIFY( guard.isNull() );

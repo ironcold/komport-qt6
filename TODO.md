@@ -738,6 +738,159 @@ anders als alle bisherigen Findings.** Ein gutes Konvergenz-Signal.
 `-Wall -Wextra`: weiterhin 0 Warnungen/Fehler. Offscreen-Smoke-Test grün,
 echtes `~/.config/Komport-Qt6/`-Profil unangetastet.
 
+## 0.7 Sechster Full-Review (2026-09-06)
+
+Wieder neuer, unabhängiger Codex-Thread, diesmal mit der Frage, ob nach
+der gezielten manuellen Ergänzungsrunde (Abschnitt 0.6) tatsächlich
+Konvergenz erreicht ist. Ergebnis: **keine Kritisch-/Hoch-Funde**, aber 2
+neue Mittel-Findings — beide von Codex selbst ausdrücklich als **keine
+Regression** einer vorherigen Fix-Runde eingeordnet, sondern als
+bestehende Alt-/Feature-Fehler, die erst durch die Minimap-/History-API
+bzw. den Copy-Pfad sichtbar werden. Konvergenz damit weiterhin nicht
+vollständig erreicht, aber die Art der Findings hat sich sichtbar
+verschoben: keine Regressionen mehr, nur noch unabhängige Alt-Bugs.
+
+- [x] **`cellAtHistoryRow()` adressierte den Scrollback um eine Zeile
+  falsch — übersprang die tatsächlich älteste Zeile und lieferte am
+  neuen Ende stattdessen eine dauerhaft leere Zeile.**
+  `komportview.cpp` `cellAtHistoryRow()` (~Z. 327): nutzte `(mScrollBuffer
+  .arrayHeight() - depth) + _row`, während `getCell()` (die bereits
+  mehrfach verifizierte, korrekte Referenz) `(arrayHeight()-1-scrolled)
+  +_y` nutzt — eine fehlende `-1`. Durch Nachrechnen bestätigt (und exakt
+  mit `KomportView::slotAboutToScrollUp()`s Kopier-Reihenfolge
+  hergeleitet): nach `N` Scroll-Ereignissen sitzt die zuletzt
+  hinzugekommene Zeile immer bei `arrayHeight()-2`, nicht `-1` (die
+  frisch angehängte, nie beschriebene letzte Zeile) — `cellAtHistoryRow()`
+  hat diese Verschiebung nicht mitgemacht. Sichtbar direkt in der
+  Minimap-Silhouette und deren Hover-Vorschau, die History-Zeilen
+  ausschließlich über diese Funktion lesen. Kein durch vorherige Fixes
+  verursachtes Problem, sondern ein eigenständiger Alt-Fehler in der in
+  Runde 4 eingeführten `cellAtHistoryRow()`-API selbst (diese exakte
+  Formel-Diskrepanz war mir bei meiner eigenen manuellen Durchsicht in
+  Abschnitt 0.6 bereits aufgefallen, ich hatte sie dort aber nicht zu
+  Ende verfolgt — von Codex jetzt konkret bestätigt und lokalisiert).
+  **Gefixt (2026-09-06):** zusätzliches `-1` ergänzt:
+  `(mScrollBuffer.arrayHeight() - depth - 1) + _row`. Verifiziert per
+  neuem `tst_selection`-Testfall: bei komplett zurückgescrolltem
+  Scrollbar (`value=0`) muss `cellAtHistoryRow(x, row)` für jede Zeile
+  `row < depth` exakt denselben Inhalt liefern wie `getCell(x, row)` (bei
+  `value=0` bezeichnen View-relatives `_y` und absolutes `_row` dieselbe
+  Bildschirmposition) — gegen den ungefixten Stand reproduzierbar (`'A'`
+  statt erwartetem `' '`), gegen den gefixten Stand grün.
+- [x] **Copy (Ctrl+C/Edit-Menü) hing ausschließlich am X11-
+  Selection-Clipboard und kopierte auf anderen Plattformen still gar
+  nichts.** `komport.cpp` `slotEditCopy()` (~Z. 1020): las
+  `QClipboard::Selection` (die X11 "primary selection", auch bekannt vom
+  Mittelklick-Einfügen) und schrieb den Inhalt nach `QClipboard::
+  Clipboard`. `KomportView::select(..., clip=true)` (~Z. 585) schrieb nur
+  nach `QClipboard::Selection`. Auf Plattformen ohne Selection-Clipboard-
+  Unterstützung (Wayland ohne das Primary-Selection-Protokoll, Windows,
+  macOS, und — wie in dieser Session mehrfach direkt beobachtet — die für
+  die eigene Testsuite verwendete `offscreen`-QPA-Plattform) blieb Copy
+  damit funktionslos, obwohl `hasSelection()` `true` war und Zellen
+  sichtbar markiert waren. Kein durch vorherige Fixes verursachtes
+  Problem, sondern bestehendes Design aus dem ursprünglichen
+  Auswahl-Pfad — bei der Portierung von KDE3 (wo dasselbe X11-spezifische
+  Verhalten unauffällig war, da Zielplattform ohnehin X11) unverändert
+  übernommen, aber ein echter Portabilitäts-Rückschritt für das
+  Qt6-Ziel dieses Projekts (`CLAUDE.md`: "reines Qt6-Programm").
+  **Gefixt (2026-09-06):** neues `KomportView`-Member `mSelectedText` plus
+  öffentlicher Getter `selectedText()` — `select(..., clip=true)` befüllt
+  es zusätzlich zum weiterhin bestehenden `QClipboard::Selection`-Schreiben
+  (das bleibt als Bonus für Mittelklick-Einfügen auf Plattformen, die es
+  unterstützen), `deselect()` leert es. `slotEditCopy()` liest jetzt
+  `view->selectedText()` direkt statt über `QClipboard::Selection` zu
+  gehen — funktioniert damit plattformunabhängig. Verifiziert per
+  erweitertem `tst_selection`-Testfall: `selectedText()` nach `select()`
+  exakt geprüft (nicht mehr nur indirekt über Zell-Flags wie in Runde 4,
+  weil jetzt eine plattformunabhängige Prüfmöglichkeit existiert), sowie
+  dass `deselect()` es wieder leert.
+
+- [x] **Scrollback-Puffer konnte nach einem Profilwechsel/Settings-Resize
+  auf eine Tiefe landen, die exakt der neuen Kapazität entsprach —
+  `getCell()`/`cellAtHistoryRow()` griffen dann mit einem
+  Out-of-Range-Index auf die älteste Zeile zu und lieferten `nullptr`
+  statt des tatsächlich noch vorhandenen Inhalts.**
+  `KomportScrollBuffer::scrollUp()`/`setArraySize()` (und die gespiegelte,
+  aktuell ungenutzte `KomportFileScrollBuffer`-Fassung) deckelten
+  `mDepth` bislang auf `arrayHeight()` statt `arrayHeight()-1` — das
+  überstieg die tatsächlich nutzbare Historie um genau eine Zeile (siehe
+  `scrollUp()`-Kommentar: die letzte Zeile ist nach jedem Scroll-Schritt
+  immer frisch leer, es gibt nie mehr als `arrayHeight()-1` Zeilen mit
+  echtem Inhalt). **Wichtige Präzisierung gegenüber der ursprünglichen
+  Einschätzung:** über fortlaufendes Scrollen allein ist dieser Zustand
+  gar nicht erreichbar — `KomportCellArray::scrollUp()` (Basisklasse)
+  schrumpft das Array um eine Zeile und vergrößert es sofort wieder, und
+  beide `setArraySize()`-Aufrufe dispatchen virtuell zurück in die
+  überschriebene Fassung, die `mDepth` dabei zweimal pro Scroll-Schritt
+  neu deckelt — dadurch bleibt `mDepth` beim fortlaufenden Scrollen immer
+  bei `arrayHeight()-1` hängen, unabhängig davon, welche Konstante hier
+  stand. Real erreichbar ist der Fehlerzustand über einen *direkten*,
+  ungepaarten `setArraySize()`-Aufruf — z.B. `KomportView::
+  setScrollBuffer()` bei einem Profilwechsel: trifft die neue,
+  konfigurierte Puffergröße exakt die aktuelle Tiefe, ließ die alte
+  `> arrayHeight()`-Prüfung `mDepth` unverändert (weil `mDepth` bereits
+  gleich der neuen `arrayHeight()` war, die Prüfung also falsch war) —
+  `depth() == arrayHeight()` exakt, der eine Zustand, den die
+  Index-Arithmetik nicht abbilden kann. Von Codex als eigenständiger
+  Alt-Fehler eingestuft, keine Regression einer vorherigen Fix-Runde.
+  **Gefixt (2026-09-06):** Deckel in beiden Klassen (`scrollUp()` und
+  `setArraySize()`) auf `arrayHeight()-1` geändert. Verifiziert per neuem
+  `tst_selection`-Testfall (`oldestRowStillReadableOnceScrollBufferIsSaturated`):
+  sättigt den Puffer durch Scrollen, ruft dann `setScrollBuffer()` mit der
+  aktuellen Tiefe als neuer Größe auf (simuliert den Profilwechsel-Pfad)
+  und prüft, dass `cellAtHistoryRow(0,0)`/`getCell(0,0)` danach nicht
+  `nullptr` liefern — gegen den ungefixten Stand reproduzierbar
+  (`nullptr`), gegen den gefixten Stand grün. Die erste Testfassung prüfte
+  nur reines Dauerscrollen und schlug dadurch nie fehl, unabhängig vom
+  Fix-Stand — beim Nachrechnen des self-correcting Shrink/Grow-Verhaltens
+  von `KomportCellArray::scrollUp()` aufgefallen und auf den echten,
+  profilwechsel-basierten Auslöser umgestellt.
+- [x] **`select()` konnte die soeben gesetzten Zell-Selektions-Flags
+  (und den kopierten Text) im selben Aufruf sofort wieder verlieren, wenn
+  es außerhalb eines Maus-Drags aufgerufen wurde** — z.B. direkt aus
+  einem Test, oder von einem künftigen, nicht-Maus-getriebenen Aufrufer.
+  Beim Schreiben des `selectedText()`-Regressionstests oben aufgefallen:
+  `select(..., clip=true)` schreibt am Ende auch nach
+  `QApplication::clipboard()->setText(str, QClipboard::Selection)` —
+  das kann synchron (gleicher Thread, Direktverbindung) `QClipboard::
+  selectionChanged()` auslösen, worauf `KomportView::
+  slotSelectionChanged()` reagiert und `deselect()` aufruft, *außer*
+  `mInSelection` ist gerade `true`. Im echten Maus-Pfad ist das immer der
+  Fall (`mouseReleaseEvent()` setzt `mInSelection=true` schon in
+  `mousePressEvent()` und löscht es erst *nach* dem `select(...,true)`-
+  Aufruf), weshalb dieser Rückkopplungspfad über die UI nie sichtbar
+  wurde — ein direkter `select()`-Aufruf ohne diesen Kontext (wie im
+  neuen Test) triggerte ihn aber sofort und löschte alle gerade gesetzten
+  Zell-Flags, noch bevor `select()` zurückkehrte. Kein Codex-Finding,
+  sondern beim eigenen Testschreiben in dieser Runde entdeckt.
+  **Gefixt (2026-09-06):** `select()` setzt `mInSelection` für die Dauer
+  des `clipboard()->setText()`-Aufrufs defensiv selbst auf `true` (und
+  stellt den vorherigen Wert danach wieder her) — macht `select()` als
+  eigenständigen Aufruf sicher, statt sich stillschweigend auf die
+  Aufrufreihenfolge in `mouseReleaseEvent()` zu verlassen. Verifiziert:
+  `selectWhileScrolledBackReadsScrollBufferNotLiveGrid` reproduzierbar
+  rot gegen den ungefixten Stand (Zell-Flags blieben `false`), grün nach
+  dem Fix.
+
+**Verifikation:** alle 6 `ctest`-Targets grün (3 erweitert/neu). Clean-Build
+mit `-Wall -Wextra`: weiterhin 0 neue Warnungen/Fehler (die eine
+vorbestehende `-Wsfinae-incomplete=`-Warnung aus `komportview.h` in einer
+MOC-generierten Datei ist nachweislich unabhängig von dieser Runde — per
+Vergleichs-Build auf unverändertem `HEAD` bestätigt). Offscreen-Smoke-Test
+grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet (md5-Vergleich
+vor/nach identisch). Ein Codex-Review auf dem finalen Diff fand **keine
+bestätigten Bugs** (explizit gegen den `arrayHeight()-1`-Deckel getestet:
+leerer Puffer, Höhe 1, exakte Kapazität, Wachsen/Schrumpfen,
+`setScrollBuffer(depth)`-Resize — kein erreichbarer Out-of-Range-Zustand
+gefunden). Drei unbestätigte Low-Severity-Hypothesen zum
+`mInSelection`-Guard (kein RAII, schützt nur vor der eigenen
+`slotSelectionChanged()`, setzt synchrone Signal-Zustellung voraus) sowie
+ein Kommentar-Nit im neuen Test wurden bewusst nicht als defensive Fixes
+übernommen — ohne Reproduktionspfad und laut Codex selbst bei aktueller
+Verdrahtung "moot"/"unconfirmed"; der Kommentar-Nit (irreführender
+4096-Bezug) wurde korrigiert.
+
 
 ## 1. Produktvision und Architektur-Gate
 

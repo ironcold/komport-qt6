@@ -78,6 +78,18 @@ class KomportView : public QWidget
   void select(QPoint start, QPoint end, bool clip=false);
   /** has a text selection */
   bool hasSelection();
+  /** the currently selected text, assembled by the last select(...,
+   *  clip=true) call (empty if nothing is selected). KomportApp::
+   *  slotEditCopy() reads this directly rather than round-tripping
+   *  through QClipboard::Selection (the X11 "primary selection") -
+   *  that clipboard mode isn't available on every platform (Wayland
+   *  without the primary-selection protocol, Windows, macOS, and the
+   *  "offscreen" QPA platform used by this project's own tests all lack
+   *  it), which used to make Edit > Copy/Ctrl+C silently copy nothing on
+   *  those. select() still also writes to QClipboard::Selection where
+   *  it *is* supported, for middle-click paste elsewhere - this is in
+   *  addition to that, not a replacement. */
+  QString selectedText() const { return mSelectedText; }
   /** set the number of lines in the scroll buffer */
   virtual void setScrollBuffer(int _sz);
 
@@ -153,6 +165,9 @@ private: // Private attributes
   bool mInSelection;
   /** has text selection */
   bool mHasSelection;
+  /** the currently selected text - see selectedText() above for why this
+   *  exists alongside QClipboard::Selection */
+  QString mSelectedText;
   /** Kate-style minimap scrollbar (see komportminimap.h) - a genuine child
    *  of this widget (not a manually-positioned sibling like the original
    *  Qt3 code had it), so its position stays correct no matter what

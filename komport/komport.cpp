@@ -1021,9 +1021,16 @@ void KomportApp::slotEditCopy()
 {
   slotStatusMsg(tr("Copying selection to clipboard..."));
   if ( view->hasSelection() ) {
-      QClipboard* cb = QApplication::clipboard();
-      QString str= cb->text( QClipboard::Selection );
-      cb->setText(  str, QClipboard::Clipboard );
+      // view->selectedText(), not QClipboard::Selection readback: the
+      // latter (X11 "primary selection") isn't available on every
+      // platform - Wayland without the primary-selection protocol,
+      // Windows, macOS, and the "offscreen" QPA platform this project's
+      // own tests run under all lack it, which silently copied nothing
+      // there even though a selection was clearly visible on screen.
+      // KomportView::select() still also writes to QClipboard::Selection
+      // where it *is* supported (middle-click paste), independently of
+      // this.
+      QApplication::clipboard()->setText( view->selectedText(), QClipboard::Clipboard );
   }
   slotStatusMsg(tr("Ready."));
 }

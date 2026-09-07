@@ -329,7 +329,20 @@ KomportCell* KomportView::cellAtHistoryRow(int _col, int _row) {
   int total = depth + cellArray()->arrayHeight();
   if ( _row < 0 || _row >= total ) return nullptr;
   if ( _row < depth ) {
-    return mScrollBuffer.cell( _col, (mScrollBuffer.arrayHeight() - depth) + _row );
+    // The extra "-1" matches getCell()'s scroll-buffer indexing
+    // ((arrayHeight()-1-scrolled)+_y) - without it this was off by one
+    // row: mScrollBuffer's most recently pushed row always sits at
+    // arrayHeight()-2 (slotAboutToScrollUp() writes it to the last row,
+    // then scrollUp() immediately shifts every row - including that one -
+    // up by one to make room for the next push), not arrayHeight()-1
+    // (which stays permanently blank, freshly appended by the last
+    // scrollUp() and never itself written to). Without the "-1" here,
+    // _row=0 ("the oldest scrollback row") skipped the actual oldest row
+    // and returned the second-oldest instead, and the newest end of the
+    // range returned that permanently-blank row instead of real content -
+    // visible directly in the minimap silhouette and its hover preview,
+    // both of which read through this function.
+    return mScrollBuffer.cell( _col, (mScrollBuffer.arrayHeight() - depth - 1) + _row );
   }
   return cellArray()->cell( _col, _row - depth );
 }
@@ -569,7 +582,30 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
           }
       }
       if ( clip ) {
+          // QClipboard::Selection (X11 "primary selection", for
+          // middle-click paste) where the platform supports it - kept as
+          // a bonus, not the only way this selection's text becomes
+          // available. mSelectedText is the one KomportApp::
+          // slotEditCopy() actually reads (see selectedText() in the
+          // header for why: Selection isn't available on every
+          // platform).
+          //
+          // setText() below can deliver QClipboard::selectionChanged()
+          // synchronously (same thread, direct connection) to
+          // slotSelectionChanged(), which calls deselect() unless
+          // mInSelection is set - normally true here because the only
+          // real caller (mouseReleaseEvent) sets it before calling
+          // select() and clears it only afterward. Forcing it true for
+          // this call too makes select() safe to call on its own (e.g.
+          // from tests, or any future caller that isn't the mouse-drag
+          // path) instead of silently depending on caller-side ordering:
+          // without this, that recursive deselect() would wipe every
+          // cell flag this loop just set, right before select() returns.
+          const bool wasInSelection = mInSelection;
+          mInSelection = true;
           QApplication::clipboard()->setText(str,QClipboard::Selection);
+          mInSelection = wasInSelection;
+          mSelectedText = str;
           mHasSelection = true;
           emit viewModified(this);
       }
@@ -611,6 +647,7 @@ void KomportView::deselect(){
         cellArray()->update();
     }
     mHasSelection = false;
+    mSelectedText.clear();
     emit viewModified( this );
 }
 /** clamp a raw pixel-derived cell coordinate to the actual grid - dragging
