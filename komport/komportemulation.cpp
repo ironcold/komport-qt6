@@ -540,7 +540,7 @@ ESC[Ps;...;Psm
 #include "komportemulation.h"
 
 #include <QApplication>
-#include <cstdio>
+#include <QDebug>
 
 #define ASCII_BEL   0x07
 #define ASCII_BS    0x08
@@ -559,6 +559,16 @@ namespace {
   // Capping the parsed value itself, long before it reaches any arithmetic,
   // closes that off regardless of screen size.
   constexpr int MaxCtlParam = 10000;
+
+  // Hard cap on the raw, not-yet-parsed CSI sequence buffer
+  // (KomportEmulation::mCtlSequence) itself, applied in sequence() below.
+  // Without it, a host that sends "ESC[" followed by an endless run of
+  // digits/semicolons and never a final letter would make mCtlSequence grow
+  // without bound (adversarial or simply malfunctioning device) - unbounded
+  // memory growth, and the terminal never processes another character while
+  // it happens. No real VT100/VT102/xterm control sequence approaches this
+  // length, so aborting the sequence past this point is always safe.
+  constexpr int MaxCtlSequenceLength = 256;
 
   // Split a CSI parameter string (already stripped of any leading "?") on
   // ';' into its fields. Shared by ctlParam(), doCursorTo(), doGraphics()
@@ -742,7 +752,12 @@ void KomportEmulation::doClearEOL()
     {
       QPoint save = cellArray()->cursor();
       for( int x=0; x<=save.x();x++ ) {
-        cellArray()->cell(x,save.y())->clear();
+        // cellArray()->clear(), not cell()->clear() directly - the
+        // latter mutates the cell but skips updateCell()/cellChanged(),
+        // so KomportView (which paints from mPixmap, only refreshed via
+        // that signal) never redrew the cleared cells until some
+        // unrelated later repaint happened to touch them.
+        cellArray()->clear(x,save.y());
       }
       cellArray()->setCursor(save);
      }
@@ -776,12 +791,24 @@ void KomportEmulation::doClearScreen()
     break;
    case 1: // BOD to cursor
      {
+      // Two bugs fixed here together:
+      //  - cell()->clear() mutated cells directly without going through
+      //    cellArray()->clear(), which is what actually emits
+      //    cellChanged() / calls updateCell() - KomportView paints from
+      //    mPixmap and only refreshes it via that signal, so the cleared
+      //    region stayed visually stale until an unrelated repaint.
+      //  - the `break` only ever exited the inner (column) loop once it
+      //    reached the cursor's exact (x,y); the outer (row) loop then
+      //    kept going regardless, so this actually cleared every row
+      //    below the cursor too - the whole screen, not "start of screen
+      //    through the cursor, inclusive" as CSI 1 J means. Looping only
+      //    up to save.y(), with the last row stopping at save.x(), gets
+      //    the boundary right without needing a loop-exiting break at all.
       QPoint save = cellArray()->cursor();
-      for( int y=0; y < cellArray()->arrayHeight(); y++ ) {
-        for (int x=0; x < cellArray()->arrayWidth();x++ ) {
-          cellArray()->cell(x,y)->clear();
-          if ( x==save.x() && y==save.y() )
-            break;
+      for( int y=0; y <= save.y(); y++ ) {
+        const int lastX = ( y == save.y() ) ? save.x() : cellArray()->arrayWidth()-1;
+        for (int x=0; x <= lastX; x++ ) {
+          cellArray()->clear(x,y);
         }
       }
       cellArray()->setCursor(save);
@@ -918,7 +945,7 @@ void KomportEmulation::doGraphics(){
         case 107: cellArray()->setBackgroundColor(QColor(255,255,255));              break;
 
         default:
-          printf( "?attr? %d\n", attr);
+          qDebug( "?attr? %d", attr);
           break;
       }
     }
@@ -1073,7 +1100,19 @@ void KomportEmulation::doDeviceAttributes()
 // received part of an escape sequence
 void KomportEmulation::sequence(char _ch)
 {
-  bool completed=(_ch>='a'&&_ch<='z')||(_ch>='A'&&_ch<='Z');
+  // Per ECMA-48/ANSI X3.64 (which VT100/VT102 CSI sequences follow), the
+  // final byte of a CSI sequence is any byte in 0x40-0x7E ('@' through
+  // '~'), not just letters - e.g. Insert Character is "CSI Pn @". Letters
+  // alone used to miss '@' (and the handful of other punctuation final
+  // bytes in that range): the sequence never completed, so it kept
+  // absorbing bytes until it happened to hit an actual letter later in
+  // the host's *unrelated* output, which then got misinterpreted as this
+  // sequence's final byte instead of being printed. Unrecognised final
+  // bytes (this emulation implements none of the punctuation ones, e.g.
+  // '@' - insert character isn't implemented at all) still fall through
+  // to the same "consume harmlessly, log it" default case below as an
+  // unrecognised letter always did.
+  bool completed = ( _ch >= 0x40 && _ch <= 0x7E );
   
   if ( completed ) {
    // debug( "ESC[%s%c",  mCtlSequence.data()==NULL?"": mCtlSequence.data(),_ch);
@@ -1137,12 +1176,19 @@ void KomportEmulation::sequence(char _ch)
                   // printed as garbage.
         break;
       default:
-        printf( "?ctl? '%c'\n ", _ch );
+        qDebug( "?ctl? '%c'", _ch );
         break;
     }
     mSawESC = false;
     mInCtlSequence = false;
     mCtlSequence.resize(0);
+  } else if ( mCtlSequence.size() >= MaxCtlSequenceLength ) {
+    // Malformed/adversarial sequence - a real terminal control sequence
+    // never gets remotely this long. Abort it instead of growing
+    // mCtlSequence without bound; see MaxCtlSequenceLength above.
+    mSawESC = false;
+    mInCtlSequence = false;
+    mCtlSequence.clear();
   } else {
     mCtlSequence += _ch;
   }
@@ -1167,6 +1213,7 @@ void KomportEmulation::shortEscape(char _ch)
     case '7': doSaveCursor(); break;
     case '8': doRestoreCursor(); break;
     case 'c': doReset(); break;
+    case 'Z': doDeviceAttributes(); break; // classic VT100 "identify" request - CSI c/CSI 0c is the newer form (also handled), but this older one is still real VT100 protocol
     case 'H': break; // set horizontal tab stop - tab stops are fixed at every 8th column, ignored
     case '(': case ')': // select G0/G1 character set - consume the designator that follows
       mPendingCharsetChar = true;

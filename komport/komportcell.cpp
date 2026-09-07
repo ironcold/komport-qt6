@@ -73,6 +73,16 @@ KomportCell & KomportCell::operator=(const KomportCell & _other){
 
 /** copy a cell */
 void KomportCell::copy(KomportCell* _other){
+  // Both current call sites (KomportView::slotAboutToScrollUp()/
+  // resizeGridRows(), copying a row into the scroll buffer) keep their
+  // loop bounds within cellArray()'s actual size, so _other is never
+  // actually null today - but cell() (see komportcellarray.cpp) does
+  // return nullptr for any out-of-range coordinate, and copy() taking a
+  // raw pointer with no such guard of its own would crash immediately if
+  // some future caller ever passed one through. Matches this codebase's
+  // existing defense-in-depth style elsewhere (cell() itself,
+  // setArraySize()'s clamps, ...).
+  if ( !_other ) return;
   setSelect(         _other->select() );
   setBlink(           _other->blink()      );
   setBold(            _other->bold()       );

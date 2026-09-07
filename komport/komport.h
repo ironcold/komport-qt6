@@ -174,6 +174,11 @@ class KomportApp : public QMainWindow
     void slotStatusMsg(const QString &text);
     /** document has been changed */
     void slotDocumentModified();
+    /** the serial port failed to apply its settings, or reported an error
+     *  while open - surfaces KomportSerial::settingsFailed() to the user
+     *  instead of leaving it as a qWarning() only they'd have to go
+     *  looking for. */
+    void slotSerialSettingsFailed(const QString &_reason);
     /** No descriptions */
     void slotViewModified(KomportView*);
     /** toggles the hex monitor split-screen panel */
@@ -208,6 +213,14 @@ class KomportApp : public QMainWindow
     KomportDoc *doc;
     /** recently uploaded/downloaded files */
     QList<QUrl> mRecentFiles;
+    /** set by slotSerialSettingsFailed(), checked (and reset) by
+     *  loadProfile()/slotShowPreferences() so their own trailing "Loaded
+     *  profile ..."/"Ready." status message doesn't immediately overwrite
+     *  a serial error that was just reported synchronously while applying
+     *  the new settings (KomportSerial::open()/applyPortSettings() can
+     *  emit settingsFailed() from inside setDeviceName()/setFraming()/.../
+     *  open(), all called from within those two methods). */
+    bool mSerialErrorPending = false;
 
     // Actions
     QAction* fileNewWindow;

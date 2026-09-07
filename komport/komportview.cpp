@@ -25,6 +25,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QDebug>
 
 // application specific includes
 #include "komportview.h"
@@ -85,6 +86,15 @@ KomportView::~KomportView()
   // mScrollBar is a real child widget now (parent == this), so Qt's
   // parent-child ownership already destroys it - deleting it again here
   // would double-free.
+  //
+  // mEmulation, unlike mScrollBar, is *not* parented (its constructor
+  // doesn't even take a QObject* parent) and nothing else owns/deletes
+  // it, so it needs an explicit delete here - one leaked KomportEmulation
+  // per KomportView used to just live for the rest of the process (a
+  // single top-level window's whole lifetime), but became a real,
+  // repeatable leak once Qt::WA_DeleteOnClose (see komport.cpp) started
+  // actually destroying windows on close instead of only hiding them.
+  delete mEmulation;
 }
 
 KomportDoc *KomportView::getDocument() const
@@ -95,7 +105,27 @@ KomportDoc *KomportView::getDocument() const
   // window. window() walks all the way up to the top-level widget, which
   // is still KomportApp regardless of how many container widgets sit in
   // between.
-  KomportApp *theApp=(KomportApp *) window();
+  //
+  // KomportView is architecturally only meant to be used with a KomportApp
+  // as its top-level window (it's not a general-purpose reusable widget) -
+  // getSerial() calls getDocument()->getSerial() unconditionally, and the
+  // constructor calls getSerial() immediately, so there is no safe/partial
+  // way to carry on if that assumption doesn't hold; returning nullptr
+  // here would just move the crash one call further out, into an
+  // unrelated null-pointer dereference with no indication of the real
+  // cause. qobject_cast rather than a blind C-style cast (which used to
+  // reinterpret whatever window() returned as a KomportApp
+  // unconditionally - undefined behaviour, i.e. potentially silent memory
+  // corruption, if that assumption is ever wrong) still buys something
+  // real: it lets us fail loudly and exactly here, at the actual
+  // precondition violation, instead of via UB or a mystery crash
+  // elsewhere.
+  KomportApp *theApp = qobject_cast<KomportApp *>( window() );
+  if ( !theApp ) {
+    qFatal( "KomportView::getDocument(): not embedded under a KomportApp "
+            "top-level window - this view requires one." );
+    return nullptr; // unreachable: qFatal() aborts
+  }
 
   return theApp->getDocument();
 }
@@ -174,6 +204,17 @@ void KomportView::drawChar(QChar _c,int _x, int _y){
 
 /** re-draw a cell */
 void KomportView::updateCell(int _x,int _y){
+  // mPixmap only gets its actual size in resizeEvent() (see there) - before
+  // this widget has ever been resized (e.g. profile-loading during
+  // KomportApp's constructor, well before show()), it's still a
+  // default-constructed null QPixmap. Painting into a null QPixmap is a
+  // silent no-op as far as pixels go, but QPainter still complains loudly
+  // ("Paint device returned engine == 0") - and there's nothing meaningful
+  // to draw into yet anyway. Once resizeEvent() does give mPixmap a real
+  // size, it finishes with cellArray()->update(), which re-triggers this
+  // for every cell - so nothing is lost by skipping here, only redundant
+  // work and warning spam.
+  if ( mPixmap.isNull() ) return;
   int cellWidth = cellArray()->cellWidth();
   int cellHeight = cellArray()->cellHeight();
   QRect cellRect( _x*cellWidth, _y*cellHeight, cellWidth, cellHeight );
@@ -224,7 +265,11 @@ void KomportView::paintEvent(QPaintEvent* _e){
 void KomportView::timerEvent(QTimerEvent* _e) {
   if ( _e->timerId() == mBlinkTimer ) {
     mBlinkState = !mBlinkState;
-    int w = cellArray()->cellWidth();
+    // arrayWidth() (column count), not cellWidth() (a single glyph's pixel
+    // width, e.g. 5-10) - the latter made this loop only ever re-check
+    // blink state for the first handful of columns instead of the whole
+    // screen width.
+    int w = cellArray()->arrayWidth();
     int h = cellArray()->arrayHeight();
     for ( int x=0; x < w; x++ ) {
       for ( int y=0; y < h; y++ ) {
@@ -284,7 +329,20 @@ KomportCell* KomportView::cellAtHistoryRow(int _col, int _row) {
   int total = depth + cellArray()->arrayHeight();
   if ( _row < 0 || _row >= total ) return nullptr;
   if ( _row < depth ) {
-    return mScrollBuffer.cell( _col, (mScrollBuffer.arrayHeight() - depth) + _row );
+    // The extra "-1" matches getCell()'s scroll-buffer indexing
+    // ((arrayHeight()-1-scrolled)+_y) - without it this was off by one
+    // row: mScrollBuffer's most recently pushed row always sits at
+    // arrayHeight()-2 (slotAboutToScrollUp() writes it to the last row,
+    // then scrollUp() immediately shifts every row - including that one -
+    // up by one to make room for the next push), not arrayHeight()-1
+    // (which stays permanently blank, freshly appended by the last
+    // scrollUp() and never itself written to). Without the "-1" here,
+    // _row=0 ("the oldest scrollback row") skipped the actual oldest row
+    // and returned the second-oldest instead, and the newest end of the
+    // range returned that permanently-blank row instead of real content -
+    // visible directly in the minimap silhouette and its hover preview,
+    // both of which read through this function.
+    return mScrollBuffer.cell( _col, (mScrollBuffer.arrayHeight() - depth - 1) + _row );
   }
   return cellArray()->cell( _col, _row - depth );
 }
@@ -409,6 +467,10 @@ void KomportView::resizeGridRows(int _newRows){
 }
 /** notification that the cell array has scrolled up so we need to scroll visually */
 void KomportView::slotScrolledUp(){
+    // see the comment in updateCell() - same null-mPixmap guard, needed
+    // here since a line feed can arrive (and scroll the cell array) before
+    // this widget's first resizeEvent() has ever given mPixmap a size.
+    if ( mPixmap.isNull() ) return;
     int rowHeight = cellArray()->cellHeight();
     // scroll the offscreen pixels up one row: copy the pixmap's lower
     // portion into a temporary buffer first, since painting a QPixmap onto
@@ -491,9 +553,25 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
       QString str;
       for( int y=startY; y <= endY; y++ ) {
           for( int x=startX; x <= endX; x++ ) {
-              cell = cellArray()->cell(x,y);
+              // getCell(), not cellArray()->cell() directly: (x,y) here
+              // are screen positions, and while scrolled back into
+              // history getCell() can resolve one to a cell in
+              // mScrollBuffer rather than the live cellArray() - see
+              // getCell() above. Selecting via cellArray()->cell()
+              // unconditionally mutated (and, for clip, read the
+              // character of) whatever the live grid happened to have at
+              // that raw coordinate, not the scroll-buffer content
+              // actually visible on screen - copying while scrolled back
+              // silently grabbed the wrong text.
+              cell = getCell(x,y);
               if ( cell != nullptr ) {
-                  cellArray()->cell(x,y)->setSelect( true );
+                  cell->setSelect( true );
+                  // Still cellArray()->updateCell(): its emitted
+                  // cellChanged(QPoint) is just a "repaint screen
+                  // position (x,y)" trigger reaching KomportView::
+                  // updateCell() -> paintCell(), which re-resolves the
+                  // correct cell via getCell() itself at paint time - it
+                  // doesn't matter which object's signal fired it.
                   cellArray()->updateCell(x,y);
                   if ( clip )
                       str += cell->character();
@@ -504,7 +582,30 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
           }
       }
       if ( clip ) {
+          // QClipboard::Selection (X11 "primary selection", for
+          // middle-click paste) where the platform supports it - kept as
+          // a bonus, not the only way this selection's text becomes
+          // available. mSelectedText is the one KomportApp::
+          // slotEditCopy() actually reads (see selectedText() in the
+          // header for why: Selection isn't available on every
+          // platform).
+          //
+          // setText() below can deliver QClipboard::selectionChanged()
+          // synchronously (same thread, direct connection) to
+          // slotSelectionChanged(), which calls deselect() unless
+          // mInSelection is set - normally true here because the only
+          // real caller (mouseReleaseEvent) sets it before calling
+          // select() and clears it only afterward. Forcing it true for
+          // this call too makes select() safe to call on its own (e.g.
+          // from tests, or any future caller that isn't the mouse-drag
+          // path) instead of silently depending on caller-side ordering:
+          // without this, that recursive deselect() would wipe every
+          // cell flag this loop just set, right before select() returns.
+          const bool wasInSelection = mInSelection;
+          mInSelection = true;
           QApplication::clipboard()->setText(str,QClipboard::Selection);
+          mInSelection = wasInSelection;
+          mSelectedText = str;
           mHasSelection = true;
           emit viewModified(this);
       }
@@ -512,26 +613,60 @@ void KomportView::select(QPoint start, QPoint end, bool clip){
 }
 /** clear selection */
 void KomportView::deselect(){
+    // Clear select() on both the live grid *and* the scroll buffer - now
+    // that select() can flag cells in either one depending on scroll
+    // position at the time (see getCell()/select()), this can't just
+    // sweep cellArray() alone without leaving stale, invisible-but-still-
+    // flagged-selected cells behind in mScrollBuffer.
+    bool anyCleared = false;
     for( int y=0; y < cellArray()->arrayHeight(); y++ ) {
         for( int x=0; x < cellArray()->arrayWidth(); x++ ) {
             KomportCell* cell = cellArray()->cell(x,y);
             if ( cell->select() ) {
                 cell->setSelect(false);
-                cellArray()->updateCell(x,y);
+                anyCleared = true;
             }
         }
     }
+    for( int y=0; y < mScrollBuffer.arrayHeight(); y++ ) {
+        for( int x=0; x < mScrollBuffer.arrayWidth(); x++ ) {
+            KomportCell* cell = mScrollBuffer.cell(x,y);
+            if ( cell->select() ) {
+                cell->setSelect(false);
+                anyCleared = true;
+            }
+        }
+    }
+    // One full repaint instead of a per-cell updateCell() while clearing:
+    // cellArray()->update() re-notifies every currently visible row
+    // through the normal (scroll-aware, via getCell()/paintCell())
+    // signal chain, which is what's actually needed here regardless of
+    // whether the cleared cells came from the live grid or the scroll
+    // buffer.
+    if ( anyCleared ) {
+        cellArray()->update();
+    }
     mHasSelection = false;
+    mSelectedText.clear();
     emit viewModified( this );
+}
+/** clamp a raw pixel-derived cell coordinate to the actual grid - dragging
+ *  a selection past the right/bottom edge of the text area (or, during an
+ *  active mouse grab, even outside the widget entirely - Qt keeps
+ *  delivering move events with negative/oversized local coordinates then)
+ *  must not hand select()/getCell() an out-of-range column or row. */
+QPoint KomportView::clampToGrid( QPoint _cell ){
+    return QPoint( qBound(0, _cell.x(), cellArray()->arrayWidth()-1),
+                   qBound(0, _cell.y(), cellArray()->arrayHeight()-1) );
 }
 /** begin a selection by pixel coordinate */
 void KomportView::selectStart( QPoint _pt ){
-    mSelectStart = QPoint( _pt.x()  / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() );
+    mSelectStart = clampToGrid( QPoint( _pt.x() / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() ) );
     mSelectEnd = mSelectStart;
 }
 /** end a selection by pixel coordinate */
 void KomportView::selectEnd( QPoint _pt ){
-    mSelectEnd = QPoint( _pt.x()  / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() );
+    mSelectEnd = clampToGrid( QPoint( _pt.x() / cellArray()->cellWidth(), _pt.y() / cellArray()->cellHeight() ) );
 }
 /** No descriptions */
 void KomportView::slotSelectionChanged() {
@@ -555,6 +690,12 @@ void KomportView::slotSimKeyPressed(QChar _c){
 /** scroll bar moved */
 void KomportView::slotScroll(int _value){
     Q_UNUSED(_value);
+    // see the comment in updateCell() - same null-mPixmap guard, needed
+    // here too since this can be reached via resetScroll()'s
+    // setValue()/valueChanged() before the first resizeEvent() ever runs
+    // (e.g. applyConnectionSettings() -> setScrollBuffer() -> resetScroll()
+    // during profile loading in KomportApp's constructor).
+    if ( mPixmap.isNull() ) return;
     int cellWidth = cellArray()->cellWidth();
     int cellHeight = cellArray()->cellHeight();
     QPainter paint( &mPixmap );

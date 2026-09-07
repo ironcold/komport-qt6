@@ -91,7 +91,12 @@ QWidget* SettingsDialog::createDeviceTab()
     RxQueueSpinBox->setRange( 1024, 32768 );
     RxQueueSpinBox->setSingleStep( 1024 );
     FlushRateSpinBox = new QSpinBox( rxQueueGroup );
-    FlushRateSpinBox->setRange( 0, 4096 );
+    // Minimum 1, not 0: KomportSerial::setFlushRate() now rejects 0 too
+    // (QTimer::start(0) re-fires on every single event-loop iteration -
+    // an idle busy-poll, not a "flush immediately" setting), but the
+    // dialog shouldn't offer a value it's just going to silently bump up
+    // to 1 anyway.
+    FlushRateSpinBox->setRange( 1, 4096 );
     FlushRateSpinBox->setSingleStep( 16 );
     FlushRateSpinBox->setValue( 256 );
     auto *rxQueueLayout = new QFormLayout( rxQueueGroup );

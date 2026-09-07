@@ -53,12 +53,68 @@ void KomportCellArray::initSettings(){
 /** set the cell array size .
  */
 void KomportCellArray::setArraySize(QSize _sz){
+  // Defensive clamp: callers ultimately derive this from user-editable
+  // QSettings/profile values (e.g. KomportApp::applyConnectionSettings()'s
+  // "ScrollBuffer" entry), which the GUI's spinbox limits but a hand-edited
+  // config file does not. A negative width/height would make newcnt below
+  // negative while mCells may already hold plenty of cells from a previous
+  // call - diff = curcnt - newcnt then overshoots curcnt and the shrink
+  // branch calls takeFirst() on an already-empty list. Clamping here (not
+  // just at the profile-loading call site) makes setArraySize() itself
+  // safe against bad input regardless of caller.
+  if ( _sz.width() < 0 )  _sz.setWidth(0);
+  if ( _sz.height() < 0 ) _sz.setHeight(0);
+
+  // Clamp each dimension individually first, before ever looking at their
+  // product: a caller that only checks the eventual cell *count* (like the
+  // MaxCells logic below) could still leave one absurdly large dimension
+  // sitting in mArraySize as long as the other one is 0 or tiny - and
+  // other public methods (size(), width()/height(), plain iteration up to
+  // arrayWidth()/arrayHeight()) use mArraySize's components directly, not
+  // just the cell count, so an unclamped dimension there can still
+  // overflow their own arithmetic or do wildly excessive work even though
+  // the cell list itself never grew unreasonably. MaxDimension is far
+  // larger than any plausible terminal size (screen pixels / a handful of
+  // pixels per cell) could ever legitimately produce.
+  constexpr int MaxDimension = 100'000;
+  if ( _sz.width()  > MaxDimension ) _sz.setWidth(MaxDimension);
+  if ( _sz.height() > MaxDimension ) _sz.setHeight(MaxDimension);
+
+  // Also guard the width*height multiplication itself against overflowing
+  // int: even two individually-legal (each <= MaxDimension) values can
+  // still overflow once multiplied together, which would defeat the
+  // clamps above and reintroduce exactly the same "diff overshoots
+  // curcnt, takeFirst() called on an already-empty list" crash this
+  // function exists to prevent - just via an overflowed newcnt instead of
+  // a negative or absurd one. MaxCells is far larger than any plausible
+  // terminal (a pixel-sized screen's worth of columns times a scrollback
+  // in the low thousands) could ever legitimately need.
+  constexpr qint64 MaxCells = 10'000'000;
+  const qint64 wanted = static_cast<qint64>(_sz.width()) * static_cast<qint64>(_sz.height());
+  if ( wanted > MaxCells ) {
+    // Width is normally the authoritative, already-bounded dimension (the
+    // fixed terminal column count); height is the one that tends to carry
+    // unchecked/hand-edited input (e.g. a scrollback depth). Clamp height
+    // down so the product fits, rather than trying to preserve some
+    // notion of aspect ratio that doesn't really apply here.
+    _sz.setHeight( _sz.width() > 0 ? static_cast<int>(MaxCells / _sz.width()) : 0 );
+    // Not reachable with the current MaxCells/MaxDimension values (by the
+    // time this branch can trigger, width is already <= MaxDimension and
+    // this branch only runs at all when width > MaxCells/MaxDimension,
+    // which makes MaxCells/width < MaxDimension automatically) - but
+    // re-applying the per-dimension cap here costs nothing and keeps that
+    // guarantee from silently depending on the exact numeric relationship
+    // between the two constants above, in case either one is ever changed
+    // on its own later.
+    if ( _sz.height() > MaxDimension ) _sz.setHeight(MaxDimension);
+  }
+
   mArraySize = _sz;
   int curcnt = mCells.count();
-  int newcnt = _sz.width()*_sz.height();
+  int newcnt = _sz.width()*_sz.height(); // safe now: bounded to <= MaxCells above
   int index;
   if ( curcnt==0 ) {
-      for( index=0; index < mArraySize.width()*mArraySize.height(); index++ ) {
+      for( index=0; index < newcnt; index++ ) {
           KomportCell *pCell = new KomportCell();
           mCells.append(pCell);
       }
@@ -127,6 +183,19 @@ int KomportCellArray::cellHeight(){
 
 /** get a pointer to the cell from location (x,y) */
 KomportCell* KomportCellArray::cell(int _x,int _y){
+  // _x and _y must each be validated individually, not just the resulting
+  // flat index: an out-of-range _x (negative, or >= arrayWidth()) still
+  // produces an in-bounds *flat* index as long as _y compensates for it,
+  // silently returning a cell from a neighbouring row instead of the
+  // out-of-range signal (nullptr) callers actually expect. E.g. with an
+  // 80-column grid, cell(-1, 1) computed index 80*1-1=79 - a "valid"
+  // index, but that's row 0's last column, not anything belonging to row
+  // 1. Concretely reachable via KomportView::selectStart()/selectEnd(),
+  // which convert raw (unclamped) mouse pixel positions to cell
+  // coordinates.
+  if ( _x < 0 || _x >= arrayWidth() || _y < 0 || _y >= arrayHeight() ) {
+    return nullptr;
+  }
   int index = (arrayWidth()*_y)+_x;
   if ( index >= 0 && index < mCells.count() ) {
     return mCells.at( index );

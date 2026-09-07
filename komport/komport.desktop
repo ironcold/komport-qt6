@@ -1,6 +1,4 @@
-#!/usr/bin/env xdg-open
 [Desktop Entry]
-Encoding=UTF-8
 Type=Application
 Exec=komport-qt6 %f
 Icon=komport-qt6

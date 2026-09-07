@@ -42,10 +42,16 @@ void KomportFileScrollBuffer::setName(const QString &_name){
 }
 /** scroll up */
 void KomportFileScrollBuffer::scrollUp(){
-    if ( mDepth < arrayHeight() ) ++mDepth;
+    // See KomportScrollBuffer::scrollUp()/setArraySize()'s comments for
+    // why the cap is arrayHeight()-1, not arrayHeight(), and why the
+    // setArraySize() cap below is the one that actually matters - kept in
+    // sync here even though this class is currently an unused stub
+    // (cell() always returns nullptr), so the same bug doesn't reappear
+    // if it's ever wired up.
+    if ( mDepth < arrayHeight()-1 ) ++mDepth;
 }
 /** set the cell array size */
 void KomportFileScrollBuffer::setArraySize(QSize _sz){
     mArraySize = _sz;
-    if ( mDepth > arrayHeight() ) mDepth = arrayHeight();
+    if ( mDepth > arrayHeight()-1 ) mDepth = qMax(0, arrayHeight()-1);
 }

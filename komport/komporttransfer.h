@@ -54,6 +54,11 @@ protected: // Private attributes
   KomportSerial* mSerial;
   /** */
   QWidget* mParent;
+  /** set by slotReceivedChar() if mFile.putChar() fails mid-download (e.g.
+   *  the disk fills up) - checked by download() once its polling loop
+   *  exits, so a failed write is reported instead of silently continuing
+   *  to discard bytes for the rest of the transfer. */
+  bool mDownloadWriteError = false;
 public slots: // Public slots
   /** No descriptions.
    *  NOTE: takes the same 'char' type as KomportSerial::receivedChar(char) -

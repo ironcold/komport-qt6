@@ -55,6 +55,8 @@ public:
   int setRxQueue(int _i);
   /** set the rate (ms) at which the Rx buffer is flushed into receivedChar() signals */
   void setFlushRate(int _i);
+  /** the current flush rate (ms), after setFlushRate()'s clamping */
+  int flushRate() const { return mFlushRate; }
   /** set the character framing. Start bits is kept for UI/config compatibility
    *  only - a UART always uses a single start bit, QSerialPort has no such
    *  setting, so it is not applied to the hardware (same as the original,
@@ -101,15 +103,26 @@ public slots: // Public slots
   void setBaudRate(qint32 _baud);
   /** Set the baud rate, parsed from a string (as used by the settings dialog / config file). */
   void setBaudRate(const QString &_baud);
-  /** put a character */
-  void putChar(char _ch);
-  /** transmit a string */
-  void putStr(const char* str);
+  /** put a character. Returns false if the port isn't open or the
+   *  underlying write failed (nothing was sent) - callers that need to
+   *  know whether a byte actually made it out (e.g. file transfers) can
+   *  check this instead of assuming success. */
+  bool putChar(char _ch);
+  /** transmit a string. Returns false if the port isn't open or the write
+   *  was partial/failed (logged via qWarning() either way) - most callers
+   *  (keyboard escape sequences, device-status replies) are fire-and-
+   *  forget and don't check this, but it's available for callers that
+   *  want to. */
+  bool putStr(const char* str);
 signals: // Signals
   /** Whenever a communications port setting is changed such as baud rate, etc. */
   void settingsChanged();
-  /** could not apply the current settings to the open port */
-  void settingsFailed();
+  /** could not apply the current settings to the open port, or the port
+   *  reported an error while open (including failing to open at all -
+   *  QSerialPort::open() itself surfaces failures via errorOccurred(), see
+   *  slotPortError() below). _reason is a human-readable message suitable
+   *  for showing directly to the user. */
+  void settingsFailed(const QString &_reason);
   /** received a char */
   void receivedChar(char _ch);
   /** a char was actually written to the port (for e.g. the hex monitor) */
