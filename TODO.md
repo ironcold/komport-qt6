@@ -1167,27 +1167,73 @@ den generierten Code aller Header einer Target in einer einzigen
 generierte Moc-Code (der nur die Vorwärtsdeklaration von `KomportView` sieht)
 *vor* dem für `komportview.h` generierten Moc-Code, der in **derselben**
 Übersetzungseinheit später die vollständige Klassendefinition liefert. Ein
-`QMetaType`-Traits-Check in Qt selbst (`qmetatype.h:344`, eine
-"ist der Typ vollständig?"-SFINAE-Prüfung) lieferte für `KomportView`
-dadurch an zwei Stellen derselben Übersetzungseinheit potenziell
-unterschiedliche Antworten — GCC 13+ markiert das zu Recht als
-ODR-Risiko, nicht als Cosmetic-Warning. **Fix:** `komport.h` bindet
-`komportview.h` jetzt vollständig ein statt nur vorwärts zu deklarieren
-(keine Zirkularität — `komportview.h` und alles, was es einbindet, ist frei
-von `komport.h`), was das Unvollständigkeits-Fenster in dieser
-Übersetzungseinheit komplett entfernt, unabhängig von `AUTOMOC`s
-Datei-Reihenfolge. `komportdoc.h`/`komportminimap.h` haben ein ähnliches
-Vorwärtsdeklarations-Muster für `KomportView`, lösen die Warnung aber
-aktuell nicht aus (vermutlich günstige Moc-Datei-Reihenfolge in ihren
-jeweiligen Übersetzungseinheiten) — bewusst nicht vorsorglich mitgeändert,
-da kein beobachtetes Symptom; falls `AUTOMOC`s Datei-Reihenfolge sich
-künftig ändert (z.B. durch neue Quelldateien) und dort dieselbe Warnung
-auftaucht, gilt derselbe Fix (volles Include statt Vorwärtsdeklaration).
-Verifiziert: per gezieltem `// TEMP:`-Revert der Include-Änderung rot
-reproduziert (Warnung erscheint exakt wie vorher), Fix zurückgesetzt, grün
-bestätigt (0 Warnungen im kompletten Clean-Build). Alle 7 `ctest`-Targets
-weiterhin grün, Offscreen-Smoke-Test grün, echtes
-`~/.config/Komport-Qt6/`-Profil unangetastet.
+`QMetaType`-Traits-Check in Qt selbst (`qmetatype.h:344`) lieferte für
+`KomportView` dadurch an zwei Stellen derselben Übersetzungseinheit
+potenziell unterschiedliche Antworten.
+
+**Erster Fix-Versuch (verworfen) und Korrektur per Review (2026-09-08):**
+der erste Versuch band `komportview.h` in `komport.h` einfach vollständig
+statt vorwärts ein. Kompilierte sauber (0 Warnungen) und wurde committet/
+gepusht — anschließend nachgeholte Gemma4+Codex-Review (`gpt-5.6-sol`, auf
+Nutzerhinweis "hatten wir einen approval von codex?", da dieser einzelne
+Fix ohne die sonst übliche Review-Runde durchgerutscht war) deckte mehrere
+Ungenauigkeiten auf:
+- **Echter, bis dahin nur zufällig kaschierter Bug:** die Behauptung
+  "`komportdoc.h`/`komportminimap.h` lösen die Warnung aktuell nicht aus,
+  vermutlich günstige Moc-Datei-Reihenfolge in ihren jeweiligen
+  Übersetzungseinheiten" war falsch für `komportdoc.h` — Codex hat per
+  gezielter manueller Moc-Reihenfolge-Vertauschung bewiesen, dass
+  `komportdoc.h` (deklariert `KomportView*` ebenfalls in mehreren
+  Slots/Signals, u.a. `slotViewModified()`/`viewModified()`) exakt dieselbe
+  Warnung reproduziert, wenn sein Moc-Code vor dem von `komport.h`
+  prozessiert wird. Es gibt keine "jeweiligen" (=separaten)
+  Übersetzungseinheiten — alle Moc-Dateien einer Target landen in
+  *derselben* `mocs_compilation.cpp`. Sauber war der Build nur, weil der
+  erste Fix `komport.h`s `KomportView` zufällig früh genug vervollständigt
+  hat, um auch `komportdoc.h`s Nutzung mit abzudecken — reine
+  Bündelungs-Reihenfolge-Glückssache, kein echter Fix für `komportdoc.h`.
+- **Falscher/gefährlicher Hinweis für `komportminimap.h`:** die Notiz
+  "falls die Warnung dort künftig auftaucht, gilt derselbe Fix" war falsch.
+  `komportminimap.h` exponiert `KomportView*` nirgends über Signal/Slot
+  (nur gewöhnlicher Konstruktor-Parameter/Member) — löst den
+  Vollständigkeits-Check gar nicht aus und ist als Vorwärtsdeklaration
+  tatsächlich korrekt. Ein volles `#include "komportview.h"` dort hätte
+  sogar eine echte Zirkularität erzeugt (`komportview.h` bindet bereits
+  `komportminimap.h` ein).
+- **Kleinere Ungenauigkeiten:** "GCC 13+" war falsch (die Warnung existiert
+  laut GCC-Dokumentation erst ab GCC 16, Juni 2025 zum Trunk hinzugefügt);
+  "ODR-Risiko" war zu stark formuliert (Qt isoliert diese Checks bewusst
+  über einen distincten `Unique`-Typ pro Nutzungsstelle, um echte
+  ODR-Verletzungen zu vermeiden — die Warnung meldet ordnungs-abhängiges
+  Template-Verhalten, nicht per se einen ODR-Verstoß); der Fix war auch
+  nicht rein kosmetisch, da moc dadurch zusätzlich eine
+  `QMetaType::fromType<KomportView*>()`-Registrierung generiert, die vorher
+  fehlte.
+
+**Revidierter Fix:** `komport.h` zurück auf Vorwärtsdeklaration +
+`Q_MOC_INCLUDE("komportview.h")` (Qts offizieller Mechanismus für genau
+diesen Fall: weist *moc selbst* an, das Include in die von ihm generierte
+Datei aufzunehmen — ordnungsunabhängig by construction, da jede
+betroffene generierte Moc-Datei ihre eigene, durch Include-Guards
+geschützte Kopie des Includes trägt, statt sich auf die zufällige
+Bündelungs-Reihenfolge in `mocs_compilation.cpp` zu verlassen). Gleicher
+Fix zusätzlich auf `komportdoc.h` angewendet (der echte, oben gefundene
+Bug). `komportminimap.h` bewusst unverändert gelassen (dort besteht das
+Problem nachweislich nicht). Vorteil gegenüber dem ersten Versuch: kein
+unnötiges Aufblähen von `komport.h`s Makro-Oberfläche/Präprozessor-Output
+durch den vollen transitiven Include.
+
+**Verifikation (revidierter Fix):** per gezieltem `// TEMP:`-Revert beider
+`Q_MOC_INCLUDE`-Zeilen rot reproduziert (Warnung erscheint exakt wie
+vorher), Fix zurückgesetzt, grün bestätigt (0 Warnungen im kompletten
+Clean-Build) — zusätzlich per Grep in den generierten `moc_komport.cpp`/
+`moc_komportdoc.cpp`-Dateien direkt bestätigt, dass beide jetzt tatsächlich
+`#include "komportview.h"` enthalten. Alle 7 `ctest`-Targets grün,
+Offscreen-Smoke-Test grün, echtes `~/.config/Komport-Qt6/`-Profil
+unangetastet (md5 identisch vor/nach). Gemma4 (auf den ersten Fix-Versuch,
+Commit `03ba91a`): Pass, keine Blocker. Codex (`gpt-5.6-sol`, auf denselben
+Commit): die drei oben aufgeführten Findings, alle bestätigt und in den
+revidierten Fix eingearbeitet.
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 

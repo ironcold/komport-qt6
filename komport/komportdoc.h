@@ -29,6 +29,16 @@
 
 // forward declaration of the Komport classes
 class KomportView;
+// GCC -Wsfinae-incomplete= fix (2026) - see the matching comment in
+// komport.h and TODO.md section 0.9 addendum for the full explanation.
+// This class independently has the same pattern (slotUpdateAllViews()/
+// slotViewModified()/addView()/removeView()/viewModified() below all take
+// KomportView*), proven by a Codex adversarial review to reproduce the
+// exact same warning under certain AUTOMOC bundling orders - it was not
+// hit in practice only because komport.h's own moc output currently
+// happens to complete KomportView first in the combined translation unit,
+// not because this file was actually safe.
+Q_MOC_INCLUDE("komportview.h")
 
 /**	KomportDoc provides a document object for a document-view model.
   *
