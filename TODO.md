@@ -1148,9 +1148,46 @@ tatsächlichen Pixels prüfte — korrigiert, siehe Kommentar im Test).
 Build mit `-Wall -Wextra` ohne *neue* Warnungen (eine bereits vor dieser
 Review-Runde bestehende `-Wsfinae-incomplete=`-Warnung auf `komportview.h:47`
 gefunden und gegen den unveränderten Runde-1-Stand verifiziert — keine
-Regression dieser Runde, dem Nutzer separat gemeldet, noch nicht behoben).
-Offscreen-Smoke-Test grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet
-(md5 identisch vor/nach).
+Regression dieser Runde, dem Nutzer separat gemeldet). Offscreen-Smoke-Test
+grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet (md5 identisch
+vor/nach).
+
+**Nachtrag (2026-09-08, auf Nutzerwunsch "ja, bitte fixen und gut
+dokumentieren"):** die oben gemeldete `-Wsfinae-incomplete=`-Warnung
+zurückverfolgt und behoben. Ursache war *keine* Regression aus Meilenstein 5
+— per Vergleichs-Build gegen den unveränderten Stand von Abschnitt 0.7
+(2026-09-06, dort bereits als "vorbestehend, unabhängig von dieser Runde"
+vermerkt) bestätigt reproduzierbar, die Warnung existierte also schon
+mindestens seit vor Meilenstein 4. Root Cause: `komport.h` deklariert
+`KomportView` nur vorwärts (`class KomportView;`), enthält aber eine
+`Q_OBJECT`-Klasse (`KomportApp`) mit einem Slot, der `KomportView*` als
+Parameter nimmt (`slotViewModified(KomportView*)`). CMakes `AUTOMOC` bündelt
+den generierten Code aller Header einer Target in einer einzigen
+`mocs_compilation.cpp`-Übersetzungseinheit — darin lief der für `komport.h`
+generierte Moc-Code (der nur die Vorwärtsdeklaration von `KomportView` sieht)
+*vor* dem für `komportview.h` generierten Moc-Code, der in **derselben**
+Übersetzungseinheit später die vollständige Klassendefinition liefert. Ein
+`QMetaType`-Traits-Check in Qt selbst (`qmetatype.h:344`, eine
+"ist der Typ vollständig?"-SFINAE-Prüfung) lieferte für `KomportView`
+dadurch an zwei Stellen derselben Übersetzungseinheit potenziell
+unterschiedliche Antworten — GCC 13+ markiert das zu Recht als
+ODR-Risiko, nicht als Cosmetic-Warning. **Fix:** `komport.h` bindet
+`komportview.h` jetzt vollständig ein statt nur vorwärts zu deklarieren
+(keine Zirkularität — `komportview.h` und alles, was es einbindet, ist frei
+von `komport.h`), was das Unvollständigkeits-Fenster in dieser
+Übersetzungseinheit komplett entfernt, unabhängig von `AUTOMOC`s
+Datei-Reihenfolge. `komportdoc.h`/`komportminimap.h` haben ein ähnliches
+Vorwärtsdeklarations-Muster für `KomportView`, lösen die Warnung aber
+aktuell nicht aus (vermutlich günstige Moc-Datei-Reihenfolge in ihren
+jeweiligen Übersetzungseinheiten) — bewusst nicht vorsorglich mitgeändert,
+da kein beobachtetes Symptom; falls `AUTOMOC`s Datei-Reihenfolge sich
+künftig ändert (z.B. durch neue Quelldateien) und dort dieselbe Warnung
+auftaucht, gilt derselbe Fix (volles Include statt Vorwärtsdeklaration).
+Verifiziert: per gezieltem `// TEMP:`-Revert der Include-Änderung rot
+reproduziert (Warnung erscheint exakt wie vorher), Fix zurückgesetzt, grün
+bestätigt (0 Warnungen im kompletten Clean-Build). Alle 7 `ctest`-Targets
+weiterhin grün, Offscreen-Smoke-Test grün, echtes
+`~/.config/Komport-Qt6/`-Profil unangetastet.
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 

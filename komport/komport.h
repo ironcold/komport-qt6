@@ -25,6 +25,22 @@
 #include <QStringList>
 #include <QList>
 
+// Full include, not a forward declaration (2026, GCC -Wsfinae-incomplete=
+// fix): KomportApp declares slots/signals taking KomportView* (see
+// slotViewModified() below), and moc-generated code for those does a
+// completeness-dependent QMetaType trait check on KomportView. CMake
+// AUTOMOC bundles every mocced header's generated code into one
+// mocs_compilation.cpp translation unit; that combined TU used to run this
+// header's own moc output (which only ever saw KomportView forward-declared
+// here) *before* komportview.h's moc output later provided the complete
+// definition in the very same TU. GCC 13+ correctly flags that as an
+// ODR-risk (the trait's answer depends on which of the two moc outputs the
+// linker happens to have compiled the check from) rather than a hard error.
+// Including the full definition here removes the incomplete-type window
+// entirely, independent of AUTOMOC's file ordering. No circular include:
+// komportview.h and everything it includes are free of komport.h.
+#include "komportview.h"
+
 class QSettings;
 class QAction;
 class QMenu;
@@ -35,7 +51,6 @@ class QLabel;
 
 // forward declaration of the Komport classes
 class KomportDoc;
-class KomportView;
 class KomportHexView;
 class KomportMacroBar;
 class KomportSessionLogger;
