@@ -47,6 +47,19 @@ public:
   inline QColor backgroundColor()     {return mBackgroundColor;}
   /** get foreground color */
   inline QColor foregroundColor()     {return mForegroundColor;}
+  /** is the foreground color currently "the default" (never explicitly
+   *  colored via SGR since the last clear/reset, as opposed to explicitly
+   *  colored via SGR 30-37/90-97/256-color)? Milestone 5 (Codex review
+   *  finding): color-scheme live-recoloring can't infer this from color
+   *  equality alone - a scheme's own default can legitimately be the same
+   *  QColor a real SGR code produces (e.g. "Green on Black"'s default
+   *  background is the same black SGR 40 produces), so comparing "is this
+   *  cell's color equal to the old default" would wrongly recolor an
+   *  explicitly-black-via-SGR-40 cell right along with genuinely
+   *  unset ones. This flag tracks provenance explicitly instead. */
+  inline bool foregroundIsDefault()   {return mForegroundIsDefault;}
+  /** see foregroundIsDefault() above */
+  inline bool backgroundIsDefault()   {return mBackgroundIsDefault;}
 
   /** set select property*/
   inline void setSelect(bool _b)    {mSelect=_b;}
@@ -60,13 +73,25 @@ public:
   inline void setReverse(bool _b)     {mReverse = _b;}
   /** set underline property */
   inline void setUnderline(bool _b)   {mUnderline = _b;}
-  /** set forground color */
-  inline void setForegroundColor(QColor _c) {mForegroundColor = _c;}
-  /** set background color */
-  inline void setBackgroundColor(QColor _c) {mBackgroundColor = _c;}
+  /** set forground color. _isDefault marks whether this sets the cell back
+   *  to "the default" (SGR 0/39, clear()) as opposed to an explicit SGR
+   *  color (30-37/90-97/256-color, the default here) - see
+   *  foregroundIsDefault() above. */
+  inline void setForegroundColor(QColor _c, bool _isDefault = false) {mForegroundColor = _c; mForegroundIsDefault = _isDefault;}
+  /** set background color - see setForegroundColor() above */
+  inline void setBackgroundColor(QColor _c, bool _isDefault = false) {mBackgroundColor = _c; mBackgroundIsDefault = _isDefault;}
 
-  /** reset properties to default values */
-  void clear();
+  /** reset properties to default values, using _fg/_bg as the "no color
+   *  set" colors. No default arguments on purpose (Milestone 5, see
+   *  komportcellarray.cpp): the colors a cleared cell gets are
+   *  configurable per profile now, and KomportCell has no back-reference
+   *  to the KomportCellArray that owns it and knows the current
+   *  configured defaults - every caller must pass them explicitly
+   *  (typically cellArray()->defaultForegroundColor()/
+   *  defaultBackgroundColor()) rather than this class silently reaching
+   *  for a hardcoded fallback that could go stale the moment the user
+   *  picks a color scheme. */
+  void clear(const QColor &_fg, const QColor &_bg);
   /** copy operator */
   KomportCell & operator=(const KomportCell & _other);
   /** copy a cell */
@@ -89,6 +114,9 @@ private: // Private attributes
   QColor mForegroundColor;
   /** background color */
   QColor mBackgroundColor;
+  /** see foregroundIsDefault()/backgroundIsDefault() above */
+  bool mForegroundIsDefault;
+  bool mBackgroundIsDefault;
 };
 
 #endif

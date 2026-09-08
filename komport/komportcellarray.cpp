@@ -31,7 +31,11 @@ KomportCellArray::KomportCellArray()
 , mUnderline(false)
 , mForegroundColor(_DEFAULT_FOREGROUND_)
 , mBackgroundColor(_DEFAULT_BACKGROUND_)
+, mForegroundIsDefault(true)
+, mBackgroundIsDefault(true)
 ,mNotify(true)
+, mDefaultForegroundColor(_DEFAULT_FOREGROUND_)
+, mDefaultBackgroundColor(_DEFAULT_BACKGROUND_)
 {
   // Qt6's QList has no auto-delete like Qt3's QPtrList did - ownership of the
   // cells is handled explicitly by this class (see setArraySize() and the
@@ -116,6 +120,14 @@ void KomportCellArray::setArraySize(QSize _sz){
   if ( curcnt==0 ) {
       for( index=0; index < newcnt; index++ ) {
           KomportCell *pCell = new KomportCell();
+          // New cells start out colored from KomportCell's own ctor
+          // default (the OS palette) - sync to *this array's* current
+          // default colors instead, in case a profile color scheme was
+          // already applied before this array was ever sized (Milestone 5:
+          // mDefaultForegroundColor/mDefaultBackgroundColor can differ from
+          // the palette by the time this runs).
+          pCell->setForegroundColor(mDefaultForegroundColor, true); // true: at default, not explicit SGR (Milestone 5)
+          pCell->setBackgroundColor(mDefaultBackgroundColor, true);
           mCells.append(pCell);
       }
   } else  if ( curcnt > newcnt ) {
@@ -126,6 +138,8 @@ void KomportCellArray::setArraySize(QSize _sz){
       int diff = newcnt - curcnt;
       for( index=0; index < diff; index++ )  {
           KomportCell *pCell = new KomportCell();
+          pCell->setForegroundColor(mDefaultForegroundColor, true); // see comment above
+          pCell->setBackgroundColor(mDefaultBackgroundColor, true);
           mCells.append(pCell);
       }
   }
@@ -216,12 +230,25 @@ void KomportCellArray::drawChar(QChar _c, int _x, int _y){
 
 /** draw a character into a cell */
 void KomportCellArray::drawChar(QChar _c, QPoint _p){
-  QChar old = getChar(_p);
-  if (old != _c) {
-    cell(_p)->setCharacter(_c);
-    setCellAttributes(_p);
-    if (mNotify) emit cellChanged(_p);
-  }
+  // Codex review finding (Milestone 5, gpt-5.6-sol round 2): this used to
+  // skip setCellAttributes() (and therefore the current fg/bg color *and*
+  // their isDefault provenance) whenever the character itself was
+  // unchanged - a pre-existing optimization to avoid redundant
+  // cellChanged() emissions for identical full-screen redraws (e.g.
+  // htop/top refreshing every second). That also meant a host which
+  // repositions the cursor, changes color, and rewrites the *same*
+  // character (a common status-line/indicator pattern) got neither the
+  // new color nor - worse, since this milestone added color-scheme
+  // provenance tracking - the correct isDefault flag: the cell stayed
+  // marked as still-default and a later scheme change would silently
+  // recolor it, even though it had just been explicitly colored.
+  // Attributes are now always applied on every drawChar() call, matching
+  // how a real terminal treats every printed character: it always gets
+  // whichever SGR attributes are currently active, whether or not the
+  // glyph itself changed.
+  cell(_p)->setCharacter(_c);
+  setCellAttributes(_p);
+  if (mNotify) emit cellChanged(_p);
 }
 
 /** cursor position */
@@ -327,7 +354,7 @@ void KomportCellArray::copyRow(int _dst, int _src){
 void KomportCellArray::clearRow(int _row){
   int w = arrayWidth();
   for( int x=0; x < w; x++ ) {
-    cell(x,_row)->clear();
+    cell(x,_row)->clear(mDefaultForegroundColor, mDefaultBackgroundColor);
   }
   if ( mNotify ) emit rowChanged(_row);
 }
@@ -362,7 +389,7 @@ void KomportCellArray::clear(){
 /** clear a cell */
 void KomportCellArray::clear(QPoint _p)
 {
-  cell(_p)->clear();
+  cell(_p)->clear(mDefaultForegroundColor, mDefaultBackgroundColor);
   updateCell(_p);
 }
 
@@ -380,18 +407,72 @@ void KomportCellArray::setCellAttributes(QPoint _p){
   c->setBold(bold());
   c->setReverse(reverse());
   c->setUnderline(underline());
-  c->setForegroundColor(foregroundColor());
-  c->setBackgroundColor(backgroundColor());
+  // Propagate whether the *current* color is still "the default" too
+  // (Milestone 5) - not just the color value itself - so a character
+  // drawn right after an SGR 0/39/49 reset correctly ends up
+  // foregroundIsDefault()/backgroundIsDefault() on the cell, the same as
+  // one that was never explicitly colored at all.
+  c->setForegroundColor(foregroundColor(), mForegroundIsDefault);
+  c->setBackgroundColor(backgroundColor(), mBackgroundIsDefault);
 }
 
 /** default foreground color */
 QColor KomportCellArray::defaultForegroundColor(){
-  return _DEFAULT_FOREGROUND_;
+  return mDefaultForegroundColor;
 }
 
 /** default background color */
 QColor KomportCellArray::defaultBackgroundColor(){
-  return _DEFAULT_BACKGROUND_;
+  return mDefaultBackgroundColor;
+}
+
+/** change the default foreground color (Milestone 5), live-applying it to
+ *  every cell currently at the default - determined via
+ *  KomportCell::foregroundIsDefault() (color *provenance*), not by
+ *  comparing colors: a Codex review finding caught that color-equality
+ *  comparison is unsound here - a scheme's own default can legitimately be
+ *  the exact same QColor a real SGR code produces (e.g. "Green on Black"'s
+ *  default background is the same black SGR 40 produces), which would
+ *  wrongly recolor an explicitly-black-via-SGR-40 cell right along with
+ *  genuinely-still-default ones. Also updates the *current* SGR-writing
+ *  color (mForegroundColor, what a newly typed character gets) if it was
+ *  still at the old default, so typing right after a scheme change uses
+ *  the new one too. */
+void KomportCellArray::setDefaultForegroundColor(QColor _c){
+  if ( _c == mDefaultForegroundColor ) return;
+  mDefaultForegroundColor = _c;
+  if ( mForegroundIsDefault ) mForegroundColor = _c;
+  for ( KomportCell *pCell : std::as_const(mCells) ) {
+    if ( pCell->foregroundIsDefault() ) pCell->setForegroundColor(_c, true);
+  }
+  update();
+}
+
+/** change the default background color - see setDefaultForegroundColor() above */
+void KomportCellArray::setDefaultBackgroundColor(QColor _c){
+  if ( _c == mDefaultBackgroundColor ) return;
+  mDefaultBackgroundColor = _c;
+  if ( mBackgroundIsDefault ) mBackgroundColor = _c;
+  for ( KomportCell *pCell : std::as_const(mCells) ) {
+    if ( pCell->backgroundIsDefault() ) pCell->setBackgroundColor(_c, true);
+  }
+  update();
+}
+
+/** reset the *current* (next-character-drawn) foreground color back to the
+ *  default (SGR 0/39) - correctly marks it foregroundIsDefault(), unlike
+ *  setForegroundColor(defaultForegroundColor()) (which would mark it as an
+ *  *explicit* color that merely happens to match the default right now -
+ *  exactly the ambiguity setDefaultForegroundColor() above needs to avoid). */
+void KomportCellArray::resetForegroundToDefault(){
+  mForegroundColor = mDefaultForegroundColor;
+  mForegroundIsDefault = true;
+}
+
+/** see resetForegroundToDefault() above */
+void KomportCellArray::resetBackgroundToDefault(){
+  mBackgroundColor = mDefaultBackgroundColor;
+  mBackgroundIsDefault = true;
 }
 
 /** clear to end of line */

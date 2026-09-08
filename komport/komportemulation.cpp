@@ -900,8 +900,8 @@ void KomportEmulation::doGraphics(){
         //    Text attributes
         case 0:   //    All attributes off
           {
-            cellArray()->setBackgroundColor(cellArray()->defaultBackgroundColor());
-            cellArray()->setForegroundColor(cellArray()->defaultForegroundColor());
+            cellArray()->resetBackgroundToDefault(); // not setBackgroundColor(defaultBackgroundColor()) - see komportcellarray.cpp
+            cellArray()->resetForegroundToDefault();
             cellArray()->setBlink(false);
             cellArray()->setBold(false);
             cellArray()->setReverse(false);
@@ -954,7 +954,7 @@ void KomportEmulation::doGraphics(){
         case 37:  //    White
           cellArray()->setForegroundColor(QColor(255,255,255)); break;
         case 39:  //    Default foreground
-          cellArray()->setForegroundColor(cellArray()->defaultForegroundColor()); break;
+          cellArray()->resetForegroundToDefault(); break; // not setForegroundColor(defaultForegroundColor()) - see komportcellarray.cpp
 
         //  Background colors
         case 40:  //    Black
@@ -974,7 +974,7 @@ void KomportEmulation::doGraphics(){
         case 47:  //    White
           cellArray()->setBackgroundColor(QColor(255,255,255)); break;
         case 49:  //    Default background
-          cellArray()->setBackgroundColor(cellArray()->defaultBackgroundColor()); break;
+          cellArray()->resetBackgroundToDefault(); break; // see case 39 above
 
         //    Bright ("aixterm") foreground colors 90-97 - not in the
         //    original vt102 doc block above (that's xterm-era ANSI), but
@@ -1156,8 +1156,8 @@ void KomportEmulation::doNextLine()
 /** reset to initial state (ESC c) */
 void KomportEmulation::doReset()
 {
-  cellArray()->setBackgroundColor(cellArray()->defaultBackgroundColor());
-  cellArray()->setForegroundColor(cellArray()->defaultForegroundColor());
+  cellArray()->resetBackgroundToDefault(); // not setBackgroundColor(defaultBackgroundColor()) - see komportcellarray.cpp
+  cellArray()->resetForegroundToDefault();
   cellArray()->setBlink(false);
   cellArray()->setBold(false);
   cellArray()->setReverse(false);
@@ -1221,7 +1221,12 @@ void KomportEmulation::doDeleteChar()
   int x0 = cellArray()->cursor().x();
   if ( n > w-x0 ) n = w-x0;
   for ( int x=x0; x < w-n; x++ ) cellArray()->cell(x,y)->copy( cellArray()->cell(x+n,y) );
-  for ( int x=qMax(x0,w-n); x < w; x++ ) cellArray()->cell(x,y)->clear();
+  // Explicit fg/bg (Milestone 5, komportcell.h): clear() no longer has its
+  // own hardcoded default - without this, deleted characters would come
+  // back colored from the OS palette instead of the configured scheme.
+  for ( int x=qMax(x0,w-n); x < w; x++ ) {
+    cellArray()->cell(x,y)->clear( cellArray()->defaultForegroundColor(), cellArray()->defaultBackgroundColor() );
+  }
   cellArray()->updateRow(y);
 }
 

@@ -21,12 +21,16 @@
 #define SETTINGSDIALOG_H
 
 #include <QDialog>
+#include <QColor>
 
 class QComboBox;
 class QSpinBox;
 class QCheckBox;
 class QRadioButton;
 class QGroupBox;
+class QFontComboBox;
+class QPushButton;
+class QFont;
 
 /** Connection/terminal settings dialog.
  *
@@ -69,9 +73,47 @@ public:
     QCheckBox* VisualBellCheckBox;
     QCheckBox* LocalEchoCheckBox;
 
+    // Appearance tab (Milestone 5: font family/size/spacing, color-scheme
+    // presets, fg/bg color pickers)
+    QFontComboBox* FontComboBox;
+    QSpinBox* FontSizeSpinBox;
+    /** letter spacing, as a percentage of the font's normal advance width
+     *  (100 = normal) - see QFont::setLetterSpacing(QFont::PercentageSpacing, ...) */
+    QSpinBox* FontSpacingSpinBox;
+    QComboBox* ColorSchemeComboBox;
+    QPushButton* ForegroundColorButton;
+    QPushButton* BackgroundColorButton;
+
+    /** the font currently selected on the Appearance tab (family from
+     *  FontComboBox, size from FontSizeSpinBox, letter spacing from
+     *  FontSpacingSpinBox) */
+    QFont selectedFont() const;
+    /** pre-fill the Appearance tab's font controls */
+    void setSelectedFont(const QFont &_font);
+    /** current fg/bg as picked (explicitly, or via a scheme preset) on the
+     *  Appearance tab */
+    QColor foregroundColor() const { return mForegroundColor; }
+    QColor backgroundColor() const { return mBackgroundColor; }
+    /** pre-fill the Appearance tab's color swatches/scheme selection.
+     *  Selects whichever preset's colors match exactly, or "Custom" if
+     *  none do - same rule setColorButtonSwatch()/color-button clicks use
+     *  to decide when to fall back to "Custom" themselves. */
+    void setColors(const QColor &_fg, const QColor &_bg);
+
 private:
     QWidget* createDeviceTab();
     QWidget* createTerminalTab();
+    QWidget* createAppearanceTab();
+    /** paint _button's background to show _color as a swatch */
+    static void setColorButtonSwatch(QPushButton *_button, const QColor &_color);
+    /** re-select whichever ColorSchemeComboBox entry matches
+     *  mForegroundColor/mBackgroundColor exactly, or "Custom" (index 0) if
+     *  none do - called after every color change so the combo box always
+     *  honestly reflects the current fg/bg, never a stale preset name. */
+    void syncColorSchemeComboToCurrentColors();
+
+    QColor mForegroundColor;
+    QColor mBackgroundColor;
 };
 
 #endif // SETTINGSDIALOG_H

@@ -22,10 +22,13 @@
 #include <QRect>
 #include <QFont>
 #include <QFontMetrics>
+#include <QFontDatabase>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QDebug>
+#include <QSettings>
+#include <QPalette>
 
 // application specific includes
 #include "komportview.h"
@@ -70,6 +73,14 @@ KomportView::KomportView(QWidget *parent)
   mBlinkTimer = startTimer( 1000 );
   mAutoScrollTimer = startTimer( 250 );
 
+  // A sensible monospace default before any profile is loaded (Milestone
+  // 5): without this, setCellSize() below derives the cell grid from
+  // whatever ambient/inherited widget font happens to be active, which is
+  // rarely monospace - paintCell() still centers each glyph in its fixed-
+  // width cell regardless, but a proportional font makes that visibly
+  // uneven. setTerminalFont() (see below) overrides this once a profile
+  // with its own font is loaded.
+  setFont( QFontDatabase::systemFont(QFontDatabase::FixedFont) );
   setCellSize();
   setEnabled(true);
   setFocusPolicy(Qt::StrongFocus);
@@ -184,7 +195,16 @@ void KomportView::paintCell( QPainter* _paint, int _x, int _y, QRect _bounds ) {
 
     _paint->fillRect( _bounds, QBrush( fillColor ) );
     _paint->setPen( textColor );
-    QFont font = _paint->font();
+    // Codex review finding (Milestone 5, gpt-5.6-sol round 2): this used to
+    // start from _paint->font() - but _paint always paints into mPixmap
+    // (see updateCell()), and a QPixmap carries no font of its own, so a
+    // freshly constructed QPainter's font is just the application default,
+    // completely disconnected from setTerminalFont()/this->font(). Family,
+    // size and letter-spacing changes on the Appearance tab were therefore
+    // silently invisible - only cell geometry (via fontMetrics() in
+    // setCellSize()) ever reflected the selected font, never the glyphs
+    // actually drawn. Starting from this widget's own font() fixes that.
+    QFont font = this->font();
     font.setBold( cell->bold() );
     font.setUnderline(cell->underline());
     _paint->setFont(font);
@@ -364,6 +384,95 @@ void KomportView::setCellSize(){
   setMaximumSize( fixedWidth, QWIDGETSIZE_MAX );
 }
 
+/** change the terminal's font at runtime (Milestone 5: Appearance tab).
+ *  Re-derives the cell grid from the new font (setCellSize() reads
+ *  fontMetrics(), which reflects whatever setFont() just set) and then
+ *  reflows exactly like a widget resize would - relayoutGrid() is the
+ *  same row-count-recompute/mPixmap-rebuild/full-repaint resizeEvent()
+ *  itself calls, just triggered here by a font/cell-size change instead of
+ *  the widget actually changing size. */
+void KomportView::setTerminalFont(const QFont &_font){
+  setFont(_font);
+  setCellSize();
+  relayoutGrid();
+  updateGeometry(); // minimum/maximum size just changed
+}
+
+/** change the default foreground/background colors (Milestone 5: Appearance
+ *  tab / color schemes) on *both* the live grid and the scrollback buffer -
+ *  a Codex review finding caught that applying a scheme only to
+ *  cellArray() (mCellArray) left mScrollBuffer (a separate KomportCellArray
+ *  instance - see komportview.h) at its old colors, so scrolling back after
+ *  a scheme change showed history in the previous scheme while the live
+ *  screen already showed the new one. This is the only place that should
+ *  ever call KomportCellArray::setDefaultForegroundColor()/
+ *  setDefaultBackgroundColor() from outside this class, so the two arrays
+ *  can't drift apart again the same way.
+ *
+ *  Order matters here (Codex review finding, round 2): mScrollBuffer's own
+ *  cellChanged()/rowChanged() signals aren't connected to anything in this
+ *  view - only cellArray()'s (mCellArray's) are, via slotRowChanged(). That
+ *  repaint reads through getCell(), which - while scrolled back - resolves
+ *  cells from mScrollBuffer. Recoloring mScrollBuffer *first* means that by
+ *  the time cellArray()'s update triggers the actual repaint, mScrollBuffer
+ *  already has its new colors too, so history rows come out right straight
+ *  away instead of staying stale until the next unrelated scroll/redraw. */
+void KomportView::setDefaultColors(const QColor &_fg, const QColor &_bg){
+  mScrollBuffer.setDefaultForegroundColor(_fg);
+  mScrollBuffer.setDefaultBackgroundColor(_bg);
+  cellArray()->setDefaultForegroundColor(_fg);
+  cellArray()->setDefaultBackgroundColor(_bg);
+}
+
+/** persist font + colors under Profiles/<name>/Appearance - same pattern as
+ *  KomportMacroBar::saveSettings()/KomportHexView::saveSettings() (caller
+ *  has already opened the Profiles/<name> group). Colors are stored as hex
+ *  strings rather than relying on QSettings' native QColor/QVariant
+ *  round-trip, matching this codebase's existing preference for
+ *  human-readable profile values (strDevice, strBaudRate, ... in
+ *  komport.cpp are all plain strings too) over the INI backend's opaque
+ *  "@Variant(...)" encoding for non-trivial types. */
+void KomportView::saveSettings(QSettings *_settings)
+{
+  if ( !_settings ) return;
+  _settings->beginGroup( QStringLiteral("Appearance") );
+  _settings->setValue( QStringLiteral("Font"), font().toString() );
+  _settings->setValue( QStringLiteral("ForegroundColor"), cellArray()->defaultForegroundColor().name(QColor::HexArgb) );
+  _settings->setValue( QStringLiteral("BackgroundColor"), cellArray()->defaultBackgroundColor().name(QColor::HexArgb) );
+  _settings->endGroup();
+}
+
+/** restore + immediately apply font + colors - see header. Every missing
+ *  key falls back to a FIXED baseline (system fixed-pitch font, OS palette
+ *  colors) - deliberately NOT "whatever is currently set" (a Codex review
+ *  finding on an earlier version of this method): a profile predating
+ *  Milestone 5 (no "Appearance" group at all - e.g. a built-in vendor
+ *  preset) has no keys here, and falling back to the *current* state made
+ *  loading such a profile right after a styled one silently keep that
+ *  other profile's colors/font - non-deterministic, load-order-dependent,
+ *  and a subsequent save of the "unstyled" profile would even persist the
+ *  leaked appearance into it permanently. Every profile's appearance must
+ *  be fully determined by what THAT profile itself has stored, never by
+ *  what was loaded before it. */
+void KomportView::loadSettings(QSettings *_settings)
+{
+  if ( !_settings ) return;
+
+  const QFont baselineFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+  const QColor baselineFg = QApplication::palette().color(QPalette::Text);
+  const QColor baselineBg = QApplication::palette().color(QPalette::Base);
+
+  _settings->beginGroup( QStringLiteral("Appearance") );
+  QFont newFont = baselineFont;
+  newFont.fromString( _settings->value( QStringLiteral("Font"), baselineFont.toString() ).toString() );
+  const QColor fg( _settings->value( QStringLiteral("ForegroundColor"), baselineFg.name(QColor::HexArgb) ).toString() );
+  const QColor bg( _settings->value( QStringLiteral("BackgroundColor"), baselineBg.name(QColor::HexArgb) ).toString() );
+  _settings->endGroup();
+
+  setTerminalFont(newFont);
+  setDefaultColors( fg.isValid() ? fg : baselineFg, bg.isValid() ? bg : baselineBg );
+}
+
 /** notify cursor position has changde */
 void KomportView::slotCursorChanged(QPoint _old, QPoint _new)
 {
@@ -400,7 +509,19 @@ KomportSerial* KomportView::getSerial(){
 /** resize the offscreen pixmap and refresh */
 void KomportView::resizeEvent(QResizeEvent* _e){
   Q_UNUSED(_e);
+  relayoutGrid();
+}
 
+/** recompute row count / rebuild mPixmap / repaint - shared by
+ *  resizeEvent() (the widget's own size changed) and setTerminalFont()
+ *  (the cell size changed instead, same relayout otherwise). Factored out
+ *  as its own method, not left as something setTerminalFont() reaches by
+ *  calling resizeEvent(nullptr): a Codex/Gemma review pointed out that
+ *  relying on resizeEvent() never touching its QResizeEvent* argument is a
+ *  brittle assumption to place on a virtual override a future change could
+ *  easily break (e.g. adding an `_e->size()` check) without anything here
+ *  flagging the new nullptr-safety requirement it would silently violate. */
+void KomportView::relayoutGrid(){
   // Height (not width - width stays fixed at the configured column count,
   // a classic fixed-width terminal, by design) tracks the available
   // window space: recompute how many rows fit and grow/shrink the live

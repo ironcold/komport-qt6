@@ -33,6 +33,8 @@
 #include "komportminimap.h"
 
 class QPrinter;
+class QSettings;
+class QFont;
 class KomportDoc;
 
 /** The KomportView class provides the view widget for the KomportApp instance.
@@ -45,6 +47,15 @@ class KomportDoc;
 class KomportView : public QWidget
 {
   Q_OBJECT
+  // Milestone 5 (Codex review finding, gpt-5.6-sol round 2): the existing
+  // appearance tests only ever asserted view->font(), never what paintCell()
+  // actually did with it - which is exactly how the "selected font is never
+  // used to render glyphs" bug went unnoticed. Grant the test direct access
+  // to the (deliberately protected, since it's an overridable rendering
+  // primitive, not part of the public API) paintCell() so it can call it
+  // with a real QPainter and inspect the resulting painter font
+  // deterministically, instead of a fragile pixel/rendering comparison.
+  friend class TstAppearance;
   public:
     /** Constructor for the main view */
     explicit KomportView(QWidget *parent = nullptr);
@@ -92,6 +103,27 @@ class KomportView : public QWidget
   QString selectedText() const { return mSelectedText; }
   /** set the number of lines in the scroll buffer */
   virtual void setScrollBuffer(int _sz);
+  /** change the terminal font at runtime, live-reflowing the grid (see
+   *  komportview.cpp - Milestone 5 Appearance tab) */
+  void setTerminalFont(const QFont &_font);
+  /** change default fg/bg colors on both the live grid and the scrollback
+   *  buffer (Milestone 5) - always use this instead of
+   *  cellArray()->setDefaultForegroundColor()/setDefaultBackgroundColor()
+   *  directly, see komportview.cpp */
+  void setDefaultColors(const QColor &_fg, const QColor &_bg);
+  /** persist font + colors under Profiles/<name>/Appearance (caller has
+   *  already opened that group) - Milestone 5, same pattern as
+   *  KomportMacroBar::saveSettings()/KomportHexView::saveSettings(),
+   *  except not const: cellArray() (needed to read the current default
+   *  colors) isn't a const accessor. */
+  void saveSettings(QSettings *_settings);
+  /** restore + immediately apply font + colors from Profiles/<name>/
+   *  Appearance (caller has already opened that group); falls back to
+   *  whatever is currently set (the constructor's monospace-system-font/
+   *  OS-palette defaults, on first run) for any key that isn't present -
+   *  same pattern as KomportMacroBar::loadSettings()/KomportHexView::
+   *  loadSettings() */
+  void loadSettings(QSettings *_settings);
 
   /** total rows across scrollback + the live screen, oldest scrollback
    *  row first - used by KomportMinimapScrollBar to render/scroll the
@@ -118,6 +150,9 @@ protected: // Protected methods
   void setCellSize();
   /** resize the offscreen pixmap and refresh */
   void resizeEvent(QResizeEvent* _e) override;
+  /** shared relayout body for resizeEvent() and setTerminalFont() - see
+   *  komportview.cpp */
+  void relayoutGrid();
   /** No descriptions */
   void mouseMoveEvent( QMouseEvent* _e ) override;
   /** No descriptions */

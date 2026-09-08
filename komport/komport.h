@@ -36,6 +36,24 @@ class QLabel;
 // forward declaration of the Komport classes
 class KomportDoc;
 class KomportView;
+// GCC -Wsfinae-incomplete= fix (2026, revised after a Codex adversarial
+// review of an earlier attempt - see TODO.md section 0.9 addendum): this
+// class declares a slot taking KomportView* (slotViewModified() below), and
+// moc-generated code for that does a completeness-dependent QMetaType trait
+// check on KomportView. CMake AUTOMOC bundles every mocced header's
+// generated code into one mocs_compilation.cpp translation unit, so if some
+// *other* moc-generated file needing the same check ends up processed
+// before this class's own KomportView becomes complete there, GCC 16+
+// flags the inconsistent answer. Q_MOC_INCLUDE tells moc itself to add
+// komportview.h's #include to *this* class's own generated moc_komport.cpp
+// - unlike a plain #include in this header (the first attempt, reverted:
+// it only accidentally protected other forward-declaring headers bundled
+// after this one, and broke if AUTOMOC ever bundled them first instead),
+// this fixes the completeness window at its actual source, independent of
+// bundling order, without pulling komportview.h's full contents (and its
+// own transitive includes) into every translation unit that includes this
+// header.
+Q_MOC_INCLUDE("komportview.h")
 class KomportHexView;
 class KomportMacroBar;
 class KomportSessionLogger;

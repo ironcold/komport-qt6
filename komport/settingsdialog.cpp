@@ -32,9 +32,37 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QSerialPortInfo>
+#include <QFontComboBox>
+#include <QFontDatabase>
+#include <QColorDialog>
+#include <QFont>
+#include <QApplication>
+#include <QPalette>
+
+namespace {
+
+// Predefined color-scheme templates (Milestone 5). "Custom" (index 0,
+// added separately in createAppearanceTab() rather than kept here) is not
+// a real scheme - it's what the combo box falls back to showing whenever
+// the current fg/bg don't exactly match one of these, so it's never
+// something the user directly "picks" to get colors from.
+struct ColorScheme { const char *name; QColor fg; QColor bg; };
+const ColorScheme kColorSchemes[] = {
+  // KDE Breeze's light/dark palette text/window colors.
+  { "Breeze Light",           QColor(0x23,0x26,0x29), QColor(0xfc,0xfc,0xfc) },
+  { "Breeze Dark",            QColor(0xfc,0xfc,0xfc), QColor(0x23,0x26,0x29) },
+  // Classic phosphor-green retro terminal.
+  { "Green on Black",         QColor(0x33,0xff,0x33), QColor(0x00,0x00,0x00) },
+  // Low-glare, easy-on-the-eyes light scheme.
+  { "Black on Light Yellow",  QColor(0x00,0x00,0x00), QColor(0xff,0xff,0xdc) },
+};
+
+} // namespace
 
 SettingsDialog::SettingsDialog( QWidget* parent )
     : QDialog( parent )
+    , mForegroundColor( QApplication::palette().color(QPalette::Text) )
+    , mBackgroundColor( QApplication::palette().color(QPalette::Base) )
 {
     setObjectName( QStringLiteral("SettingsDialog") );
     setWindowTitle( tr("Settings") );
@@ -43,6 +71,7 @@ SettingsDialog::SettingsDialog( QWidget* parent )
     auto *tabWidget = new QTabWidget( this );
     tabWidget->addTab( createDeviceTab(), tr("Device") );
     tabWidget->addTab( createTerminalTab(), tr("Terminal") );
+    tabWidget->addTab( createAppearanceTab(), tr("Appearance") );
 
     auto *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
     connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
@@ -197,4 +226,151 @@ QWidget* SettingsDialog::createTerminalTab()
     pageLayout->addWidget( historyGroup );
 
     return page;
+}
+
+QWidget* SettingsDialog::createAppearanceTab()
+{
+    auto *page = new QWidget( this );
+
+    auto *fontGroup = new QGroupBox( tr("Font"), page );
+    FontComboBox = new QFontComboBox( fontGroup );
+    // Monospace-filtered (Milestone 5): every character cell in the grid is
+    // a fixed pixel size (see KomportView::setCellSize()) with each glyph
+    // centered in it - a proportional font still "works" (nothing crashes)
+    // but looks visibly uneven, so don't offer one in the first place.
+    FontComboBox->setFontFilters( QFontComboBox::MonospacedFonts );
+    FontComboBox->setToolTip( tr("Monospace fonts only - every character cell in the\nterminal grid must be the same width.") );
+    FontSizeSpinBox = new QSpinBox( fontGroup );
+    FontSizeSpinBox->setRange( 6, 72 );
+    FontSizeSpinBox->setValue( QFontDatabase::systemFont(QFontDatabase::FixedFont).pointSize() );
+    FontSpacingSpinBox = new QSpinBox( fontGroup );
+    FontSpacingSpinBox->setRange( 50, 300 );
+    FontSpacingSpinBox->setSingleStep( 5 );
+    FontSpacingSpinBox->setValue( 100 );
+    FontSpacingSpinBox->setSuffix( QStringLiteral("%") );
+    FontSpacingSpinBox->setToolTip( tr("Letter spacing, as a percentage of the font's normal\ncharacter width. 100% is normal spacing.") );
+    auto *fontLayout = new QFormLayout( fontGroup );
+    fontLayout->addRow( tr("Family:"), FontComboBox );
+    fontLayout->addRow( tr("Size:"), FontSizeSpinBox );
+    fontLayout->addRow( tr("Spacing:"), FontSpacingSpinBox );
+
+    auto *colorGroup = new QGroupBox( tr("Colors"), page );
+    ColorSchemeComboBox = new QComboBox( colorGroup );
+    // Index 0 is "Custom" - not a real scheme, just what this combo shows
+    // whenever the current fg/bg don't exactly match one of the presets
+    // below (see syncColorSchemeComboToCurrentColors()). Never itself
+    // applies a color when selected - selecting it manually is a no-op,
+    // consistent with there being no "custom" colors to apply.
+    ColorSchemeComboBox->addItem( tr("Custom") );
+    for ( const ColorScheme &scheme : kColorSchemes ) {
+        ColorSchemeComboBox->addItem( tr(scheme.name) );
+    }
+    ForegroundColorButton = new QPushButton( tr("Text Color…"), colorGroup );
+    BackgroundColorButton = new QPushButton( tr("Background Color…"), colorGroup );
+    setColorButtonSwatch( ForegroundColorButton, mForegroundColor );
+    setColorButtonSwatch( BackgroundColorButton, mBackgroundColor );
+
+    connect( ColorSchemeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int _index) {
+        if ( _index <= 0 || _index > int(sizeof(kColorSchemes)/sizeof(kColorSchemes[0])) ) return; // "Custom" - nothing to apply
+        const ColorScheme &scheme = kColorSchemes[_index-1];
+        mForegroundColor = scheme.fg;
+        mBackgroundColor = scheme.bg;
+        setColorButtonSwatch( ForegroundColorButton, mForegroundColor );
+        setColorButtonSwatch( BackgroundColorButton, mBackgroundColor );
+    } );
+    connect( ForegroundColorButton, &QPushButton::clicked, this, [this]() {
+        const QColor picked = QColorDialog::getColor( mForegroundColor, this, tr("Text Color") );
+        if ( !picked.isValid() ) return; // dialog cancelled
+        mForegroundColor = picked;
+        setColorButtonSwatch( ForegroundColorButton, mForegroundColor );
+        // Picking a color by hand almost certainly no longer matches
+        // whichever preset was selected (if any) - reflect that honestly
+        // instead of leaving a stale scheme name showing.
+        syncColorSchemeComboToCurrentColors();
+    } );
+    connect( BackgroundColorButton, &QPushButton::clicked, this, [this]() {
+        const QColor picked = QColorDialog::getColor( mBackgroundColor, this, tr("Background Color") );
+        if ( !picked.isValid() ) return;
+        mBackgroundColor = picked;
+        setColorButtonSwatch( BackgroundColorButton, mBackgroundColor );
+        syncColorSchemeComboToCurrentColors();
+    } );
+
+    auto *colorLayout = new QFormLayout( colorGroup );
+    colorLayout->addRow( tr("Scheme:"), ColorSchemeComboBox );
+    colorLayout->addRow( ForegroundColorButton );
+    colorLayout->addRow( BackgroundColorButton );
+
+    auto *pageLayout = new QVBoxLayout( page );
+    pageLayout->addWidget( fontGroup );
+    pageLayout->addWidget( colorGroup );
+    pageLayout->addStretch( 1 );
+
+    return page;
+}
+
+QFont SettingsDialog::selectedFont() const
+{
+    QFont f = FontComboBox->currentFont();
+    f.setPointSize( FontSizeSpinBox->value() );
+    // The font combo is already monospace-filtered, but a caller applying
+    // this font directly (KomportView::setTerminalFont()) benefits from
+    // the hint being explicit too, not just "whatever this family happens
+    // to default to".
+    f.setFixedPitch( true );
+    // Milestone 5's spec explicitly asked for a spacing control alongside
+    // family/size (Codex review finding: the first version only exposed
+    // those two). PercentageSpacing (100 = normal) maps directly onto the
+    // spinbox's own 50-300% range.
+    f.setLetterSpacing( QFont::PercentageSpacing, FontSpacingSpinBox->value() );
+    return f;
+}
+
+void SettingsDialog::setSelectedFont(const QFont &_font)
+{
+    FontComboBox->setCurrentFont( _font );
+    // A default-constructed/unset QFont's pointSize() is -1 (pixel-size-only)
+    // - fall back to the same system fixed-font size used elsewhere as the
+    // baseline default rather than briefly showing a nonsensical negative
+    // spinbox value.
+    const int pt = _font.pointSize();
+    FontSizeSpinBox->setValue( pt > 0 ? pt : QFontDatabase::systemFont(QFontDatabase::FixedFont).pointSize() );
+    // Only trust letterSpacing() when it's actually percentage-based -
+    // AbsoluteSpacing (pixels) is a different unit this spinbox doesn't
+    // represent, and a font that never had spacing set at all defaults to
+    // PercentageSpacing/100 anyway, so this covers the common case too.
+    FontSpacingSpinBox->setValue( _font.letterSpacingType() == QFont::PercentageSpacing
+                                   ? qRound( _font.letterSpacing() ) : 100 );
+}
+
+void SettingsDialog::setColors(const QColor &_fg, const QColor &_bg)
+{
+    mForegroundColor = _fg;
+    mBackgroundColor = _bg;
+    setColorButtonSwatch( ForegroundColorButton, mForegroundColor );
+    setColorButtonSwatch( BackgroundColorButton, mBackgroundColor );
+    syncColorSchemeComboToCurrentColors();
+}
+
+void SettingsDialog::setColorButtonSwatch( QPushButton *_button, const QColor &_color )
+{
+    // Contrasting label text so the button's own caption stays legible
+    // regardless of how dark or light the picked swatch color is.
+    const QColor textColor = _color.lightness() > 128 ? QColor(Qt::black) : QColor(Qt::white);
+    _button->setStyleSheet( QStringLiteral("background-color: %1; color: %2;")
+                             .arg( _color.name(), textColor.name() ) );
+}
+
+void SettingsDialog::syncColorSchemeComboToCurrentColors()
+{
+    ColorSchemeComboBox->blockSignals( true ); // avoid re-triggering the scheme-applies-colors handler
+    int matchIndex = 0; // "Custom" - the default when nothing below matches
+    for ( int i = 0; i < int(sizeof(kColorSchemes)/sizeof(kColorSchemes[0])); ++i ) {
+        if ( kColorSchemes[i].fg == mForegroundColor && kColorSchemes[i].bg == mBackgroundColor ) {
+            matchIndex = i + 1; // +1: index 0 is "Custom", presets start at 1
+            break;
+        }
+    }
+    ColorSchemeComboBox->setCurrentIndex( matchIndex );
+    ColorSchemeComboBox->blockSignals( false );
 }

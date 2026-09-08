@@ -50,6 +50,13 @@ public:
   inline QColor backgroundColor()     {return mBackgroundColor;}
   /** get foreground color */
   inline QColor foregroundColor()     {return mForegroundColor;}
+  /** is the *current* (next-character-drawn) foreground color still "the
+   *  default" - see KomportCell::foregroundIsDefault() and
+   *  setDefaultForegroundColor() below for why this is tracked explicitly
+   *  rather than inferred from color equality (Milestone 5, Codex review). */
+  inline bool foregroundIsDefault()   {return mForegroundIsDefault;}
+  /** see foregroundIsDefault() above */
+  inline bool backgroundIsDefault()   {return mBackgroundIsDefault;}
 
   /** set blink property */
   inline void setBlink(bool _b)       {mBlink=_b;}
@@ -59,10 +66,20 @@ public:
   inline void setReverse(bool _b)     {mReverse = _b;}
   /** set underline property */
   inline void setUnderline(bool _b)   {mUnderline = _b;}
-  /** set forground color */
-  inline void setForegroundColor(QColor _c) {mForegroundColor = _c;}
-  /** set background color */
-  inline void setBackgroundColor(QColor _c) {mBackgroundColor = _c;}
+  /** set forground color - an *explicit* SGR color (30-37/90-97/256-color).
+   *  Marks foregroundIsDefault() false - use resetForegroundToDefault()
+   *  below for SGR 0/39 instead, which correctly marks it true. */
+  inline void setForegroundColor(QColor _c) {mForegroundColor = _c; mForegroundIsDefault = false;}
+  /** set background color - see setForegroundColor() above, and
+   *  resetBackgroundToDefault() for SGR 0/49 */
+  inline void setBackgroundColor(QColor _c) {mBackgroundColor = _c; mBackgroundIsDefault = false;}
+  /** reset the *current* (next-character-drawn) foreground/background
+   *  color back to the default (SGR 0/39, SGR 0/49) - unlike
+   *  setForegroundColor()/setBackgroundColor(), correctly marks the
+   *  result as foregroundIsDefault()/backgroundIsDefault() rather than
+   *  "explicitly colored to happen to match the default". */
+  void resetForegroundToDefault();
+  void resetBackgroundToDefault();
 
   /** set the cell array size .
  */
@@ -136,10 +153,23 @@ public:
   void updateCell(QPoint _c);
   /** clear all cells */
   void clear();
-  /** default background color */
+  /** default background color - what a cleared/reset cell gets, and what
+   *  SGR 49 ("default background") resolves to. Historically a fixed read
+   *  of QApplication::palette(); configurable per-profile since
+   *  Milestone 5 via setDefaultBackgroundColor() below. */
   QColor defaultBackgroundColor();
-  /** default foreground color */
+  /** default foreground color - see defaultBackgroundColor() above */
   QColor defaultForegroundColor();
+  /** change the default background color (Milestone 5: profile-configured
+   *  color schemes). Live-applies: every cell currently showing the *old*
+   *  default background is recolored to the new one immediately (a host
+   *  that explicitly set some other background via SGR is left alone -
+   *  this can't tell "explicitly colored to the same shade as the old
+   *  default" apart from "never explicitly colored", but that's an
+   *  acceptable, common approximation - see komportcellarray.cpp). */
+  void setDefaultBackgroundColor(QColor _c);
+  /** change the default foreground color - see setDefaultBackgroundColor() above */
+  void setDefaultForegroundColor(QColor _c);
   /** set cell attributes */
   void setCellAttributes(QPoint _p);
   /** clear to end of line */
@@ -171,8 +201,18 @@ private: // Private attributes
   QColor mForegroundColor;
   /** background color */
   QColor mBackgroundColor;
+  /** see foregroundIsDefault()/backgroundIsDefault() above */
+  bool mForegroundIsDefault;
+  bool mBackgroundIsDefault;
   /** if true, signals are emitted when a cell is changed, otherwise not */
   bool mNotify;
+  /** default (SGR 39/49, cell-clear) colors - see defaultForegroundColor()/
+   *  defaultBackgroundColor() above. Initialized from QApplication::
+   *  palette() in the constructor, same as before Milestone 5; overridden
+   *  by setDefaultForegroundColor()/setDefaultBackgroundColor() once a
+   *  profile with its own color scheme is loaded. */
+  QColor mDefaultForegroundColor;
+  QColor mDefaultBackgroundColor;
   /** DECTCEM cursor-visible flag */
   bool mCursorVisible = true;
 protected:

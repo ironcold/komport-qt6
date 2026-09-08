@@ -1054,6 +1054,191 @@ mit `-Wall -Wextra`: 0 neue Warnungen. Offscreen-Smoke-Test grün, echtes
   `ADR-001` dokumentiert; durch den Spike unverändert (wurde bewusst nicht
   prototypisiert, da explizit die nicht bevorzugte Vergleichsoption).
 
+## 0.9 Meilenstein 5 — Appearance-Tab (Schrift/Farbschemata) + Review-Zyklus (2026-09-08)
+
+Umgesetzt: konfigurierbare Terminal-Schrift (Familie/Größe/Laufweite) und
+Vordergrund-/Hintergrundfarben statt der bisherigen, aus `QApplication::
+palette()` abgeleiteten festen Default-Farben. Kern der Änderung ist eine
+neue **Farb-Herkunfts-Verfolgung** (`mForegroundIsDefault`/
+`mBackgroundIsDefault` auf `KomportCell`/`KomportCellArray`): ein
+Farbschema-Wechsel darf nur Zellen umfärben, die tatsächlich noch beim
+Default stehen, nicht solche, die zufällig explizit auf eine Farbe gesetzt
+wurden, die mit dem *alten* Default numerisch übereinstimmt (z.B. bei
+"Green on Black": SGR 40 Schwarz == Default-Hintergrund). Neu:
+`KomportView::setDefaultColors()`/`setTerminalFont()` (einziger Eintrittspunkt
+von außen, hält `mCellArray` und `mScrollBuffer` synchron), `saveSettings()`/
+`loadSettings()` (Persistenz unter `Profiles/<Name>/Appearance`), sowie ein
+neuer Appearance-Tab in `SettingsDialog` (Schriftauswahl, Laufweiten-Spinbox,
+Farbschema-Presets "Breeze Light/Dark", "Green on Black", "Black on Light
+Yellow", Custom-Farbwahl). Ab dieser Runde: Gemma 4 (`hermes-gemma-review`)
+lief vor **jeder** Codex-Runde als erstes Gate (Nutzervorgabe), Codex selbst
+über `codex-companion.mjs task --model gpt-5.6-sol` (Standardmodell `gpt-5.5`
+zu dieser Zeit intermittierend mit 404-Fehlern, s. Abschnitt 0.8).
+
+**Runde 1** (Gemma 4: Pass; Codex `gpt-5.6-sol`): 5 Findings, 4 gefixt:
+- Farb-Umfärbung erkannte "noch beim Default" per Farbwert-Gleichheit statt
+  Herkunft — bei einer Kollision (z.B. "Green on Black") wurden explizit
+  gesetzte Farben fälschlich mit umgefärbt. Gefixt durch die oben genannte
+  Herkunfts-Verfolgung.
+- Farbschema-Wechsel färbte nur `mCellArray` um, nicht `mScrollBuffer`
+  (eigene, zweite `KomportCellArray`-Instanz) — Scrollback zeigte nach einem
+  Wechsel weiter das alte Schema. Gefixt durch `KomportView::setDefaultColors()`
+  als einzigen Eintrittspunkt für beide Arrays.
+- `loadSettings()`s Fallback bei fehlender "Appearance"-Gruppe (Alt-/
+  Built-in-Profile) war "aktuell gesetzter Wert" — dadurch leakte das
+  Erscheinungsbild eines zuvor geladenen Profils nicht-deterministisch in
+  ein anderes, das gar keins hatte. Gefixt: fester Baseline-Fallback
+  (`QFontDatabase::systemFont(FixedFont)`, `QApplication::palette()`-Farben).
+- Laufweiten-Kontrolle fehlte trotz TODO-Vorgabe ("Spacing"-Regler) im
+  ersten Entwurf des Appearance-Tabs — ergänzt (`FontSpacingSpinBox`, 50–300%,
+  `QFont::setLetterSpacing(PercentageSpacing, ...)`).
+- **Bewusst nicht gefixt, dokumentiert:** Schriftgrößen-Wechsel verschiebt
+  die Fensterbreite (Fixed-Width-Design, architektonische Grenze, kein
+  Meilenstein-5-Regression) — siehe Abschnitt 6.2.
+
+**Runde 2** (Gemma 4 auf dem Diff nach Runde 1: Pass, keine Blocker; Codex
+`gpt-5.6-sol`): 5 Findings, 4 gefixt:
+- **[Hoch]** Die gewählte Schrift wurde nie tatsächlich zum Zeichnen benutzt:
+  `paintCell()` ging von `_paint->font()` aus, aber jeder reale Aufrufer
+  zeichnet in `mPixmap` (ein `QPixmap`, das keine eigene Schrift trägt) — der
+  Painter startete also immer beim Anwendungs-Default. `setTerminalFont()`
+  änderte dadurch nur die Zellgeometrie (`fontMetrics()`), nie die
+  tatsächlich gezeichneten Glyphen. Gefixt: `paintCell()` geht jetzt von
+  `this->font()` aus.
+- **[Mittel]** Ein Farbwechsel bei bereits aktivem Scrollback machte die
+  Historie nicht sofort sichtbar neu: `setDefaultColors()` färbte zuerst
+  `mCellArray` um (löst den einzigen verbundenen Repaint aus, der beim
+  Scrollen aus `mScrollBuffer` liest — noch mit alten Farben), erst danach
+  `mScrollBuffer` (dessen eigene Signale mit nichts verbunden sind). Gefixt
+  durch Vertauschen der Reihenfolge (`mScrollBuffer` zuerst).
+- **[Mittel]** `KomportCellArray::drawChar()` übersprang `setCellAttributes()`
+  (Farben **und** deren Herkunfts-Flag) komplett, wenn sich das gezeichnete
+  Zeichen nicht änderte — ein Host, der Cursor zurücksetzt, Farbe ändert und
+  dasselbe Zeichen erneut schreibt (z.B. Statuszeilen-Muster), bekam weder
+  die neue Farbe noch die korrekte Herkunfts-Markierung aus Runde 1. Gefixt:
+  Attribute werden jetzt bei jedem `drawChar()`-Aufruf angewendet, unabhängig
+  davon, ob sich das Zeichen ändert (entspricht echtem Terminal-Verhalten).
+- **[Niedrig]** `tst_appearance.cpp`s Profil-Rundlauf-Test testete nicht den
+  echten `KomportApp::saveProfile()`-Pfad, sondern rief `KomportView::
+  saveSettings()` direkt auf (`saveProfile()` ist `protected`, UI-only) — der
+  Datei-Kopfkommentar hatte das fälschlich als vollständige Integration
+  dargestellt. Kommentar korrigiert, Lücke (die Ein-Zeilen-Integration in
+  `komport.cpp` muss beim Review von Auge geprüft werden) offen dokumentiert.
+- **Erneut aufgeworfen, keine neue Aktion:** die Fensterbreiten-Verschiebung
+  bei Schriftgrößen-Wechsel (s.o., Runde 1) — bereits als bewusste, dokumentierte
+  Grenze bestätigt (Abschnitt 6.2), keine Regression dieser Runde.
+
+**Testbarkeit:** `KomportView` gewährt `tests/tst_appearance.cpp` jetzt per
+`friend class TstAppearance` Zugriff auf das (bewusst weiterhin `protected`
+bleibende, da überschreibbare Rendering-Primitive) `paintCell()` sowie auf
+`mPixmap` — damit lässt sich der tatsächlich verwendete Painter-Font bzw. das
+tatsächlich gezeichnete Pixel deterministisch prüfen, ohne auf fragile
+Font-Rendering-/Pixel-Vergleiche über mehrere Systeme hinweg angewiesen zu
+sein. Neue Tests (`tst_appearance.cpp`, jetzt 7 Testfunktionen):
+`paintCellUsesTerminalFontNotPainterDefault`,
+`colorChangeRepaintsAlreadyScrolledBackHistory` (prüft explizit das
+gerenderte `mPixmap`-Pixel, nicht nur die – in beiden Reihenfolgen korrekte –
+Zellendaten über `getCell()`), `sameCharacterRedrawPicksUpNewExplicitColor`.
+Alle drei zunächst per gezieltem `// TEMP:`-Revert rot verifiziert (inkl.
+eines Fehlversuchs bei `colorChangeRepaintsAlreadyScrolledBackHistory`, der
+zunächst fälschlich grün blieb, weil er nur `getCell()` statt des
+tatsächlichen Pixels prüfte — korrigiert, siehe Kommentar im Test).
+
+**Verifikation (gesamt, beide Runden):** alle 7 `ctest`-Targets grün, Clean
+Build mit `-Wall -Wextra` ohne *neue* Warnungen (eine bereits vor dieser
+Review-Runde bestehende `-Wsfinae-incomplete=`-Warnung auf `komportview.h:47`
+gefunden und gegen den unveränderten Runde-1-Stand verifiziert — keine
+Regression dieser Runde, dem Nutzer separat gemeldet). Offscreen-Smoke-Test
+grün, echtes `~/.config/Komport-Qt6/`-Profil unangetastet (md5 identisch
+vor/nach).
+
+**Nachtrag (2026-09-08, auf Nutzerwunsch "ja, bitte fixen und gut
+dokumentieren"):** die oben gemeldete `-Wsfinae-incomplete=`-Warnung
+zurückverfolgt und behoben. Ursache war *keine* Regression aus Meilenstein 5
+— per Vergleichs-Build gegen den unveränderten Stand von Abschnitt 0.7
+(2026-09-06, dort bereits als "vorbestehend, unabhängig von dieser Runde"
+vermerkt) bestätigt reproduzierbar, die Warnung existierte also schon
+mindestens seit vor Meilenstein 4. Root Cause: `komport.h` deklariert
+`KomportView` nur vorwärts (`class KomportView;`), enthält aber eine
+`Q_OBJECT`-Klasse (`KomportApp`) mit einem Slot, der `KomportView*` als
+Parameter nimmt (`slotViewModified(KomportView*)`). CMakes `AUTOMOC` bündelt
+den generierten Code aller Header einer Target in einer einzigen
+`mocs_compilation.cpp`-Übersetzungseinheit — darin lief der für `komport.h`
+generierte Moc-Code (der nur die Vorwärtsdeklaration von `KomportView` sieht)
+*vor* dem für `komportview.h` generierten Moc-Code, der in **derselben**
+Übersetzungseinheit später die vollständige Klassendefinition liefert. Ein
+`QMetaType`-Traits-Check in Qt selbst (`qmetatype.h:344`) lieferte für
+`KomportView` dadurch an zwei Stellen derselben Übersetzungseinheit
+potenziell unterschiedliche Antworten.
+
+**Erster Fix-Versuch (verworfen) und Korrektur per Review (2026-09-08):**
+der erste Versuch band `komportview.h` in `komport.h` einfach vollständig
+statt vorwärts ein. Kompilierte sauber (0 Warnungen) und wurde committet/
+gepusht — anschließend nachgeholte Gemma4+Codex-Review (`gpt-5.6-sol`, auf
+Nutzerhinweis "hatten wir einen approval von codex?", da dieser einzelne
+Fix ohne die sonst übliche Review-Runde durchgerutscht war) deckte mehrere
+Ungenauigkeiten auf:
+- **Echter, bis dahin nur zufällig kaschierter Bug:** die Behauptung
+  "`komportdoc.h`/`komportminimap.h` lösen die Warnung aktuell nicht aus,
+  vermutlich günstige Moc-Datei-Reihenfolge in ihren jeweiligen
+  Übersetzungseinheiten" war falsch für `komportdoc.h` — Codex hat per
+  gezielter manueller Moc-Reihenfolge-Vertauschung bewiesen, dass
+  `komportdoc.h` (deklariert `KomportView*` ebenfalls in mehreren
+  Slots/Signals, u.a. `slotViewModified()`/`viewModified()`) exakt dieselbe
+  Warnung reproduziert, wenn sein Moc-Code vor dem von `komport.h`
+  prozessiert wird. Es gibt keine "jeweiligen" (=separaten)
+  Übersetzungseinheiten — alle Moc-Dateien einer Target landen in
+  *derselben* `mocs_compilation.cpp`. Sauber war der Build nur, weil der
+  erste Fix `komport.h`s `KomportView` zufällig früh genug vervollständigt
+  hat, um auch `komportdoc.h`s Nutzung mit abzudecken — reine
+  Bündelungs-Reihenfolge-Glückssache, kein echter Fix für `komportdoc.h`.
+- **Falscher/gefährlicher Hinweis für `komportminimap.h`:** die Notiz
+  "falls die Warnung dort künftig auftaucht, gilt derselbe Fix" war falsch.
+  `komportminimap.h` exponiert `KomportView*` nirgends über Signal/Slot
+  (nur gewöhnlicher Konstruktor-Parameter/Member) — löst den
+  Vollständigkeits-Check gar nicht aus und ist als Vorwärtsdeklaration
+  tatsächlich korrekt. Ein volles `#include "komportview.h"` dort hätte
+  sogar eine echte Zirkularität erzeugt (`komportview.h` bindet bereits
+  `komportminimap.h` ein).
+- **Kleinere Ungenauigkeiten:** "GCC 13+" war falsch (die Warnung existiert
+  laut GCC-Dokumentation erst ab GCC 16, Juni 2025 zum Trunk hinzugefügt);
+  "ODR-Risiko" war zu stark formuliert (Qt isoliert diese Checks bewusst
+  über einen distincten `Unique`-Typ pro Nutzungsstelle, um echte
+  ODR-Verletzungen zu vermeiden — die Warnung meldet ordnungs-abhängiges
+  Template-Verhalten, nicht per se einen ODR-Verstoß); der Fix war auch
+  nicht rein kosmetisch, da die generierten statischen Metadaten jetzt das
+  `KomportView*`-Metatype-Interface tragen können, statt auf einen
+  Null-/Incomplete-Type-Eintrag zurückzufallen (Korrektur nach
+  Codex-Review auf den revidierten Fix, s.u. — ursprünglich hier fälschlich
+  als "generiert zusätzlich einen `QMetaType::fromType<KomportView*>()`-
+  Aufruf" formuliert; dieser Aufruf taucht so in den generierten Dateien
+  nicht auf).
+
+**Revidierter Fix:** `komport.h` zurück auf Vorwärtsdeklaration +
+`Q_MOC_INCLUDE("komportview.h")` (Qts offizieller Mechanismus für genau
+diesen Fall: weist *moc selbst* an, das Include in die von ihm generierte
+Datei aufzunehmen — ordnungsunabhängig by construction, da jede
+betroffene generierte Moc-Datei ihre eigene, durch Include-Guards
+geschützte Kopie des Includes trägt, statt sich auf die zufällige
+Bündelungs-Reihenfolge in `mocs_compilation.cpp` zu verlassen). Gleicher
+Fix zusätzlich auf `komportdoc.h` angewendet (der echte, oben gefundene
+Bug). `komportminimap.h` bewusst unverändert gelassen (dort besteht das
+Problem nachweislich nicht). Vorteil gegenüber dem ersten Versuch: kein
+unnötiges Aufblähen von `komport.h`s Makro-Oberfläche/Präprozessor-Output
+durch den vollen transitiven Include.
+
+**Verifikation (revidierter Fix):** per gezieltem `// TEMP:`-Revert beider
+`Q_MOC_INCLUDE`-Zeilen rot reproduziert (Warnung erscheint exakt wie
+vorher), Fix zurückgesetzt, grün bestätigt (0 Warnungen im kompletten
+Clean-Build) — zusätzlich per Grep in den generierten `moc_komport.cpp`/
+`moc_komportdoc.cpp`-Dateien direkt bestätigt, dass beide jetzt tatsächlich
+`#include "komportview.h"` enthalten. Alle 7 `ctest`-Targets grün,
+Offscreen-Smoke-Test grün, echtes `~/.config/Komport-Qt6/`-Profil
+unangetastet (md5 identisch vor/nach). Gemma4 (auf den ersten Fix-Versuch,
+Commit `03ba91a`): Pass, keine Blocker. Codex (`gpt-5.6-sol`, auf denselben
+Commit): die drei oben aufgeführten Findings, alle bestätigt und in den
+revidierten Fix eingearbeitet.
+
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 
 - `KomportDoc::openDocument/saveDocument` waren im Original bereits reine
@@ -1093,6 +1278,25 @@ angegangen wird: evtl. mit einem kurzen `QTimer::singleShot(0, ...)`
 zwischen `hideText()` und `showText()` experimentieren, oder ganz auf ein
 eigenes, immer neu erzeugtes Tooltip-Widget umsteigen statt den
 `QToolTip`-Singleton zu nutzen.
+
+## 6.2 Restpunkt: Schriftgrößen-Wechsel (Appearance-Tab) ändert die Fensterbreite
+
+Aus einer Codex-Review-Runde zu Meilenstein 5 (siehe Abschnitt 0.9): der
+Appearance-Tab wendet Font-/Farbänderungen bewusst "ohne Layout-Sprung" an
+(TODO.md-Vorgabe) — für Farben stimmt das exakt (reines Neuzeichnen, keine
+Geometrieänderung). Bei einer *Schriftgröße* ist das aber architektonisch
+nicht vollständig erreichbar: `KomportView` hält die Spaltenzahl fest
+(`setMinimumSize()`/`setMaximumSize()` mit identischer Breite, "klassisches
+Fixed-Width-Terminal", schon vor Meilenstein 5 so) — ändert sich die
+Zeichenbreite der gewählten Schrift, ändert sich zwangsläufig die für
+dieselbe Spaltenzahl benötigte Pixelbreite, was Qt's Layout dazu bringt,
+das Fenster/den Splitter entsprechend zu verschieben. Keine Regression von
+Meilenstein 5, sondern eine direkte Konsequenz des schon vorher bestehenden
+Fixed-Width-Designs — bewusst nicht "gefixt": eine echte Lösung bräuchte
+horizontales Scrollen/Clipping statt fester Breite, ein größeres Redesign
+außerhalb des Meilenstein-5-Umfangs. Falls das später relevant wird: die
+Spaltenzahl vom sichtbaren Ausschnitt entkoppeln (horizontale Scrollbar
+oder Clipping), statt die Fensterbreite an die Zeichenbreite zu koppeln.
 
 ## 7. Wunschliste / mögliche nächste Schritte
 

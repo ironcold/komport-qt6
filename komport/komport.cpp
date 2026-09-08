@@ -594,6 +594,7 @@ void KomportApp::saveProfile(const QString &_name)
   config->setValue( QStringLiteral("LineEnding"), strLineEnding );
   macroBar->saveSettings(config); // ends up nested under Profiles/<name>/Macros
   hexView->saveSettings(config);  // ends up nested under Profiles/<name>/HexMonitor
+  view->saveSettings(config);     // ends up nested under Profiles/<name>/Appearance (Milestone 5)
   config->endGroup();
   config->endGroup();
 
@@ -674,6 +675,7 @@ void KomportApp::loadProfile(const QString &_name)
   strLineEnding = config->value( QStringLiteral("LineEnding"), strLineEnding ).toString();
   macroBar->loadSettings(config); // reads Profiles/<name>/Macros
   hexView->loadSettings(config);  // reads Profiles/<name>/HexMonitor
+  view->loadSettings(config);     // reads Profiles/<name>/Appearance, applies immediately (Milestone 5)
   config->endGroup();
   config->endGroup();
 
@@ -1086,6 +1088,8 @@ void KomportApp::slotShowPreferences()
   settingsDialog.ParityComboBox->setCurrentText( strParity );
   settingsDialog.EmulationComboBox->setCurrentText( strEmulation );
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
+  settingsDialog.setSelectedFont( view->font() ); // Milestone 5
+  settingsDialog.setColors( view->cellArray()->defaultForegroundColor(), view->cellArray()->defaultBackgroundColor() );
   if ( settingsDialog.exec() == QDialog::Accepted ) {
       strDevice =  settingsDialog.DeviceComboBox->currentText();
       strBaudRate =  settingsDialog.BaudRateComboBox->currentText() ;
@@ -1128,6 +1132,12 @@ void KomportApp::slotShowPreferences()
       // real application attempt, and its own settingsFailed() (via
       // slotPortError()) is what will have the final say on the flag.
       if ( !serial->isOpen() ) serial->open();
+
+      // Milestone 5: font/colors apply live, independent of the serial
+      // settings above (no port re-open, no mSerialErrorPending interplay -
+      // these never touch the connection at all).
+      view->setTerminalFont( settingsDialog.selectedFont() );
+      view->setDefaultColors( settingsDialog.foregroundColor(), settingsDialog.backgroundColor() );
 
       // Persist the tweak into the active profile, so it isn't silently
       // lost the next time this profile is (re)loaded or the app restarts.
