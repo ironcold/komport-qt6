@@ -143,10 +143,17 @@ hatte dieses Problem nie (keine gleichzeitige ANSI-Escape-Interpretation
 über denselben Bytebereich) — für ein VT100-Terminal ist es aber ein
 echter Korrektheits-Rückschritt.
 
-**Gefixt durch Scope-Reduktion (2026-09-09):** `KomportCharset::CP437`
-deckt jetzt nur noch den unzweideutigen 0x80-0xFF-Bereich ab (Akzent-
-Buchstaben, Box-Drawing/Block-Zeichen); 0x00-0x7F ist bewusst Identität
-(wie "Standard"). Löst den Konflikt an der Wurzel, opfert aber die
+**Gefixt durch Scope-Reduktion (2026-09-09, Formulierung nach zweiter
+Codex-Review-Runde präzisiert):** `KomportCharset::CP437` deckt jetzt nur
+noch den unzweideutigen 0x80-0xFF-Bereich ab (Akzent-Buchstaben, Box-
+Drawing/Block-Zeichen); 0x00-0x7F ist bewusst Identität (wie "Standard").
+**Präzisierung:** das behebt nur die durch CP437 selbst neu eingeführte
+Regression (falsche Glyphen für nicht behandelte Steuercodes) — die
+zugrundeliegende Lücke selbst (VT/FF & Co. werden von
+`slotReceivedChar()` nicht wie LF behandelt) ist eine vorbestehende,
+von "Standard" geerbte Einschränkung dieser Emulation und bleibt
+unverändert bestehen, wird durch diesen Fix nicht gelöst — nur nicht
+mehr durch CP437 zusätzlich sichtbar verschlimmert. Opfert dafür die
 ikonischen Grafikzeichen im unteren Bereich.
 
 **Backlog-Vermerk (Nutzerwunsch: "gut dokumentieren und evtl. im

@@ -86,10 +86,17 @@ public:
 
   /** TX direction: translate one typed/pasted Unicode character into the
    *  raw byte that should actually be sent over the wire for the given
-   *  charset. Falls back to _ch.toLatin1() (today's exact behavior) for
-   *  any character not part of that charset's own distinctive mapping -
-   *  covers plain ASCII input (the vast majority of real typing)
-   *  identically under every charset. */
+   *  charset. Standard falls back to _ch.toLatin1() for the full Latin-1
+   *  range (its whole definition is "byte value == code point"). CP437
+   *  relies solely on its own exhaustive reverse table - no separate
+   *  fallback, since anything not in there genuinely isn't representable
+   *  in CP437. PETSCII falls back to _ch.toLatin1() only for its narrow,
+   *  genuinely ASCII-identical range (see the .cpp for the exact bytes -
+   *  NOT "everything <= 0x7F", a round-2 Codex review finding: several
+   *  bytes in that range mean something else entirely under PETSCII).
+   *  Any character a given charset cannot represent returns '?' rather
+   *  than a silently wrong byte or - QChar::toLatin1()'s own behavior for
+   *  non-Latin-1 input - a silent NUL. */
   static char toWire(Id _charset, QChar _ch);
 
   /** display names for the Settings dialog dropdown, in Id order */

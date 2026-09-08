@@ -56,6 +56,7 @@ private slots:
   void petsciiSubstitutesThreePunctuationBytes();
   void petsciiAsciiCompatibleRangePassesThrough();
   void petsciiGraphicsRangeIsDeliberatelyUnmapped();
+  void petsciiDisplacedAsciiCharactersDoNotSilentlySendWrongByte();
   void unrepresentableCharacterOnCp437ReturnsPlaceholderNotWrongByte();
   void nonLatin1CharacterNeverSilentlyBecomesNul();
   void namesAndIndexRoundTrip();
@@ -173,6 +174,25 @@ void TstCharset::petsciiGraphicsRangeIsDeliberatelyUnmapped()
     QCOMPARE( KomportCharset::toDisplay(KomportCharset::PETSCII, static_cast<unsigned char>(b)),
               QChar(static_cast<uchar>(b)) );
   }
+}
+
+void TstCharset::petsciiDisplacedAsciiCharactersDoNotSilentlySendWrongByte()
+{
+  // Codex review finding (round 2): the first version of toWire()'s
+  // PETSCII fallback treated "anything <= 0x7F" as safe ASCII identity -
+  // wrong, because PETSCII displaces several of those bytes to mean
+  // something else entirely. A literal '\' (U+005C) fell through to byte
+  // 0x5C, which PETSCII actually displays as £ - the exact
+  // silent-wrong-byte bug this function exists to prevent, just via a
+  // different path than the one already fixed. Same for '^'/'_'
+  // (-> ↑/←), and any lowercase letter (0x61-0x7A sits inside PETSCII's
+  // deliberately-unmapped graphics range, not real lowercase text).
+  for ( char c : { '\\', '^', '_', 'a', 'z' } ) {
+    QCOMPARE( KomportCharset::toWire(KomportCharset::PETSCII, QChar(c)), '?' );
+  }
+  // ']' (0x5D) sits directly between the displaced bytes and is
+  // genuinely ASCII-identical under PETSCII - must still work.
+  QCOMPARE( KomportCharset::toWire(KomportCharset::PETSCII, QChar(']')), ']' );
 }
 
 void TstCharset::unrepresentableCharacterOnCp437ReturnsPlaceholderNotWrongByte()

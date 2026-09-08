@@ -197,15 +197,29 @@ char KomportCharset::toWire(Id _charset, QChar _ch)
       {
         // Unlike CP437, petsciiForward()/petsciiReverse() deliberately
         // only tabulate the *distinctive* substitutions (see its own
-        // comment) - the ASCII-compatible range (letters/digits/most
-        // punctuation) is intentionally absent from the table and must
-        // still fall through to the Latin-1 byte value, which is exactly
-        // correct for that range (PETSCII's unshifted mode *is*
-        // ASCII-identical there).
+        // comment) - the genuinely ASCII-identical range (digits, most
+        // punctuation, '@', uppercase letters, '[' and ']') is
+        // intentionally absent from the table and must still fall
+        // through to the Latin-1 byte value.
+        //
+        // Codex review finding (round 2): the first version of this
+        // fallback used "anything <= 0x7F" as its identity range, which
+        // was wrong - it let a literal '\' (U+005C) fall through to byte
+        // 0x5C, which PETSCII actually displays as £ (the exact
+        // silent-wrong-byte class this function exists to prevent); same
+        // problem for '^'/'_' (-> ↑/←), and for any lowercase letter
+        // (0x61-0x7A sits inside PETSCII's unmapped graphics range, not
+        // real lowercase text). The safe identity range is exactly
+        // 0x20-0x5B plus 0x5D - everything else in 0x00-0x7F either has
+        // its own distinctive substitution above, or falls into the
+        // deliberately-unmapped graphics range and must not be sent as
+        // if it meant something else.
         const auto &rev = petsciiReverse();
         auto it = rev.constFind( _ch.unicode() );
         if ( it != rev.constEnd() ) return static_cast<char>( it.value() );
-        return ( _ch.unicode() <= 0x7F ) ? _ch.toLatin1() : '?';
+        const ushort u = _ch.unicode();
+        const bool asciiIdentityRange = ( u >= 0x20 && u <= 0x5B ) || u == 0x5D;
+        return asciiIdentityRange ? _ch.toLatin1() : '?';
       }
     case Standard:
     default:
@@ -217,11 +231,12 @@ char KomportCharset::toWire(Id _charset, QChar _ch)
   }
 }
 
-QStringList KomportCharset::names()
-{
-  return { QStringLiteral("Standard"), QStringLiteral("IBM CP437"), QStringLiteral("PETSCII") };
-}
-
+// Codex review finding (round 2): names()/fromIndex()/toIndex() used to be
+// three independent implementations that merely had to *agree* with
+// displayEntries() by convention, with nothing enforcing that - a real
+// maintenance hazard even though nothing had actually drifted yet. All
+// three now derive directly from displayEntries(), the one place that
+// pairs an Id with its display name, so they cannot drift from it.
 QVector<QPair<KomportCharset::Id, QString>> KomportCharset::displayEntries()
 {
   return {
@@ -231,18 +246,27 @@ QVector<QPair<KomportCharset::Id, QString>> KomportCharset::displayEntries()
   };
 }
 
+QStringList KomportCharset::names()
+{
+  QStringList result;
+  for ( const auto &entry : displayEntries() ) result << entry.second;
+  return result;
+}
+
 KomportCharset::Id KomportCharset::fromIndex(int _index)
 {
-  switch ( _index ) {
-    case CP437:   return CP437;
-    case PETSCII: return PETSCII;
-    default:      return Standard;
-  }
+  const auto entries = displayEntries();
+  if ( _index >= 0 && _index < entries.size() ) return entries.at(_index).first;
+  return Standard;
 }
 
 int KomportCharset::toIndex(Id _charset)
 {
-  return static_cast<int>( _charset );
+  const auto entries = displayEntries();
+  for ( int i = 0; i < entries.size(); ++i ) {
+    if ( entries.at(i).first == _charset ) return i;
+  }
+  return 0; // Standard's own index - see displayEntries()
 }
 
 QString KomportCharset::settingsKey(Id _charset)
