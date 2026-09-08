@@ -16,6 +16,7 @@
  ***************************************************************************/
 
 #include "settingsdialog.h"
+#include "komportcharset.h"
 
 #include <QTabWidget>
 #include <QGroupBox>
@@ -178,10 +179,21 @@ QWidget* SettingsDialog::createTerminalTab()
     auto *emulationGroup = new QGroupBox( tr("Emulation"), page );
     EmulationComboBox = new QComboBox( emulationGroup );
     EmulationComboBox->addItem( QStringLiteral("VT102") );
+    // Milestone 7: retro/industrial byte-level character-set translation -
+    // see KomportCharset for the mapping tables. Index must match
+    // KomportCharset::toIndex()/fromIndex().
+    auto *charsetLabel = new QLabel( tr("Character Set:"), emulationGroup );
+    CharsetComboBox = new QComboBox( emulationGroup );
+    CharsetComboBox->addItems( KomportCharset::names() );
+    CharsetComboBox->setToolTip( tr("Translate the raw byte stream between the serial\n"
+                                     "device and the terminal display - for retro/industrial\n"
+                                     "gear that doesn't speak plain ASCII/Latin-1.") );
     VisualBellCheckBox = new QCheckBox( tr("Visual Bell"), emulationGroup );
     LocalEchoCheckBox = new QCheckBox( tr("Local Echo"), emulationGroup );
     auto *emulationLayout = new QVBoxLayout( emulationGroup );
     emulationLayout->addWidget( EmulationComboBox );
+    emulationLayout->addWidget( charsetLabel );
+    emulationLayout->addWidget( CharsetComboBox );
     emulationLayout->addWidget( VisualBellCheckBox );
     emulationLayout->addWidget( LocalEchoCheckBox );
     emulationLayout->addStretch( 1 );

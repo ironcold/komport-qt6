@@ -727,7 +727,12 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
         // targets.
         const QString text = _e->text();
         if ( !text.isEmpty() ) {
-          char ch = text.at(0).toLatin1();
+          // Milestone 7: reverse charset translation - see KomportCharset::
+          // toWire()'s own comment for the ASCII-fallback rationale. The
+          // emulation's own generated escape sequences above (cursor
+          // keys, Insert/Delete/Home/...) bypass this entirely, exactly
+          // like the RX side bypasses translation for control codes.
+          char ch = KomportCharset::toWire(mCharset, text.at(0));
           s->putChar(ch);
         }
         break;
@@ -1540,7 +1545,14 @@ void KomportEmulation::slotReceivedChar(char _ch)
         }
         cellArray()->updateRow(pos.y());
       }
-      cellArray()->drawChar(_ch,cellArray()->cursor());
+      // Milestone 7: retro/industrial charset translation. This is the
+      // *only* point in slotReceivedChar() a printable byte reaches -
+      // every control code the emulation itself still needs (BEL/BS/HT/
+      // LF/CR above, ESC/CSI-sequence bytes at the top of this function)
+      // is dispatched before this default: branch and never passes
+      // through KomportCharset::toDisplay(), so escape-sequence parsing
+      // is completely unaffected by whatever charset is selected.
+      cellArray()->drawChar( KomportCharset::toDisplay(mCharset, static_cast<unsigned char>(_ch)), cellArray()->cursor() );
       advanceCursorWithWrap();
       break;
   }
@@ -1569,6 +1581,6 @@ void KomportEmulation::advanceCursorWithWrap()
 void KomportEmulation::slotSimKeyPressed(QChar _c){
    KomportSerial* s = serial();
    if ( s->isOpen() ) {
-      s->putChar(_c.toLatin1());
+      s->putChar( KomportCharset::toWire(mCharset, _c) ); // Milestone 7
    }
 }

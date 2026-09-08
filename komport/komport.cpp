@@ -543,6 +543,7 @@ void KomportApp::initProfiles()
     strEmulation = config->value( QStringLiteral("Emulation"), QStringLiteral("VT102") ).toString();
     strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") ).toString();
     strLineEnding = config->value( QStringLiteral("LineEnding"), QStringLiteral("CR") ).toString();
+    strCharset = config->value( QStringLiteral("Charset"), QStringLiteral("Standard") ).toString();
     config->endGroup();
     macroBar->loadSettings(config); // reads the old flat top-level "Macros" group, if any
 
@@ -596,6 +597,7 @@ void KomportApp::saveProfile(const QString &_name)
   config->setValue( QStringLiteral("Emulation"), strEmulation );
   config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
   config->setValue( QStringLiteral("LineEnding"), strLineEnding );
+  config->setValue( QStringLiteral("Charset"), strCharset );
   macroBar->saveSettings(config); // ends up nested under Profiles/<name>/Macros
   hexView->saveSettings(config);  // ends up nested under Profiles/<name>/HexMonitor
   view->saveSettings(config);     // ends up nested under Profiles/<name>/Appearance (Milestone 5)
@@ -677,6 +679,7 @@ void KomportApp::loadProfile(const QString &_name)
   strEmulation = config->value( QStringLiteral("Emulation"), strEmulation ).toString();
   strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), strScrollBuffer ).toString();
   strLineEnding = config->value( QStringLiteral("LineEnding"), strLineEnding ).toString();
+  strCharset = config->value( QStringLiteral("Charset"), strCharset ).toString();
   macroBar->loadSettings(config); // reads Profiles/<name>/Macros
   hexView->loadSettings(config);  // reads Profiles/<name>/HexMonitor
   view->loadSettings(config);     // reads Profiles/<name>/Appearance, applies immediately (Milestone 5)
@@ -689,6 +692,11 @@ void KomportApp::loadProfile(const QString &_name)
   mSerialErrorPending = false; // see slotSerialSettingsFailed()
   applyConnectionSettings();
   lineEndingCombo->setCurrentText( strLineEnding ); // triggers slotLineEndingChanged() if it actually changed
+  // Milestone 7: applied directly (not through a signal-driven toolbar
+  // widget like lineEndingCombo above) so it's unconditional - no risk of
+  // silently no-op'ing just because the new profile happens to already
+  // match whatever the previous one had selected.
+  view->mEmulation->setCharset( KomportCharset::fromSettingsKey(strCharset) );
 
   refreshProfileCombo( _name );
   // Don't stomp on a serial error applyConnectionSettings() may have just
@@ -1092,6 +1100,7 @@ void KomportApp::slotShowPreferences()
   settingsDialog.ParityComboBox->setCurrentText( strParity );
   settingsDialog.EmulationComboBox->setCurrentText( strEmulation );
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
+  settingsDialog.CharsetComboBox->setCurrentIndex( KomportCharset::toIndex( view->mEmulation->charset() ) ); // Milestone 7
   settingsDialog.setSelectedFont( view->font() ); // Milestone 5
   settingsDialog.setColors( view->cellArray()->defaultForegroundColor(), view->cellArray()->defaultBackgroundColor() );
   if ( settingsDialog.exec() == QDialog::Accepted ) {
@@ -1106,6 +1115,12 @@ void KomportApp::slotShowPreferences()
       strParity =  settingsDialog.ParityComboBox->currentText() ;
       strEmulation = settingsDialog.EmulationComboBox->currentText();
       strScrollBuffer = QString::number( settingsDialog.ScrollBufferSpinBox->value() );
+      // Milestone 7: font/colors below already apply live and independent
+      // of the serial settings, same reasoning applies here - no port
+      // re-open, no mSerialErrorPending interplay.
+      const KomportCharset::Id charset = KomportCharset::fromIndex( settingsDialog.CharsetComboBox->currentIndex() );
+      strCharset = KomportCharset::settingsKey( charset );
+      view->mEmulation->setCharset( charset );
 
       view->setScrollBuffer( strScrollBuffer.toInt() );
       KomportSerial* serial = view->getSerial();

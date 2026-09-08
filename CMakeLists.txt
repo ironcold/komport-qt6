@@ -46,6 +46,8 @@ add_library(komport_core OBJECT
   komport/komportserial.h
   komport/komportemulation.cpp
   komport/komportemulation.h
+  komport/komportcharset.cpp
+  komport/komportcharset.h
   komport/komporttransfer.cpp
   komport/komporttransfer.h
   komport/komportupload.cpp
