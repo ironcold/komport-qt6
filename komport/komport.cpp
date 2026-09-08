@@ -174,10 +174,14 @@ void KomportApp::initActions()
   connect( viewStatusBar, &QAction::triggered, this, &KomportApp::slotViewStatusBar );
   viewStatusBar->setStatusTip( tr("Show/hide the status bar") );
 
-  showPreferences = new QAction( QIcon::fromTheme(QStringLiteral("preferences-system")), tr("&Connection Settings..."), this );
+  // Renamed from "&Connection Settings..." (2026, user report: Appearance
+  // tab, added in Milestone 5, wasn't discoverable under that label since
+  // it no longer only covers the connection - the dialog now has Device/
+  // Terminal/Appearance tabs) - see TODO.md section 0.9 addendum.
+  showPreferences = new QAction( QIcon::fromTheme(QStringLiteral("preferences-system")), tr("&Settings..."), this );
   showPreferences->setShortcut( QKeySequence::Preferences );
   connect( showPreferences, &QAction::triggered, this, &KomportApp::slotShowPreferences );
-  showPreferences->setStatusTip( tr("Connection settings") );
+  showPreferences->setStatusTip( tr("Connection, terminal and appearance settings") );
 
   viewHexMonitor = new QAction( QIcon::fromTheme(QStringLiteral("format-text-code")), tr("&Hex Monitor"), this );
   viewHexMonitor->setCheckable( true );
