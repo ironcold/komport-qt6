@@ -29,27 +29,62 @@
 #include "komportemulation.h"
 #include "komportcellarray.h"
 #include "komportserial.h"
+#include "komport.h"
+#include "komportview.h"
+#include "settingsdialog.h"
 
 #include <QTest>
+#include <QPointer>
+#include <QSettings>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QComboBox>
 
 class TstCharset : public QObject
 {
   Q_OBJECT
 private slots:
+  void initTestCase();
+  void cleanupTestCase();
+
   void standardCharsetIsIdentity();
   void cp437HighRangeMapsToBoxDrawingAndAccents();
   void cp437LowRangeMapsToControlPictureGlyphs();
   void cp437RoundTripsDistinctiveGlyphsBackToWire();
+  void cp437SpaceDoesNotCollideWithNul();
   void petsciiSubstitutesThreePunctuationBytes();
   void petsciiAsciiCompatibleRangePassesThrough();
   void petsciiGraphicsRangeIsDeliberatelyUnmapped();
-  void unmappedCharacterFallsBackToLatin1OnWire();
+  void unrepresentableCharacterOnCp437ReturnsPlaceholderNotWrongByte();
+  void nonLatin1CharacterNeverSilentlyBecomesNul();
   void namesAndIndexRoundTrip();
   void settingsKeyRoundTrips();
   void emulationTranslatesReceivedBytesThroughSelectedCharset();
   void emulationControlCodesUnaffectedByNonStandardCharset();
   void emulationDefaultsToStandardCharset();
+  void settingsDialogComboBoxStoresIdAsUserRoleNotRowPosition();
+  void legacyProfileWithoutCharsetKeyFallsBackToStandard();
+
+private:
+  QString mTestConfigFile;
 };
+
+void TstCharset::initTestCase()
+{
+  // Same reasoning as tst_appearance.cpp/tst_windowlifetime.cpp: keep
+  // this off the real user's "Komport-Qt6" profiles entirely.
+  QCoreApplication::setOrganizationName( QStringLiteral("Komport-Qt6-Test-Charset") );
+  QCoreApplication::setApplicationName( QStringLiteral("Komport-Qt6-Test-Charset") );
+  mTestConfigFile = QSettings().fileName();
+}
+
+void TstCharset::cleanupTestCase()
+{
+  const QString dirPath = QFileInfo(mTestConfigFile).absolutePath();
+  QFile::remove(mTestConfigFile);
+  QDir().rmdir(dirPath);
+}
 
 void TstCharset::standardCharsetIsIdentity()
 {
@@ -75,21 +110,38 @@ void TstCharset::cp437HighRangeMapsToBoxDrawingAndAccents()
 
 void TstCharset::cp437LowRangeMapsToControlPictureGlyphs()
 {
-  // CP437's famous "the low control range doubles as printable glyphs"
-  // feature - card suits, smileys, etc. These specific byte values (03,
-  // 04, 06) are NOT among the six the emulation itself still treats as
-  // real control codes (BEL 07/BS 08/HT 09/LF 0A/CR 0D/ESC 1B), so they
-  // ARE reachable through the real RX path - see the integration test
-  // below.
-  QCOMPARE( KomportCharset::toDisplay(KomportCharset::CP437, 0x01), QChar(0x263A) ); // ☺
-  QCOMPARE( KomportCharset::toDisplay(KomportCharset::CP437, 0x03), QChar(0x2665) ); // ♥
-  QCOMPARE( KomportCharset::toDisplay(KomportCharset::CP437, 0x06), QChar(0x2660) ); // ♠
+  // Codex review finding, scope correction: the first version of this
+  // table mapped 0x00-0x1F/0x7F to CP437's separate "control picture"
+  // glyphs (☺♥♦♣♠ etc.), which conflicted with several real VT100 control
+  // codes this emulation doesn't special-case (e.g. VT/FF at 0x0B/0x0C,
+  // which many real hosts use like LF, would have drawn ♂/♀ and merely
+  // advanced the cursor instead of doing a line feed). 0x00-0x7F is now
+  // deliberately identity under CP437 too (same as Standard) - this test
+  // now asserts *that*, not the old glyph mapping, so a regression back
+  // to the control-picture table would be caught.
+  for ( int b : { 0x00, 0x01, 0x03, 0x06, 0x0B, 0x0C, 0x7F } ) {
+    QCOMPARE( KomportCharset::toDisplay(KomportCharset::CP437, static_cast<unsigned char>(b)),
+              QChar(static_cast<uchar>(b)) );
+  }
 }
 
 void TstCharset::cp437RoundTripsDistinctiveGlyphsBackToWire()
 {
   QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, QChar(0x2588)), static_cast<char>(0xDB) );
-  QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, QChar(0x263A)), static_cast<char>(0x01) );
+  QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, QChar(0x00FC)), static_cast<char>(0x81) ); // ü
+}
+
+void TstCharset::cp437SpaceDoesNotCollideWithNul()
+{
+  // Codex review finding: the first version's table mapped *both* 0x00
+  // and 0x20 to U+0020 (space) for display-safety reasons (see the old
+  // comment, since removed) - cp437Reverse()'s "keep the first insert"
+  // tie-break then made 0x00 win for U+0020, so every typed space was
+  // silently sent as NUL instead. The 0x00-0x7F scope correction above
+  // removes the duplicate at its root (0x00 now maps to U+0000, not
+  // U+0020), but this test pins the specific, practically-critical
+  // symptom directly so it can never quietly come back.
+  QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, QChar(' ')), ' ' );
 }
 
 void TstCharset::petsciiSubstitutesThreePunctuationBytes()
@@ -123,15 +175,32 @@ void TstCharset::petsciiGraphicsRangeIsDeliberatelyUnmapped()
   }
 }
 
-void TstCharset::unmappedCharacterFallsBackToLatin1OnWire()
+void TstCharset::unrepresentableCharacterOnCp437ReturnsPlaceholderNotWrongByte()
 {
-  // U+00FE (þ, thorn) is a real Latin-1 code point but not part of
-  // CP437's set of covered code points - toWire() must fall back to
-  // .toLatin1() (today's pre-Milestone-7 behavior) rather than e.g.
-  // silently sending a wrong/default byte.
+  // Codex review finding, corrected: the first version fell back to
+  // .toLatin1() here, silently sending byte 0xFE for þ (U+00FE, a real
+  // Latin-1 code point but NOT part of what CP437 can display) - 0xFE
+  // happens to display as an entirely different glyph (■) under CP437,
+  // silent corruption rather than a reasonable fallback. CP437's reverse
+  // table is exhaustive of everything CP437 can actually represent, so
+  // "not found in it" now means "genuinely not representable", and
+  // toWire() returns '?' instead of guessing a misleading byte.
   const QChar thorn(0x00FE);
-  QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, thorn), thorn.toLatin1() );
-  QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, thorn), static_cast<char>(0xFE) );
+  QCOMPARE( KomportCharset::toWire(KomportCharset::CP437, thorn), '?' );
+}
+
+void TstCharset::nonLatin1CharacterNeverSilentlyBecomesNul()
+{
+  // Codex review finding: QChar::toLatin1() returns 0 (NUL) for any
+  // character outside the Latin-1 range, per Qt's own documented
+  // behavior - indistinguishable from someone deliberately sending a real
+  // NUL, and far more disruptive to real serial gear than a visible
+  // placeholder. U+0100 (Ā) is well outside Latin-1 under every charset
+  // implemented here.
+  const QChar farOutside(0x0100);
+  for ( auto id : { KomportCharset::Standard, KomportCharset::CP437, KomportCharset::PETSCII } ) {
+    QCOMPARE( KomportCharset::toWire(id, farOutside), '?' );
+  }
 }
 
 void TstCharset::namesAndIndexRoundTrip()
@@ -198,6 +267,99 @@ void TstCharset::emulationDefaultsToStandardCharset()
   KomportCellArray cellArray;
   KomportEmulation emu(&serial, &cellArray);
   QCOMPARE( emu.charset(), KomportCharset::Standard );
+}
+
+void TstCharset::settingsDialogComboBoxStoresIdAsUserRoleNotRowPosition()
+{
+  // Codex review finding: CharsetComboBox used to be populated purely
+  // from KomportCharset::names() and read back via
+  // fromIndex(currentIndex()) - correct only as long as row position
+  // happened to match Id's numeric value, with nothing enforcing that.
+  // It's now populated from displayEntries() with each item's Id stored
+  // explicitly as Qt::UserRole data - this test checks that data
+  // directly, independent of row order, and that findData()/currentData()
+  // (as komport.cpp now uses) actually round-trip through it.
+  SettingsDialog dialog;
+  QVERIFY( dialog.CharsetComboBox != nullptr );
+
+  const auto entries = KomportCharset::displayEntries();
+  QCOMPARE( dialog.CharsetComboBox->count(), entries.size() );
+  for ( int i = 0; i < entries.size(); ++i ) {
+    QCOMPARE( dialog.CharsetComboBox->itemData(i).toInt(), static_cast<int>(entries.at(i).first) );
+    QCOMPARE( dialog.CharsetComboBox->itemText(i), entries.at(i).second );
+  }
+
+  const int idx = dialog.CharsetComboBox->findData( static_cast<int>(KomportCharset::PETSCII) );
+  QVERIFY( idx >= 0 );
+  dialog.CharsetComboBox->setCurrentIndex(idx);
+  QCOMPARE( static_cast<KomportCharset::Id>(dialog.CharsetComboBox->currentData().toInt()), KomportCharset::PETSCII );
+}
+
+void TstCharset::legacyProfileWithoutCharsetKeyFallsBackToStandard()
+{
+  // Codex review finding (same load-order-leakage class Milestone 5 fixed
+  // for Appearance settings): a profile predating Milestone 7 has no
+  // "Charset" key under Profiles/<name> at all. loadProfile() used to
+  // fall back to whatever strCharset *currently* held - so loading a
+  // CP437 profile first, then this legacy one, silently left CP437
+  // active instead of resetting to Standard.
+  //
+  // An earlier version of this test set the CP437 "marker" directly on
+  // view->mEmulation instead of actually loading a real CP437 profile
+  // first - that never touches KomportApp's own strCharset member (only
+  // loadProfile() does), so it couldn't poison the fallback the bug
+  // actually relies on, and the test stayed green even against the
+  // unfixed code. Loading a real profile first, like below, is what
+  // actually reproduces it.
+  {
+    QSettings settings;
+    settings.beginGroup( QStringLiteral("Profiles/Cp437Profile") );
+    settings.setValue( QStringLiteral("Device"), QStringLiteral("/dev/null") );
+    settings.setValue( QStringLiteral("BaudRate"), QStringLiteral("9600") );
+    settings.setValue( QStringLiteral("DataBits"), QStringLiteral("8") );
+    settings.setValue( QStringLiteral("StartBits"), QStringLiteral("1") );
+    settings.setValue( QStringLiteral("StopBits"), QStringLiteral("1") );
+    settings.setValue( QStringLiteral("Parity"), QStringLiteral("NONE") );
+    settings.setValue( QStringLiteral("FlowControl"), QStringLiteral("NONE") );
+    settings.setValue( QStringLiteral("RXQueue"), QStringLiteral("1024") );
+    settings.setValue( QStringLiteral("FlushRate"), QStringLiteral("256") );
+    settings.setValue( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") );
+    settings.setValue( QStringLiteral("LineEnding"), QStringLiteral("CR") );
+    settings.setValue( QStringLiteral("Charset"), KomportCharset::settingsKey(KomportCharset::CP437) );
+    settings.endGroup();
+
+    settings.beginGroup( QStringLiteral("Profiles/LegacyNoCharset") );
+    settings.setValue( QStringLiteral("Device"), QStringLiteral("/dev/null") );
+    settings.setValue( QStringLiteral("BaudRate"), QStringLiteral("9600") );
+    settings.setValue( QStringLiteral("DataBits"), QStringLiteral("8") );
+    settings.setValue( QStringLiteral("StartBits"), QStringLiteral("1") );
+    settings.setValue( QStringLiteral("StopBits"), QStringLiteral("1") );
+    settings.setValue( QStringLiteral("Parity"), QStringLiteral("NONE") );
+    settings.setValue( QStringLiteral("FlowControl"), QStringLiteral("NONE") );
+    settings.setValue( QStringLiteral("RXQueue"), QStringLiteral("1024") );
+    settings.setValue( QStringLiteral("FlushRate"), QStringLiteral("256") );
+    settings.setValue( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") );
+    settings.setValue( QStringLiteral("LineEnding"), QStringLiteral("CR") );
+    // deliberately no "Charset" key at all
+    settings.endGroup();
+  }
+
+  KomportApp *win = new KomportApp();
+  win->show();
+  QPointer<KomportApp> guard(win);
+
+  KomportView *view = win->findChild<KomportView *>();
+  QVERIFY( view != nullptr );
+
+  win->loadProfile( QStringLiteral("Cp437Profile") );
+  QCOMPARE( view->mEmulation->charset(), KomportCharset::CP437 ); // sanity check on the setup itself
+
+  win->loadProfile( QStringLiteral("LegacyNoCharset") ); // must not crash, must reset to Standard
+
+  QCOMPARE( view->mEmulation->charset(), KomportCharset::Standard );
+
+  win->close();
+  QTRY_VERIFY( guard.isNull() );
 }
 
 QTEST_MAIN(TstCharset)

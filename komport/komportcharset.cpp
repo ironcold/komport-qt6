@@ -21,29 +21,36 @@
 
 namespace {
 
-/** IBM PC / MS-DOS code page 437 ("OEM-US"), the full 256-entry table.
- *  This is one of the most stable, widely-referenced character encodings
- *  in computing history (the original IBM PC ROM font) - byte value is
- *  the array index, value is the Unicode code point. 0x00-0x1F and 0x7F
- *  include CP437's famous "control picture" glyphs (smileys, card suits,
- *  arrows, ...) - at runtime, KomportEmulation::slotReceivedChar() only
- *  ever reaches this table for the byte values it doesn't already handle
- *  as actual control codes itself (BEL 0x07, BS 0x08, HT 0x09, LF 0x0A,
- *  CR 0x0D, ESC 0x1B all stay control codes exactly as under "Standard"
- *  regardless of charset - see the header comment) - the table still
- *  carries "authentic" CP437 entries for those six positions rather than
- *  leaving gaps, purely so it reads as a complete, textbook-accurate
- *  CP437 table and is directly testable byte-for-byte, even though six
- *  of its 256 entries are provably unreachable through the real RX path.
- *  0x00 maps to a plain space rather than CP437's traditional "blank"
- *  glyph for NUL, to avoid putting an embedded U+0000 into a QString. */
+/** IBM PC / MS-DOS code page 437 ("OEM-US") - byte value is the array
+ *  index, value is the Unicode code point.
+ *
+ *  Scope correction after a Codex adversarial review of the first version
+ *  (which mapped 0x00-0x1F/0x7F to CP437's separate, well-known "control
+ *  picture" glyphs - smileys, card suits, arrows, the IBM PC's video-
+ *  memory character generator's actual behavior for those byte values):
+ *  that range genuinely conflicts with this emulation's own VT100/VT102
+ *  control-code interpretation for the *same* byte values it doesn't
+ *  already special-case (KomportEmulation::slotReceivedChar() only
+ *  intercepts BEL/BS/HT/LF/CR/ESC - every other C0 control byte, plus
+ *  DEL, fell through into this table and got drawn as a CP437 glyph
+ *  instead of being treated as a control code, e.g. VT/FF (0x0B/0x0C,
+ *  which many real hosts use like LF) would draw ♂/♀ and only advance the
+ *  cursor by one column instead of doing a line feed). A native DOS text
+ *  console never had this conflict (it wasn't simultaneously interpreting
+ *  ANSI escape codes over the very same control-byte range), but this
+ *  emulation is a VT100/VT102 interpreter first - so 0x00-0x7F is
+ *  deliberately identity here (matches "Standard" exactly, no glyphs),
+ *  and only the unambiguous 0x80-0xFF extended range is real CP437.
+ *  Tracked as a known, documented scope limitation in TODO.md - restoring
+ *  the low-range glyphs would need either a dedicated "raw graphics mode"
+ *  toggle or per-control-code special-casing, out of scope for this pass. */
 const char16_t kCp437[256] = {
   // 0x00-0x0F
-  0x0020,0x263A,0x263B,0x2665,0x2666,0x2663,0x2660,0x2022,
-  0x25D8,0x25CB,0x25D9,0x2642,0x2640,0x266A,0x266B,0x263C,
+  0x0000,0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007,
+  0x0008,0x0009,0x000A,0x000B,0x000C,0x000D,0x000E,0x000F,
   // 0x10-0x1F
-  0x25BA,0x25C4,0x2195,0x203C,0x00B6,0x00A7,0x25AC,0x21A8,
-  0x2191,0x2193,0x2192,0x2190,0x221F,0x2194,0x25B2,0x25BC,
+  0x0010,0x0011,0x0012,0x0013,0x0014,0x0015,0x0016,0x0017,
+  0x0018,0x0019,0x001A,0x001B,0x001C,0x001D,0x001E,0x001F,
   // 0x20-0x2F
   0x0020,0x0021,0x0022,0x0023,0x0024,0x0025,0x0026,0x0027,
   0x0028,0x0029,0x002A,0x002B,0x002C,0x002D,0x002E,0x002F,
@@ -61,7 +68,7 @@ const char16_t kCp437[256] = {
   0x0068,0x0069,0x006A,0x006B,0x006C,0x006D,0x006E,0x006F,
   // 0x70-0x7F
   0x0070,0x0071,0x0072,0x0073,0x0074,0x0075,0x0076,0x0077,
-  0x0078,0x0079,0x007A,0x007B,0x007C,0x007D,0x007E,0x2302,
+  0x0078,0x0079,0x007A,0x007B,0x007C,0x007D,0x007E,0x007F,
   // 0x80-0x8F
   0x00C7,0x00FC,0x00E9,0x00E2,0x00E4,0x00E0,0x00E5,0x00E7,
   0x00EA,0x00EB,0x00E8,0x00EF,0x00EE,0x00EC,0x00C4,0x00C5,
@@ -119,12 +126,17 @@ const QMap<char16_t, unsigned char> &petsciiReverse()
   return table;
 }
 
-/** reverse of kCp437, built once - Unicode char -> CP437 byte. Several
- *  CP437 code points repeat (e.g. duplicate box-drawing corners aren't
- *  actually duplicated here, but 0x20 and 0x00 both map to space) - a
- *  QMap insert keeps whichever byte was inserted *first*; since the loop
- *  runs in ascending byte order, that's always the lowest/first-defined
- *  byte for a given code point, a stable and reasonable tie-break. */
+/** reverse of kCp437, built once - Unicode char -> CP437 byte. With the
+ *  0x00-0x7F identity range (see kCp437's own comment), every code point
+ *  in this table is unique - no duplicate/tie-break concern - but the
+ *  "keep the first insert" rule below is still a deliberate, defensive
+ *  choice in case that ever stops being true (e.g. a future extension of
+ *  the 0x80-0xFF range). Codex review finding (first version of this
+ *  table): before the 0x00-0x7F scope correction above, 0x00 and 0x20
+ *  both mapped to space, and this "keep first" rule silently made *every*
+ *  typed space translate to NUL on the wire (0x00 sorts first) - fixed at
+ *  the root by removing the duplicate rather than special-casing the
+ *  tie-break, but documented here so it isn't reintroduced by accident. */
 const QMap<char16_t, unsigned char> &cp437Reverse()
 {
   static const QMap<char16_t, unsigned char> table = [] {
@@ -160,31 +172,63 @@ QChar KomportCharset::toDisplay(Id _charset, unsigned char _rawByte)
 
 char KomportCharset::toWire(Id _charset, QChar _ch)
 {
+  // Codex review finding: falling back to _ch.toLatin1() unconditionally
+  // for *any* charset was silently wrong in two ways. (1) For CP437, its
+  // own reverse table is exhaustive of everything CP437 can actually
+  // display - if a character isn't in there, CP437 genuinely cannot
+  // represent it, and sending the character's raw Latin-1 byte value
+  // anyway sent a real but *different* CP437 glyph (e.g. þ, U+00FE, isn't
+  // representable in CP437 at all, but byte 0xFE happens to display as ■
+  // under CP437 - silent corruption, not a reasonable fallback). (2) For
+  // any charset, a character outside Latin-1 entirely makes
+  // QChar::toLatin1() return 0 (NUL) per Qt's own documented behavior -
+  // indistinguishable from a deliberately-typed real NUL character, and a
+  // NUL byte sent to real serial gear is far more likely to be
+  // disruptive than a visibly-wrong placeholder. '?' now marks "this
+  // charset cannot represent this character" explicitly instead.
   switch ( _charset ) {
     case CP437:
       {
         const auto &rev = cp437Reverse();
         auto it = rev.constFind( _ch.unicode() );
-        if ( it != rev.constEnd() ) return static_cast<char>( it.value() );
-        break;
+        return ( it != rev.constEnd() ) ? static_cast<char>( it.value() ) : '?';
       }
     case PETSCII:
       {
+        // Unlike CP437, petsciiForward()/petsciiReverse() deliberately
+        // only tabulate the *distinctive* substitutions (see its own
+        // comment) - the ASCII-compatible range (letters/digits/most
+        // punctuation) is intentionally absent from the table and must
+        // still fall through to the Latin-1 byte value, which is exactly
+        // correct for that range (PETSCII's unshifted mode *is*
+        // ASCII-identical there).
         const auto &rev = petsciiReverse();
         auto it = rev.constFind( _ch.unicode() );
         if ( it != rev.constEnd() ) return static_cast<char>( it.value() );
-        break;
+        return ( _ch.unicode() <= 0x7F ) ? _ch.toLatin1() : '?';
       }
     case Standard:
     default:
-      break;
+      // Standard's whole definition is "byte value == code point", so
+      // toLatin1() is correct here for the full Latin-1 range, not just a
+      // fallback - preserves the exact pre-Milestone-7 behavior. Only
+      // guard against the NUL-for-non-Latin1-input ambiguity above.
+      return ( _ch.unicode() <= 0xFF ) ? _ch.toLatin1() : '?';
   }
-  return _ch.toLatin1(); // fallback: today's exact pre-Milestone-7 behavior
 }
 
 QStringList KomportCharset::names()
 {
   return { QStringLiteral("Standard"), QStringLiteral("IBM CP437"), QStringLiteral("PETSCII") };
+}
+
+QVector<QPair<KomportCharset::Id, QString>> KomportCharset::displayEntries()
+{
+  return {
+    { Standard, QStringLiteral("Standard") },
+    { CP437,    QStringLiteral("IBM CP437") },
+    { PETSCII,  QStringLiteral("PETSCII") },
+  };
 }
 
 KomportCharset::Id KomportCharset::fromIndex(int _index)

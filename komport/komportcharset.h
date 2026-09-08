@@ -19,8 +19,10 @@
 #define KOMPORTCHARSET_H
 
 #include <QChar>
+#include <QPair>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 /** Milestone 7: byte-level character-set translation between the raw
  *  serial stream and the terminal emulation, for retro/industrial gear
@@ -49,10 +51,22 @@ public:
   enum Id {
     Standard = 0, /**< no translation - byte value == Unicode code point,
                     *  exactly today's pre-Milestone-7 behavior (Latin-1) */
-    CP437,        /**< IBM PC / MS-DOS code page 437 ("OEM-US") - full
-                    *  0x00-0xFF table, including the well-known low-range
-                    *  "control picture" glyphs (☺♥♦♣♠ etc.) at the byte
-                    *  values not already claimed by BEL/BS/HT/LF/CR/ESC */
+    CP437,        /**< IBM PC / MS-DOS code page 437 ("OEM-US") - the
+                    *  0x80-0xFF extended range only (accented Latin
+                    *  letters, box-drawing/block glyphs). 0x00-0x7F is
+                    *  deliberately identity (same as Standard), NOT
+                    *  CP437's well-known low-range "control picture"
+                    *  glyphs (☺♥♦♣♠ etc.) - an earlier version mapped
+                    *  those too, but a Codex adversarial review found
+                    *  that conflicts with several real VT100 control
+                    *  codes this emulation doesn't special-case (e.g.
+                    *  VT/FF at 0x0B/0x0C, which many real hosts use like
+                    *  LF, drew a glyph and merely advanced the cursor
+                    *  instead of doing a line feed). See .cpp for the
+                    *  full rationale; TODO.md tracks restoring them
+                    *  (behind an explicit "raw graphics mode" toggle or
+                    *  per-code special-casing) as a possible future
+                    *  refinement, not a currently planned one. */
     PETSCII,      /**< Commodore PETSCII, unshifted/"graphics" mode -
                     *  deliberately partial, see .cpp: the ASCII-compatible
                     *  range (letters/digits/most punctuation) plus the
@@ -84,6 +98,17 @@ public:
   static Id fromIndex(int _index);
   /** Id -> index into names() */
   static int toIndex(Id _charset);
+  /** (Id, display name) pairs, in the same order as names() - the single
+   *  source of truth the Settings dialog's dropdown actually populates
+   *  itself from (each combo item carries its Id directly as Qt::UserRole
+   *  data). Codex review finding on names()/fromIndex()/toIndex() above:
+   *  a caller that populated a combo box from names() alone and read the
+   *  selection back via fromIndex(currentIndex()) was implicitly relying
+   *  on row position matching Id's numeric value - correct as long as
+   *  both stay in the same order, but nothing enforced that. This pairs
+   *  them at the source instead, so a combo box built from it can be read
+   *  back via currentData() regardless of row order. */
+  static QVector<QPair<Id, QString>> displayEntries();
 
   /** persisted profile value (Profiles/<name>/Charset) <-> Id - separate
    *  from the UI's names()/fromIndex()/toIndex() so a future change to
