@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose an improvement for the serial workbench
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the serial-console workflow that is difficult today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Explain the desired behavior and how it fits Komport-Qt6's specialized serial-workbench scope.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Relevant hardware or protocol
+      description: Name the device class or protocol without including sensitive environment details.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and TODO.md for this request.
+          required: true
