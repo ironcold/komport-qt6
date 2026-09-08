@@ -113,6 +113,17 @@ public:
   QChar getChar(QPoint _p);
   /** scroll up one line */
   virtual void scrollUp();
+  /** scroll rows [_top,_bottom] (inclusive, 0-based) up by one line: row
+   *  _top's content is discarded, row _bottom ends up blank, rows outside
+   *  the range are untouched. Unlike scrollUp(), this does NOT feed the
+   *  scrollback history - used for DECSTBM scroll-region scrolling, where
+   *  a program has deliberately split the screen (e.g. a status line) and
+   *  only the inner region should move. */
+  void scrollUpRegion(int _top, int _bottom);
+  /** scroll rows [_top,_bottom] (inclusive, 0-based) down by one line: row
+   *  _bottom's content is discarded, row _top ends up blank. Used for
+   *  reverse-index (ESC M) scrolling within (or across) a scroll region. */
+  void scrollDownRegion(int _top, int _bottom);
   /** clear a row */
   void clearRow(int _row);
   /** update cell */

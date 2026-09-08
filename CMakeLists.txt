@@ -103,3 +103,11 @@ include(CTest)
 if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
+
+# Architecture-decision spikes (see TODO.md section 1 / docs/architecture-
+# decisions/). Off by default: throwaway code that pulls in dependencies
+# (e.g. qtermwidget6) the normal build/install/test path never needs.
+option(KOMPORT_BUILD_SPIKES "Build experimental architecture-decision spikes (not part of the shipped app)" OFF)
+if(KOMPORT_BUILD_SPIKES)
+  add_subdirectory(spike/qtermwidget-bridge)
+endif()

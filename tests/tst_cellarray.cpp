@@ -34,6 +34,7 @@ private slots:
   void hugeWidthDoesNotCrashAndGetsClamped();
   void cellRejectsOutOfRangeCoordinatesIndividually();
   void copyIgnoresNullSource();
+  void scrollRegionHelpersDoNotCrashOnZeroHeightArray();
 };
 
 void TstCellArray::negativeHeightDoesNotCrash()
@@ -140,6 +141,30 @@ void TstCellArray::copyIgnoresNullSource()
   target->copy(nullptr); // must not crash
 
   QCOMPARE( target->character(), QChar('X') ); // untouched
+}
+
+void TstCellArray::scrollRegionHelpersDoNotCrashOnZeroHeightArray()
+{
+  // Codex review finding (Milestone 4, DECSTBM scroll regions): with
+  // arrayHeight()==0, qBound(0, x, arrayHeight()-1) == qBound(0, x, -1)
+  // still clamps to 0 (qBound with max < min just returns min), so the
+  // unguarded original scrollUpRegion()/scrollDownRegion() would call
+  // clearRow(0) -> cell(x,0)->clear() with cell() correctly returning
+  // nullptr for a 0-height array - a null-pointer dereference. Not
+  // reachable via the live KomportView grid today (resizeGridRows() never
+  // lets it shrink below 1 row), but these are public methods with no
+  // such guarantee, so both need to be safe on their own.
+  KomportCellArray arr;
+  arr.setArraySize( QSize(80, 0) );
+  QCOMPARE( arr.arrayHeight(), 0 );
+
+  arr.scrollUpRegion(0, 0);   // must not crash
+  arr.scrollDownRegion(0, 0); // must not crash
+
+  // And the array must still be usable normally afterwards.
+  arr.setArraySize( QSize(80, 25) );
+  QCOMPARE( arr.arrayHeight(), 25 );
+  QVERIFY( arr.cell(0, 0) != nullptr );
 }
 
 QTEST_MAIN(TstCellArray)

@@ -283,6 +283,35 @@ void KomportCellArray::scrollUp(){
     clearRow(arrayHeight()-1);
 }
 
+/** scroll rows [_top,_bottom] up by one line, region-only (see header) */
+void KomportCellArray::scrollUpRegion(int _top, int _bottom){
+  // Defensive, like cell()/setArraySize() elsewhere in this class: with
+  // arrayHeight()==0, qBound(0, x, arrayHeight()-1) == qBound(0, x, -1)
+  // still clamps to 0 (a qBound with max < min just returns min), so
+  // clearRow(0) below would run and call cell(x,0)->clear() on a null
+  // cell() - a real crash, found by Codex review. Not reachable via the
+  // live KomportView grid today (resizeGridRows() never lets it shrink
+  // below 1 row), but these are public methods with no such guarantee.
+  if ( arrayHeight() <= 0 ) return;
+  _top = qBound(0, _top, arrayHeight()-1);
+  _bottom = qBound(_top, _bottom, arrayHeight()-1);
+  for ( int row = _top; row < _bottom; row++ ) {
+    copyRow(row, row+1);
+  }
+  clearRow(_bottom);
+}
+
+/** scroll rows [_top,_bottom] down by one line, region-only (see header) */
+void KomportCellArray::scrollDownRegion(int _top, int _bottom){
+  if ( arrayHeight() <= 0 ) return; // see scrollUpRegion() above
+  _top = qBound(0, _top, arrayHeight()-1);
+  _bottom = qBound(_top, _bottom, arrayHeight()-1);
+  for ( int row = _bottom; row > _top; row-- ) {
+    copyRow(row, row-1);
+  }
+  clearRow(_top);
+}
+
 /** copy a row  */
 void KomportCellArray::copyRow(int _dst, int _src){
   int w = arrayWidth();

@@ -112,28 +112,9 @@ KDE `KonsolePart` ist technisch interessant, aber langfristig wahrscheinlich zu 
 
 ## Serielles Backend — Kernstück der Migration
 
-`komportserial.h/.cpp` macht aktuell:
-- `::open()`/`::close()`/`read()`/`write()` auf `/dev/ttyXX` direkt (POSIX).
-- `termios`-Struct manuell für Baudrate/Framing konfigurieren (`tcgetattr`/`tcsetattr`).
-- `QSocketNotifier` auf dem File-Descriptor für eingehende Daten, dazu ein eigener
-  Ring-Puffer (`KomportQueue`) und ein Timer, der den Puffer per `receivedChar(char)`-Signal
-  leert.
-- Baudraten als eigenes `enum Baud` mit manueller String-Tabelle.
-
-Soll ersetzt werden durch:
-- `QSerialPort` als Member statt rohem `fd`.
-- `QSerialPortInfo::availablePorts()` zur Geräteauswahl (ersetzt fest codierte
-  Device-Comboboxen/-Listen im Settings-Dialog).
-- `QSerialPort::setBaudRate()`, `setDataBits()`, `setStopBits()`, `setParity()`,
-  `setFlowControl()` statt manuellem `termios`.
-- `QSerialPort::readyRead()`-Signal statt `QSocketNotifier` + eigenem Ring-Puffer;
-  `KomportQueue` kann entfallen oder bleibt nur als optionaler Anwendungs-Puffer, falls
-  Flush-Rate-Verhalten (`setFlushRate`) bewusst beibehalten werden soll.
-- Fehlerbehandlung über `QSerialPort::errorOccurred()` statt `errno`/`perror`.
-- Die öffentliche Signal-/Slot-Schnittstelle nach außen (`receivedChar`, `settingsChanged`,
-  `settingsFailed`, `putChar`/`putStr`) so weit wie möglich beibehalten, damit
-  `KomportView`/`KomportEmulation` nicht mehr als nötig angefasst werden müssen — intern
-  aber komplett auf `QSerialPort` umstellen.
+**Erledigt:** `komportserial.h/.cpp` ist vollständig auf `QSerialPort` umgestellt (kein
+rohes POSIX/`termios`, kein `QSocketNotifier`, `KomportQueue` entfällt) — Details zum
+ursprünglichen Zustand und zur Umstellung in `TODO-ARCHIVE.md` Abschnitt 2.
 
 ## Architektur-Überblick
 
@@ -163,8 +144,9 @@ Soll ersetzt werden durch:
 - `KomportEmulation` (`komportemulation.h/.cpp`) — VT100/VT102-Escape-Sequenz-Interpreter.
   **Größtes und wichtigstes Modul.** Inzwischen recht vollständig (Cursor-Bewegung mit
   Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports, erweiterte
-  SGR-Farben, Tab, non-CSI-Escapes) — Details in `TODO-ARCHIVE.md` Abschnitt 8.2,
-  bekannte Lücken (Scroll-Regionen, VT52, Zeichensatz-Umschaltung) in `TODO.md`
+  SGR-Farben inkl. 256-Farben, Scroll-Regionen/DECSTBM, Tab, non-CSI-Escapes) —
+  Details in `TODO-ARCHIVE.md` Abschnitt 8.2 und `TODO.md` Abschnitt 0.8, bekannte
+  Lücken (DECOM/Origin-Mode, VT52, Zeichensatz-Umschaltung) in `TODO.md`
   Abschnitt 6. Trägt auch die
   `LineEnding`-Einstellung (CR/LF/CRLF) für die Enter-Taste und die Makro-Bar.
 - `KomportCell`/`KomportCellArray` — Zeichen-Zellen-Modell des sichtbaren Bildschirms;
@@ -211,8 +193,12 @@ Default an). Siehe `TODO.md` Abschnitt 0.1 für den Anlass.
   aufgenommen, weil der Nutzer explizit "korrektes Handling von Farb-Codes (ANSI)"
   als vollständig gefordert hat und reale Zielgeräte (Cisco/Juniper-CLIs, eingefärbte
   `ls`-Ausgaben o.ä.) sie routinemäßig senden. Bewusste, dokumentierte Ausnahme von der
-  VT100/VT102-Beschränkung, keine sonstige xterm-Erweiterung (keine 256-Farben, kein
-  True-Color, kein sonstiger xterm-Funktionsumfang).
+  VT100/VT102-Beschränkung. **Update Meilenstein 4 (siehe `TODO.md` Abschnitt 0.8):**
+  das 256-Farben-Protokoll (`CSI 38;5;N`/`48;5;N`) wurde nachträglich ebenfalls
+  bewusst aufgenommen (explizit als Meilenstein-4-Ziel spezifiziert, nicht nur
+  aixterm-Kompatibilität) — bleibt aber die einzige weitere Ausnahme: kein
+  True-Color (`CSI 38;2;r;g;b` wird geparst/konsumiert, aber nicht angewendet),
+  kein sonstiger xterm-Funktionsumfang.
 - Keine funktionale Erweiterung des Datei-Transfers (Upload/Download/Script) über das
   bisherige rudimentäre Grundgerüst hinaus.
 - Keine Internationalisierung/`.po`-Pflege über das Nötigste hinaus (die alte
