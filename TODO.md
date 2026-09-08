@@ -1206,9 +1206,13 @@ Ungenauigkeiten auf:
   über einen distincten `Unique`-Typ pro Nutzungsstelle, um echte
   ODR-Verletzungen zu vermeiden — die Warnung meldet ordnungs-abhängiges
   Template-Verhalten, nicht per se einen ODR-Verstoß); der Fix war auch
-  nicht rein kosmetisch, da moc dadurch zusätzlich eine
-  `QMetaType::fromType<KomportView*>()`-Registrierung generiert, die vorher
-  fehlte.
+  nicht rein kosmetisch, da die generierten statischen Metadaten jetzt das
+  `KomportView*`-Metatype-Interface tragen können, statt auf einen
+  Null-/Incomplete-Type-Eintrag zurückzufallen (Korrektur nach
+  Codex-Review auf den revidierten Fix, s.u. — ursprünglich hier fälschlich
+  als "generiert zusätzlich einen `QMetaType::fromType<KomportView*>()`-
+  Aufruf" formuliert; dieser Aufruf taucht so in den generierten Dateien
+  nicht auf).
 
 **Revidierter Fix:** `komport.h` zurück auf Vorwärtsdeklaration +
 `Q_MOC_INCLUDE("komportview.h")` (Qts offizieller Mechanismus für genau
