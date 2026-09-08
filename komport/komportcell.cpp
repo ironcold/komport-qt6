@@ -38,22 +38,26 @@ KomportCell::KomportCell()
 , mUnderline(false)
 , mForegroundColor(_DEFAULT_FOREGROUND_)
 , mBackgroundColor(_DEFAULT_BACKGROUND_ )
+, mForegroundIsDefault(true)
+, mBackgroundIsDefault(true)
 {
 }
 
 KomportCell::~KomportCell(){
 }
 
-/** reset properties to default values */
-void KomportCell::clear(){
+/** reset properties to default values, colored with the caller-supplied
+ *  _fg/_bg (see header - no longer this class's own hardcoded default,
+ *  Milestone 5). */
+void KomportCell::clear(const QColor &_fg, const QColor &_bg){
   setSelect(false);
   setBlink(false);
   setBold(false);
   setCharacter(_DEFAULT_CHAR_);
   setReverse(false);
   setUnderline(false);
-  setForegroundColor(_DEFAULT_FOREGROUND_);
-  setBackgroundColor(_DEFAULT_BACKGROUND_);
+  setForegroundColor(_fg, true);  // true: back to "the default" (Milestone 5, see header)
+  setBackgroundColor(_bg, true);
 }
 
 /** copy operator */
@@ -67,6 +71,8 @@ KomportCell & KomportCell::operator=(const KomportCell & _other){
     mUnderline        = _other.mUnderline;
     mForegroundColor  = _other.mForegroundColor;
     mBackgroundColor  = _other.mBackgroundColor;
+    mForegroundIsDefault = _other.mForegroundIsDefault;
+    mBackgroundIsDefault = _other.mBackgroundIsDefault;
   }
   return *this;
 }
@@ -89,6 +95,6 @@ void KomportCell::copy(KomportCell* _other){
   setCharacter(       _other->character()  );
   setReverse(         _other->reverse()    );
   setUnderline(       _other->underline()  );
-  setForegroundColor( _other->foregroundColor() );
-  setBackgroundColor( _other->backgroundColor() );
+  setForegroundColor( _other->foregroundColor(), _other->foregroundIsDefault() );
+  setBackgroundColor( _other->backgroundColor(), _other->backgroundIsDefault() );
 }

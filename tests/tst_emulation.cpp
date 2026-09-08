@@ -55,6 +55,7 @@ private slots:
   void printableAutoWrapRespectsScrollRegion();
   void insertAndDeleteLineRespectScrollRegion();
   void deviceAttributesRecognizesCsiForm();
+  void deleteCharClearsWithConfiguredDefaultColors();
 };
 
 void TstEmulation::unboundedCsiSequenceDoesNotHang()
@@ -701,6 +702,46 @@ void TstEmulation::deviceAttributesRecognizesCsiForm()
   // Must be ready for normal input again right afterwards.
   sendCsi("", 'H'); // cursor home
   QCOMPARE( cellArray.cursor(), QPoint(0, 0) );
+}
+
+void TstEmulation::deleteCharClearsWithConfiguredDefaultColors()
+{
+  // Milestone 5 (color schemes): doDeleteChar() (CSI Pn P) used to clear
+  // the columns exposed at the row's end via a direct cell()->clear() with
+  // no colors of its own - which, before Milestone 5's KomportCell::clear()
+  // signature change, silently fell back to KomportCell's own OS-palette
+  // default instead of this array's *configured* default colors. Give the
+  // array an obviously-non-palette scheme first, so a wrong fallback would
+  // be immediately visible.
+  KomportSerial serial;
+  KomportCellArray cellArray; // 80x25 by default
+  KomportEmulation emu(&serial, &cellArray);
+
+  const QColor scheme_fg(0,255,0);
+  const QColor scheme_bg(0,0,0);
+  cellArray.setDefaultForegroundColor(scheme_fg);
+  cellArray.setDefaultBackgroundColor(scheme_bg);
+
+  auto sendCsi = [&](const QByteArray &params, char finalByte) {
+    emu.slotReceivedChar(0x1B);
+    emu.slotReceivedChar('[');
+    for ( char c : params ) emu.slotReceivedChar(c);
+    emu.slotReceivedChar(finalByte);
+  };
+
+  // Fill row 0 with 'X', explicitly colored red - so the exposed columns'
+  // *previous* content isn't already coincidentally scheme-colored.
+  cellArray.setForegroundColor( QColor(255,0,0) );
+  for ( int x = 0; x < cellArray.arrayWidth(); ++x ) cellArray.drawChar( QChar('X'), x, 0 );
+
+  sendCsi("0;1", 'H'); // cursor home, row 0 col 0 (0-based (0,0))
+  sendCsi("5", 'P');   // delete 5 characters - columns 75-79 get cleared
+
+  for ( int x = cellArray.arrayWidth()-5; x < cellArray.arrayWidth(); ++x ) {
+    QCOMPARE( cellArray.cell(x,0)->character(), QChar(' ') );
+    QCOMPARE( cellArray.cell(x,0)->foregroundColor(), scheme_fg );
+    QCOMPARE( cellArray.cell(x,0)->backgroundColor(), scheme_bg );
+  }
 }
 
 QTEST_MAIN(TstEmulation)

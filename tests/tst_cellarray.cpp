@@ -35,6 +35,9 @@ private slots:
   void cellRejectsOutOfRangeCoordinatesIndividually();
   void copyIgnoresNullSource();
   void scrollRegionHelpersDoNotCrashOnZeroHeightArray();
+  void setDefaultColorsLiveRecolorsMatchingCellsOnly();
+  void newlyGrownCellsUseCurrentDefaultColors();
+  void explicitColorMatchingSchemeDefaultSurvivesSchemeChange();
 };
 
 void TstCellArray::negativeHeightDoesNotCrash()
@@ -165,6 +168,103 @@ void TstCellArray::scrollRegionHelpersDoNotCrashOnZeroHeightArray()
   arr.setArraySize( QSize(80, 25) );
   QCOMPARE( arr.arrayHeight(), 25 );
   QVERIFY( arr.cell(0, 0) != nullptr );
+}
+
+void TstCellArray::setDefaultColorsLiveRecolorsMatchingCellsOnly()
+{
+  // Milestone 5 (Appearance tab / color schemes): setDefaultForegroundColor()/
+  // setDefaultBackgroundColor() must immediately recolor cells that were
+  // showing the *previous* default (so switching schemes is visible right
+  // away without waiting for a clear/reset), but must NOT touch a cell a
+  // host explicitly colored via SGR to some other color.
+  KomportCellArray arr; // 80x25, default colors from QApplication::palette()
+
+  // Two cells at the (old) default color, one explicitly colored away from it.
+  arr.clear(); // every cell starts at the current default fg/bg
+  arr.cell(0,0)->setForegroundColor( QColor(255,0,0) ); // explicit SGR red - must survive
+
+  const QColor newFg(0,255,0);
+  const QColor newBg(0,0,128);
+  arr.setDefaultForegroundColor(newFg);
+  arr.setDefaultBackgroundColor(newBg);
+
+  QCOMPARE( arr.defaultForegroundColor(), newFg );
+  QCOMPARE( arr.defaultBackgroundColor(), newBg );
+  // cell(1,0) was at the old default - recolored live.
+  QCOMPARE( arr.cell(1,0)->foregroundColor(), newFg );
+  QCOMPARE( arr.cell(1,0)->backgroundColor(), newBg );
+  // cell(0,0)'s explicit red foreground must survive the scheme change...
+  QCOMPARE( arr.cell(0,0)->foregroundColor(), QColor(255,0,0) );
+  // ...but its background (never explicitly set, still at the old default)
+  // still gets recolored like any other untouched cell.
+  QCOMPARE( arr.cell(0,0)->backgroundColor(), newBg );
+
+  // A cell drawn *after* the scheme change must also pick up the new
+  // default, not the old one - setDefaultForegroundColor()/
+  // setDefaultBackgroundColor() also update the "current SGR color" used
+  // for newly drawn characters when it was still at the old default.
+  arr.drawChar( QChar('X'), 5, 5 );
+  QCOMPARE( arr.cell(5,5)->foregroundColor(), newFg );
+  QCOMPARE( arr.cell(5,5)->backgroundColor(), newBg );
+}
+
+void TstCellArray::newlyGrownCellsUseCurrentDefaultColors()
+{
+  // Milestone 5: a cell freshly created by setArraySize() (growing the
+  // array, or first construction) used to always start out colored from
+  // KomportCell's own ctor default (QApplication::palette()) regardless of
+  // what this array's *current* default colors actually are - so growing
+  // the grid (e.g. a window resize) after a color scheme was applied would
+  // add new rows in the wrong (OS palette) colors instead of the
+  // configured scheme.
+  KomportCellArray arr;
+  const QColor scheme_fg(0,255,0);
+  const QColor scheme_bg(0,0,0);
+  arr.setDefaultForegroundColor(scheme_fg);
+  arr.setDefaultBackgroundColor(scheme_bg);
+
+  arr.setArraySize( QSize(80, 30) ); // grow - new rows 25-29 are brand new cells
+
+  QCOMPARE( arr.cell(0,29)->foregroundColor(), scheme_fg );
+  QCOMPARE( arr.cell(0,29)->backgroundColor(), scheme_bg );
+}
+
+void TstCellArray::explicitColorMatchingSchemeDefaultSurvivesSchemeChange()
+{
+  // Codex review finding (Milestone 5, gpt-5.6-sol round): the original
+  // live-recolor logic inferred "is this cell still at the default color"
+  // by comparing QColor values - which breaks the moment a color scheme's
+  // own default happens to equal a real SGR color a host explicitly sent
+  // (e.g. "Green on Black"'s default background is the same black SGR 40
+  // produces - see the color-scheme table in settingsdialog.cpp).
+  // Reproduces exactly that collision: the scheme default background
+  // starts black, a character is drawn with an *explicit* SGR-style black
+  // background (numerically the same value), then the scheme changes to a
+  // different background - the explicitly-black cell must NOT be swept
+  // along with the genuinely-still-default ones.
+  KomportCellArray arr;
+  arr.setDefaultBackgroundColor( QColor(0,0,0) ); // scheme default: black
+  arr.clear(); // every cell now at the (black) default
+
+  // Simulate "CSI 40 m" (explicit black background) followed by a
+  // character - the same setBackgroundColor()-then-drawChar() path
+  // KomportEmulation::doGraphics()/slotReceivedChar() use for a real SGR
+  // sequence.
+  arr.setBackgroundColor( QColor(0,0,0) ); // explicit, even though it equals the default
+  arr.drawChar( QChar('X'), 0, 0 );
+
+  QVERIFY2( !arr.cell(0,0)->backgroundIsDefault(),
+            "an explicitly-set SGR color must not be tracked as \"default\", "
+            "even when it happens to equal the current default color" );
+
+  // The scheme changes: default background moves from black to blue.
+  arr.setDefaultBackgroundColor( QColor(0,0,255) );
+
+  // The explicitly-black cell must stay black...
+  QCOMPARE( arr.cell(0,0)->backgroundColor(), QColor(0,0,0) );
+  // ...while a genuinely still-default cell (never drawn on) correctly
+  // picks up the new scheme color.
+  QCOMPARE( arr.cell(1,0)->backgroundColor(), QColor(0,0,255) );
 }
 
 QTEST_MAIN(TstCellArray)
