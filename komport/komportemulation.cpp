@@ -542,6 +542,8 @@ ESC[Ps;...;Psm
 #include <QApplication>
 #include <QDebug>
 
+#include <limits>
+
 #define ASCII_BEL   0x07
 #define ASCII_BS    0x08
 #define ASCII_HT    0x09
@@ -600,6 +602,42 @@ namespace {
     return _seq;
   }
 
+  // xterm 256-color palette (CSI 38;5;Nm / CSI 48;5;Nm - see doGraphics()):
+  //  0-15  the same 16 ANSI colors doGraphics() already uses for the plain
+  //        30-37/90-97 codes (kept byte-for-byte identical to those, so a
+  //        host using "38;5;1" and a host using plain "31" for the same
+  //        red get the same pixel).
+  //  16-231 a 6x6x6 RGB color cube, each axis stepped 0,95,135,175,215,255
+  //        (the standard xterm cube steps - not linear 0-255/5, which is
+  //        what most terminals actually implement and hosts expect).
+  //  232-255 a 24-step grayscale ramp from 8 to 238 (also the standard
+  //        xterm steps, deliberately not touching pure 0/255 - those are
+  //        already covered by the cube's corners at index 16/231).
+  QColor xterm256ToColor(int _index)
+  {
+    static const QColor base16[16] = {
+      QColor(0,0,0),      QColor(255,0,0),                  QColor(0,255,0),                  QColor(240,240,10),
+      QColor(0,0,255),    QColor(215,15,230),               QColor(10,240,230),               QColor(255,255,255),
+      QColor(85,85,85),   QColor(255,0,0).lighter(140),     QColor(0,255,0).lighter(140),     QColor(240,240,10).lighter(140),
+      QColor(0,0,255).lighter(140), QColor(215,15,230).lighter(140), QColor(10,240,230).lighter(140), QColor(255,255,255),
+    };
+    static const int cubeSteps[6] = { 0, 95, 135, 175, 215, 255 };
+
+    const int index = qBound(0, _index, 255); // defensive - see doGraphics()
+    if ( index < 16 ) {
+      return base16[index];
+    }
+    if ( index < 232 ) {
+      const int n = index - 16;
+      const int r = cubeSteps[ (n/36) % 6 ];
+      const int g = cubeSteps[ (n/6)  % 6 ];
+      const int b = cubeSteps[  n     % 6 ];
+      return QColor(r,g,b);
+    }
+    const int gray = 8 + (index-232)*10; // 232->8 ... 255->238
+    return QColor(gray,gray,gray);
+  }
+
 } // namespace
 
 KomportEmulation::KomportEmulation(KomportSerial* _serial, KomportCellArray* _cellArray)
@@ -609,9 +647,25 @@ KomportEmulation::KomportEmulation(KomportSerial* _serial, KomportCellArray* _ce
 , mInCtlSequence(false)
 , mPendingCharsetChar(false)
 , mApplicationCursorKeys(false)
+, mInsertMode(false)
+, mScrollTop(0)
+, mScrollBottom(std::numeric_limits<int>::max()) // see header: clamps to "whole screen"
 , mLineEnding(LineEnding::CR)
 {
   QObject::connect(serial(),SIGNAL(receivedChar(char)),this,SLOT(slotReceivedChar(char)));
+}
+
+/** current top margin of the scroll region, clamped to the live screen */
+int KomportEmulation::scrollTop() const {
+  return qBound( 0, mScrollTop, mCellArray->arrayHeight()-1 );
+}
+
+/** current bottom margin of the scroll region, clamped to the live screen.
+ *  mScrollBottom starts at INT_MAX (see constructor), so qBound alone
+ *  makes this track arrayHeight()-1 until an explicit DECSTBM narrows it -
+ *  no separate "is a region set?" flag needed. */
+int KomportEmulation::scrollBottom() const {
+  return qBound( scrollTop(), mScrollBottom, mCellArray->arrayHeight()-1 );
 }
 
 /** the raw bytes for the current line ending */
@@ -833,7 +887,12 @@ void KomportEmulation::doRestoreCursor(){
 /** do graphics attributes */
 void KomportEmulation::doGraphics(){
   const QList<QByteArray> fields = splitCsiParams( mCtlSequence.isEmpty() ? QByteArray("0") : mCtlSequence );
-  for ( const QByteArray &attrStr : fields ) {
+  // Index-based (not range-for) because 38/48 below need to look ahead at
+  // and consume extra fields of their own (the "5;N" / "2;r;g;b" that
+  // follows them) rather than treating each ';'-separated field as an
+  // independent attribute code like every other case here.
+  for ( int i = 0; i < fields.size(); i++ ) {
+    const QByteArray &attrStr = fields.at(i);
     if ( !attrStr.isEmpty() ) {
       int attr = attrStr.toInt();
       switch(attr) {
@@ -944,6 +1003,73 @@ void KomportEmulation::doGraphics(){
         case 106: cellArray()->setBackgroundColor(QColor(10,240,230).lighter(140));  break;
         case 107: cellArray()->setBackgroundColor(QColor(255,255,255));              break;
 
+        //    Extended color (Milestone 4: 256-color only, see TODO.md) -
+        //    CSI 38;5;Nm (foreground) / CSI 48;5;Nm (background) select
+        //    palette index N via xterm256ToColor() above. The true-color
+        //    form CSI 38;2;r;g;bm / 48;2;r;g;bm is out of this milestone's
+        //    scope (CLAUDE.md's aixterm-16-color exception is explicitly
+        //    documented as *not* extending to true-color) - its parameters
+        //    are still consumed here so they don't fall through and get
+        //    misread as unrelated attribute codes (e.g. "38;2;255;0;0"
+        //    without this would apply codes 2, 255 and 0 in turn - "255"
+        //    logged as unknown, but "0" would silently reset every
+        //    attribute just set moments earlier), just not applied.
+        case 38:
+        case 48:
+          {
+            // Uses a local index (j) rather than mutating the loop's own i
+            // until the very end: every branch below - complete, AND
+            // truncated/malformed - must advance past whatever sub-fields
+            // actually belong to this 38/48 sequence, or a leftover field
+            // (e.g. the plain "5" in a truncated "38;5" with no index
+            // following) falls through to the next loop iteration and gets
+            // misread as an unrelated top-level SGR code (5 = Blink on).
+            // The first version of this code only advanced on the complete
+            // path, missing exactly that truncated case (Codex review
+            // finding).
+            const bool isBackground = (attr == 48);
+            int j = i+1;
+            if ( j >= fields.size() ) break; // "38"/"48" alone, nothing follows
+            const int mode = fields.at(j).toInt();
+            j++;
+            if ( mode == 5 ) {
+              if ( j < fields.size() ) {
+                // Two-arg toInt(&ok), matching ctlParam()'s existing
+                // convention elsewhere in this file: a plain one-arg
+                // toInt() returns 0 for a non-numeric/empty field with no
+                // way to tell that apart from a genuine "0" - silently
+                // applying color index 0 (a real, valid black) for garbage
+                // input instead of leaving the color untouched (Codex
+                // review finding). The field is consumed (j++) either way,
+                // valid or not - only whether the color is *applied*
+                // depends on it, matching the missing-index branch below.
+                bool ok = false;
+                const int idx = fields.at(j).toInt(&ok);
+                if ( ok ) {
+                  const QColor c = xterm256ToColor(idx);
+                  if ( isBackground ) cellArray()->setBackgroundColor(c);
+                  else                cellArray()->setForegroundColor(c);
+                } else {
+                  qDebug( "?attr? %d;5 (non-numeric color index)", attr );
+                }
+                j++;
+              } else {
+                qDebug( "?attr? %d;5 (missing color index)", attr );
+              }
+            } else if ( mode == 2 ) {
+              // true-color r;g;b - consumed, not applied (see comment
+              // above); consume however many of the up to 3 components are
+              // actually present, even if fewer (truncated sequence).
+              const int rgbAvailable = qMin(3, fields.size() - j);
+              j += rgbAvailable;
+              if ( rgbAvailable < 3 ) qDebug( "?attr? %d;2 (incomplete r;g;b)", attr );
+            } else {
+              qDebug( "?attr? %d;%d (unknown extended-color mode)", attr, mode );
+            }
+            i = j-1; // -1: the enclosing for-loop's own i++ advances past this
+          }
+          break;
+
         default:
           qDebug( "?attr? %d", attr);
           break;
@@ -952,32 +1078,70 @@ void KomportEmulation::doGraphics(){
   }
 }
 
-/** index: cursor down, scrolling at the bottom margin (ESC D) */
+/** index: cursor down, scrolling at the bottom margin (ESC D and plain LF -
+ *  slotReceivedChar() calls this for ASCII_LF too, they're the same
+ *  operation). Scrolls within the DECSTBM scroll region (see scrollTop()/
+ *  scrollBottom()): when the region is the whole screen (the default, and
+ *  by far the common case), this goes through the ordinary whole-screen
+ *  scrollUp() so scrollback history keeps working exactly as before;
+ *  when a program has set a narrower region (e.g. vi/nano splitting off a
+ *  status line via DECSTBM), only that region moves and nothing is pushed
+ *  into scrollback - matching real terminals, where a scroll-region isn't
+ *  "history", the rows scrolled out of it are simply gone.
+ *  Plain character auto-wrap past the last column also goes through here
+ *  (via advanceCursorWithWrap() below), not KomportCellArray::
+ *  advanceCursor() directly - a Codex review finding: an earlier version
+ *  used that whole-screen-only helper for the printable-character path,
+ *  so DECSTBM was respected for LF/Index but silently ignored for plain
+ *  wrap, letting output escape a narrowed region depending only on
+ *  whether the host used LF or column wrap to reach the margin. */
 void KomportEmulation::doIndex()
 {
+  // Scrolling only triggers exactly *at* the bottom margin - a cursor that
+  // is currently outside the region entirely (above it, or - reachable via
+  // an absolute cursor-position sequence - below it) just moves down by one,
+  // clamped to the physical screen, same as it always did before scroll
+  // regions existed. Comparing with "<" instead of "!=" here originally
+  // (Codex review finding) meant a cursor sitting *below* the region (e.g.
+  // row 12 with a "CSI 5;10 r" region active) tripped the scroll branch too
+  // - scrolling rows the cursor wasn't even inside.
   QPoint pos = cellArray()->cursor();
-  pos.setY( pos.y()+1 );
-  if ( pos.y() >= cellArray()->arrayHeight() ) {
-    pos.setY( cellArray()->arrayHeight()-1 );
-    cellArray()->scrollUp();
+  const int bottom = scrollBottom();
+  if ( pos.y() != bottom ) {
+    pos.setY( qMin(pos.y()+1, cellArray()->arrayHeight()-1) );
+    cellArray()->setCursor(pos);
+    return;
   }
-  cellArray()->setCursor(pos);
+  if ( scrollTop() == 0 && bottom == cellArray()->arrayHeight()-1 ) {
+    cellArray()->scrollUp(); // whole screen: keep feeding scrollback as before
+  } else {
+    cellArray()->scrollUpRegion( scrollTop(), bottom ); // region only, no scrollback
+  }
+  // pos.y() is already == bottom - nothing to change, cursor stays put.
 }
 
-/** reverse index: cursor up, stopping at the top row (ESC M).
- *  NOTE: a "full" reverse index scrolls the screen *down* (inserting a
- *  blank line at the top) once the cursor is already on the top row -
- *  that needs a symmetric scrollDown()/scroll-region implementation that
- *  KomportCellArray does not have (it only ever scrolls forward). Simply
- *  stopping at the top row, like the original doCursorUp() already did, is
- *  the safe subset implemented here; scrolling down is a known gap. */
+/** reverse index: cursor up, scrolling (the region) down at the top margin
+ *  (ESC M). Unlike Index, this never touches scrollback either way - it
+ *  can't "un-scroll" history that has already left the live grid, that
+ *  would be a different, unimplemented "scroll back through history via
+ *  the host" concept entirely separate from the scrollback buffer used for
+ *  the view's own scrollbar. */
 void KomportEmulation::doReverseIndex()
 {
+  // Symmetric to doIndex() above: only scroll exactly *at* the top margin.
+  // "<" instead of "!=" here originally (Codex review finding) meant a
+  // cursor *above* the region (reachable right after DECSTBM, which homes
+  // the cursor to (0,0) - above any region with top>0) tripped the scroll
+  // branch even though it wasn't inside the region at all.
   QPoint pos = cellArray()->cursor();
-  if ( pos.y() > 0 ) {
-    pos.setY( pos.y()-1 );
+  const int top = scrollTop();
+  if ( pos.y() != top ) {
+    pos.setY( qMax(pos.y()-1, 0) );
     cellArray()->setCursor(pos);
+    return;
   }
+  cellArray()->scrollDownRegion( top, scrollBottom() );
+  // pos.y() is already == top - nothing to change, cursor stays put.
 }
 
 /** next line: CR + index (ESC E) */
@@ -1000,36 +1164,51 @@ void KomportEmulation::doReset()
   cellArray()->setUnderline(false);
   cellArray()->setCursorVisible(true);
   mApplicationCursorKeys = false;
+  mInsertMode = false;
+  mScrollTop = 0;
+  mScrollBottom = std::numeric_limits<int>::max(); // back to "whole screen"
   cellArray()->clear();
   cellArray()->setCursor(QPoint(0,0));
 }
 
-/** insert <n> blank lines at the cursor row, pushing the rows below it (and
- *  the bottom margin's worth of the screen) down - CSI Pn L */
+/** insert <n> blank lines at the cursor row, pushing the rows below it down
+ *  to the bottom of the active scroll region - CSI Pn L. Bounded by
+ *  scrollTop()/scrollBottom(), not the physical screen (Codex review
+ *  finding, Milestone 4): the original version predates DECSTBM and always
+ *  used arrayHeight() - once a program narrows the scroll region, CSI L
+ *  inside it must not shift or clear rows below the region (a status
+ *  line, say). A cursor outside the region is a no-op, matching real
+ *  terminal behaviour - insert/delete line only apply within the region. */
 void KomportEmulation::doInsertLine()
 {
+  const int y = cellArray()->cursor().y();
+  const int top = scrollTop();
+  const int bottom = scrollBottom();
+  if ( y < top || y > bottom ) return;
   int n = ctlParam(1);
-  int h = cellArray()->arrayHeight();
-  int y = cellArray()->cursor().y();
-  if ( n > h-y ) n = h-y;
-  for ( int row = h-1; row >= y+n; row-- ) {
+  if ( n > bottom-y+1 ) n = bottom-y+1;
+  for ( int row = bottom; row >= y+n; row-- ) {
     cellArray()->copyRow(row, row-n);
   }
   for ( int row = y; row < y+n; row++ ) cellArray()->clearRow(row);
 }
 
-/** delete <n> lines at the cursor row, pulling the rows below it up and
- *  clearing the newly exposed rows at the bottom - CSI Pn M */
+/** delete <n> lines at the cursor row, pulling the rows below it up within
+ *  the active scroll region and clearing the newly exposed rows at the
+ *  region's bottom - CSI Pn M. Region-bounded for the same reason as
+ *  doInsertLine() above (Codex review finding, Milestone 4). */
 void KomportEmulation::doDeleteLine()
 {
+  const int y = cellArray()->cursor().y();
+  const int top = scrollTop();
+  const int bottom = scrollBottom();
+  if ( y < top || y > bottom ) return;
   int n = ctlParam(1);
-  int h = cellArray()->arrayHeight();
-  int y = cellArray()->cursor().y();
-  if ( n > h-y ) n = h-y;
-  for ( int row = y; row < h-n; row++ ) {
+  if ( n > bottom-y+1 ) n = bottom-y+1;
+  for ( int row = y; row <= bottom-n; row++ ) {
     cellArray()->copyRow(row, row+n);
   }
-  for ( int row = h-n; row < h; row++ ) cellArray()->clearRow(row);
+  for ( int row = bottom-n+1; row <= bottom; row++ ) cellArray()->clearRow(row);
 }
 
 /** delete <n> characters at the cursor, shifting the rest of the row left
@@ -1064,9 +1243,12 @@ void KomportEmulation::doSetMode(bool _set)
         case 25: cellArray()->setCursorVisible(_set); break;    // DECTCEM
         default: break; // ?2/?3/?4/?5/?6/?7/?8/... not implemented, ignored safely
       }
+    } else {
+      switch ( mode ) {
+        case 4: mInsertMode = _set; break; // DECIM - insert mode
+        default: break; // 2=keyboard lock, 12=echo, 20=CR/LF mapping, ... not implemented, ignored safely
+      }
     }
-    // non-private modes (2=keyboard lock, 4=insert mode, 12=echo,
-    // 20=CR/LF mapping, ...) are not implemented; ignored safely.
   }
 }
 
@@ -1090,11 +1272,55 @@ void KomportEmulation::doDeviceStatusReport()
   }
 }
 
-/** device attributes / "who are you" (CSI c, CSI 0c) - always answers as a
- *  VT102, matching this emulation's documented scope. */
+/** device attributes / "who are you" (CSI c, CSI 0c, ESC Z) - answers as a
+ *  VT220 (class code 62), matching Milestone 4's VT220-identification goal.
+ *  No optional-feature codes (DRCS/UDK/selective erase/...) are appended -
+ *  none of those are actually implemented, and claiming them would just
+ *  invite a host to rely on features this emulation doesn't have. */
 void KomportEmulation::doDeviceAttributes()
 {
-  serial()->putStr( "\x1b[?6c" );
+  serial()->putStr( "\x1b[?62c" );
+}
+
+/** set scrolling region / DECSTBM (CSI Pt;Pb r): Pt/Pb are 1-based, default
+ *  to the whole screen when omitted *or 0* - "0" meaning "use the default"
+ *  is the same convention ctlParam() already uses for every other CSI
+ *  parameter in this emulation (a missing or 0 count/position parameter
+ *  means "default"), which the very first version of this function didn't
+ *  follow: it treated an explicit "CSI 0;0 r" as top=bottom=0, a degenerate
+ *  region, and silently left the previous region in place instead of
+ *  resetting it (Codex review finding). Per spec, an invalid region (top at
+ *  or past bottom) is ignored rather than applied, and a valid one homes
+ *  the cursor to the screen's absolute top-left (this emulation doesn't
+ *  implement DECOM/origin mode, so "home" is always the physical screen,
+ *  never region-relative).
+ *  When Pb is omitted/0, mScrollBottom is reset to the dynamic
+ *  std::numeric_limits<int>::max() sentinel (see the constructor/header),
+ *  not the *current* arrayHeight()-1 - a second Codex review finding: an
+ *  intermediate version stored a concrete row number here even for a
+ *  "reset to full screen" request, which looked identical to the dynamic
+ *  sentinel right up until the next resize - after the view grew (a
+ *  perfectly ordinary window resize, see KomportView::resizeGridRows()),
+ *  the stored bottom stayed pinned at the old, now-too-small row, so
+ *  doIndex() no longer recognised the *new* physical bottom row as the
+ *  margin and silently stopped scrolling there. h-1 is still used to
+ *  *validate* an explicit Pb against (an explicit region must still be a
+ *  real, current-screen-relative range), just not stored when Pb was
+ *  defaulted. */
+void KomportEmulation::doSetScrollRegion()
+{
+  const QList<QByteArray> fields = splitCsiParams(mCtlSequence);
+  const int h = cellArray()->arrayHeight();
+  const bool haveTop    = fields.size() > 0 && !fields.at(0).isEmpty() && fields.at(0).toInt() > 0;
+  const bool haveBottom = fields.size() > 1 && !fields.at(1).isEmpty() && fields.at(1).toInt() > 0;
+  const int top = haveTop ? qBound(0, fields.at(0).toInt()-1, h-1) : 0;
+  // Only used to validate an explicit Pb against the current screen; if Pb
+  // was defaulted, the dynamic sentinel is stored instead (see above).
+  const int bottomForValidation = haveBottom ? qBound(0, fields.at(1).toInt()-1, h-1) : h-1;
+  if ( top >= bottomForValidation ) return; // degenerate/invalid region - leave unchanged
+  mScrollTop = top;
+  mScrollBottom = haveBottom ? bottomForValidation : std::numeric_limits<int>::max();
+  cellArray()->setCursor(QPoint(0,0));
 }
 
 // received part of an escape sequence
@@ -1170,10 +1396,10 @@ void KomportEmulation::sequence(char _ch)
         doDeviceAttributes();
         break;
       case 'g':   // clear tab stop(s) - tab stops are always at every 8th
-      case 'r':   // set scrolling region - not implemented (would need a
-                  // scroll-region-aware scrollUp()/scrollDown() in
-                  // KomportCellArray); consumed harmlessly rather than
-                  // printed as garbage.
+                  // column, not implemented; consumed harmlessly.
+        break;
+      case 'r':   // set scrolling region (DECSTBM)
+        doSetScrollRegion();
         break;
       default:
         qDebug( "?ctl? '%c'", _ch );
@@ -1284,15 +1510,9 @@ void KomportEmulation::slotReceivedChar(char _ch)
       }
       break;
     case ASCII_LF:
-      {
-        QPoint pos = cellArray()->cursor();
-        pos.setY(pos.y()+1);
-        if ( pos.y() >= cellArray()->arrayHeight() ) {
-          pos.setY(cellArray()->arrayHeight()-1);
-          cellArray()->scrollUp();
-        }
-        cellArray()->setCursor(pos);
-      }
+      // Same operation as Index (ESC D): cursor down, scrolling
+      // (scroll-region-aware) at the bottom margin - see doIndex().
+      doIndex();
       break;
     case ASCII_CR:
       {
@@ -1302,9 +1522,41 @@ void KomportEmulation::slotReceivedChar(char _ch)
       }
       break;
     default:
+      if ( mInsertMode ) {
+        // DECIM (CSI 4h): shift the rest of this row one column right
+        // before drawing, dropping whatever falls off the right edge -
+        // same shift-based approach as doDeleteChar() above, just in the
+        // opposite direction (and one column instead of doDeleteChar()'s
+        // <n>, since insert-mode shifts one column per printed character).
+        const QPoint pos = cellArray()->cursor();
+        const int w = cellArray()->arrayWidth();
+        for ( int x = w-1; x > pos.x(); x-- ) {
+          cellArray()->cell(x,pos.y())->copy( cellArray()->cell(x-1,pos.y()) );
+        }
+        cellArray()->updateRow(pos.y());
+      }
       cellArray()->drawChar(_ch,cellArray()->cursor());
-      cellArray()->advanceCursor();
+      advanceCursorWithWrap();
       break;
+  }
+}
+
+/** advance the cursor one column, wrapping (and scroll-region-aware
+ *  scrolling at the bottom margin) exactly like doIndex() does for
+ *  LF/Index - see the header comment. KomportCellArray::advanceCursor()
+ *  itself is left untouched (still whole-screen-only): it has its own
+ *  caller, KomportCellArray::putChar(), which is unrelated to this
+ *  emulation's input path and has no scroll-region concept to be aware of. */
+void KomportEmulation::advanceCursorWithWrap()
+{
+  QPoint pos = cellArray()->cursor();
+  pos.setX( pos.x()+1 );
+  if ( pos.x() >= cellArray()->arrayWidth() ) {
+    pos.setX(0);
+    cellArray()->setCursor(pos);
+    doIndex(); // region-aware vertical step, same as a plain LF
+  } else {
+    cellArray()->setCursor(pos);
   }
 }
 

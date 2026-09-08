@@ -891,8 +891,102 @@ ein Kommentar-Nit im neuen Test wurden bewusst nicht als defensive Fixes
 Verdrahtung "moot"/"unconfirmed"; der Kommentar-Nit (irreführender
 4096-Bezug) wurde korrigiert.
 
+## 0.8 Meilenstein 4 — VT220/xterm-Erweiterungen + Review-Zyklus (2026-09-08)
 
-## 1. Produktvision und Architektur-Gate — ✅ erledigt (2026-09-07)
+Nach Abschluss des Architektur-Gates (Abschnitt 1, `ADR-001` auf `Rejected`)
+direkt Meilenstein 4 umgesetzt: 256-Farben-SGR (`CSI 38;5;N`/`48;5;N`,
+xterm-Palette: 16 Basisfarben + 6x6x6-Würfel + 24-stufige Graurampe),
+Scroll-Regionen (DECSTBM, `CSI Pt;Pb r`, inkl. neuer `KomportCellArray::
+scrollUpRegion()`/`scrollDownRegion()`), Insert-Mode (`CSI 4h`/`4l`) und
+VT220-Geräte-Identifikation (`CSI c`/`CSI 0c`/`ESC Z` antworten jetzt
+`\x1b[?62c` statt `\x1b[?6c`). Anders als bei den vorherigen Review-Runden
+(Abschnitt 0.1–0.7, die den *bestehenden* Code durchleuchtet haben) hier:
+das Feature direkt gegen mehrere Codex-Adversarial-Review-Runden auf dem
+*entstehenden* Diff entwickelt (`/codex:adversarial-review`, `--background`
+mit `AskUserQuestion`-Bestätigung vor jedem Lauf), zusätzlich mehrfach über
+`hermes-gemma-review` (Gemma 4, lokal über `hermes`) gegengeprüft — siehe
+Stolperstein unten zur Codex-Infra-Instabilität während dieser Runde.
+
+**Runde 1+2** (zwei separate `codex:codex-rescue`-Läufe auf dem ersten
+Entwurf, letztere nach Nachbesserung): 5 Findings, alle bestätigt und
+gefixt:
+- `doIndex()`/`doReverseIndex()` scrollten fälschlich auch, wenn der Cursor
+  außerhalb der Region stand (`>=`/`<=` statt exaktem `==` am Rand).
+- `doGraphics()`s `38;5;N`/`38;2;r;g;b`-Sub-Parameter-Parsing rückte bei
+  unvollständigen Sequenzen den Feld-Index nicht vor — ein übrig gebliebenes
+  Feld wurde als eigenständiger SGR-Code fehlinterpretiert (z.B. Blink).
+- `doSetScrollRegion()` behandelte `0` nicht wie `ctlParam()`s
+  Default-Konvention — `CSI 0;0 r` setzte die Region fälschlich nicht
+  zurück.
+- `scrollUpRegion()`/`scrollDownRegion()` konnten bei `arrayHeight()==0`
+  über `clearRow()` einen Null-Pointer-Crash auslösen (aktuell über die
+  echte UI nicht erreichbar, aber öffentliche API ohne diese Garantie).
+- `CSI 38;5;N` mit leerem/nicht-numerischem Index wandte stillschweigend
+  Farbindex 0 (Schwarz) an statt die Farbe unverändert zu lassen
+  (`toInt()` statt `toInt(&ok)`, inkonsistent zu `ctlParam()`s Muster).
+
+**Runde 3** (`/codex:adversarial-review`): 2 weitere Findings, beide
+gefixt:
+- Zeichendruck am rechten Rand (`KomportCellArray::advanceCursor()`) kannte
+  keine Scroll-Region — Auto-Wrap konnte die Region verlassen bzw. bei
+  `top>0` fälschlich in den Scrollback-Puffer scrollen. Gefixt durch neue
+  `KomportEmulation::advanceCursorWithWrap()`, die den Y-Schritt an
+  `doIndex()` delegiert (identische Region-Logik wie bei LF/Index).
+- `doInsertLine()`/`doDeleteLine()` (`CSI L`/`M`) stammen aus der Zeit vor
+  DECSTBM und arbeiteten immer auf dem ganzen Bildschirm — ein Programm mit
+  aktiver Scroll-Region hätte Zeilen unterhalb der Region verschoben/
+  gelöscht. Jetzt auf `scrollTop()`/`scrollBottom()` begrenzt, No-Op bei
+  Cursor außerhalb der Region.
+
+**Runde 4**: 1 Finding gefixt, 1 bewusste Produktentscheidung:
+- **Gefixt:** `doSetScrollRegion()` speicherte bei implizitem
+  Vollbild-Reset (`CSI r`/`CSI 0;0 r`) die *aktuelle* Bildschirmhöhe als
+  festen Wert statt den dynamischen `INT_MAX`-Sentinel — nach einem
+  späteren Fenster-Resize (Wachsen) blieb die untere Marge auf der alten,
+  jetzt zu kleinen Zeile hängen, wodurch Scrollen an der *neuen* letzten
+  Zeile dauerhaft ausblieb. Hoch eingestuft, da über einen ganz normalen
+  Fenster-Resize nach jedem expliziten Region-Reset erreichbar.
+- **Bewusst nicht geändert:** die neue VT220-Kennung (`\x1b[?62c`) wurde
+  von Codex kritisiert, da nicht alle VT220-Fähigkeiten implementiert
+  sind. War aber ein expliziter Punkt aus diesem Meilenstein (s.o.), kein
+  Alleingang — Kommentar im Code dokumentiert bereits bewusst, dass keine
+  Feature-Codes mitgeclaimt werden. Nutzerentscheidung: wie spezifiziert
+  belassen.
+
+**Runde 5** (nach mehreren an einem Codex-Infra-Problem gescheiterten
+Versuchen, s.u., schließlich erfolgreich): 1 weiteres Finding, bewusst
+**nicht gefixt, sondern dokumentiert** (siehe Abschnitt 6): DECOM/
+Origin-Mode (`CSI ?6h/l`) ist nicht implementiert — Cursor-Adressierung
+bleibt immer physisch-bildschirmbezogen, auch bei aktivem Origin-Mode.
+War schon vor diesem Meilenstein in `doSetMode()` bewusst ignoriert
+(Kommentar dort), wird aber erst durch aktive Scroll-Regionen überhaupt
+beobachtbar. Nutzerentscheidung: als bekannte Lücke dokumentiert statt
+implementiert — moderne Curses-Programme (vim, nano, htop) adressieren
+üblicherweise absolut statt sich auf Origin-Mode zu verlassen, reale
+Praxisrelevanz gering.
+
+**Stolperstein — Codex-Infra-Instabilität:** über den Verlauf dieser Runde
+schlugen mehrere `/codex:adversarial-review`-Läufe mit identischem Fehler
+fehl (`unexpected status 404 Not Found: The model \`gpt-5.5\` does not
+exist or you do not have access to it.`) — ein Modell-Konfigurationsproblem
+auf Codex-Seite, intermittierend (in Summe lief etwa jeder zweite bis
+dritte Versuch durch). Nicht durch Code-Änderungen lösbar; als
+`hermes-gemma-review` (Gemma 4 über `hermes`) genutzt, um in der
+Zwischenzeit trotzdem eine unabhängige zweite Meinung zu bekommen (dreimal
+"PASS"/"Approved", einmal mit einem falsch-negativen Hinweis, `doSetScrollRegion()`
+sei im Diff nicht sichtbar — Artefakt der begrenzten Diff-Sicht, Methode
+war vorhanden und getestet).
+
+**Verifikation (gesamt):** alle 6 `ctest`-Targets grün (`tst_emulation`
+und `tst_cellarray` erweitert, u.a. `printableAutoWrapRespectsScrollRegion`,
+`insertAndDeleteLineRespectScrollRegion`, `fullScreenResetSurvivesLaterResize`,
+`scrollRegionHelpersDoNotCrashOnZeroHeightArray`). Jeder der zehn Fixes
+einzeln per gezieltem Revert-und-Wiederherstellen (statt Git-Stash — ein
+`git stash push --keep-index` hatte in dieser Runde einmal versehentlich
+zu weit zurückgesetzt, per `git checkout <pfad>` aus dem Index sauber
+wiederhergestellt, siehe Session-Historie) rot/grün verifiziert. Clean-Build
+mit `-Wall -Wextra`: 0 neue Warnungen. Offscreen-Smoke-Test grün, echtes
+`~/.config/Komport-Qt6/`-Profil unangetastet (md5 identisch vor/nach).
 
 - [x] Produktvision festhalten und bei kuenftigen Features gegenpruefen: Komport-Qt6
   soll ein spezialisiertes serielles Werkstatt-Terminal werden, nicht noch ein
@@ -966,11 +1060,21 @@ Verdrahtung "moot"/"unconfirmed"; der Kommentar-Nit (irreführender
   TODO-Stubs ohne echte Dateiverarbeitung — bleiben es auch nach der Portierung.
 - `KomportFileScrollBuffer::cell()` liefert immer `NULL` (Datei-Scrollback war im
   Original nie fertig implementiert) — unverändert übernommen.
-- VT100/VT102-Emulation: Scroll-Regionen (`DECSTBM`/`CSI r`) werden nur
-  konsumiert, nicht angewendet; `ESC M` (Reverse Index) scrollt am oberen Rand
-  nicht rückwärts; VT52-Modus, echte Zeichensatz-Umschaltung
-  (Linien-Grafikzeichen) und Insert-Mode (`CSI 4h`) sind nicht implementiert.
-  Details siehe `TODO-ARCHIVE.md` Abschnitt 8.2.
+- VT100/VT102-Emulation: Scroll-Regionen (`DECSTBM`/`CSI Pt;Pb r`), Reverse
+  Index (`ESC M`, inkl. Rückwärts-Scrollen am oberen Rand der Region) und
+  Insert-Mode (`CSI 4h`) sind seit Meilenstein 4 implementiert (Abschnitt 0.8).
+  Weiterhin nicht implementiert: VT52-Modus, echte Zeichensatz-Umschaltung
+  (Linien-Grafikzeichen) und **DECOM/Origin-Mode** (`CSI ?6h/l`) — Cursor-
+  Adressierung (`CSI H`/`f` und alle relativen Cursor-Bewegungen) bleibt immer
+  physisch-bildschirmbezogen, auch wenn ein Host Origin-Mode explizit
+  aktiviert; `doSetMode()` ignoriert `?6` bereits seit vor Meilenstein 4
+  bewusst (Kommentar dort). Erst durch aktive Scroll-Regionen überhaupt
+  beobachtbar (ohne Region gibt es nichts, worauf sich "relativ" beziehen
+  könnte) — von Codex in der Meilenstein-4-Review gefunden, bewusst nicht
+  gefixt: moderne Curses-Programme (vim, nano, htop) adressieren
+  üblicherweise absolut statt sich auf Origin-Mode zu verlassen, reale
+  Praxisrelevanz gering. Details siehe `TODO-ARCHIVE.md` Abschnitt 8.2 und
+  Abschnitt 0.8 unten.
 
 ## 6.1 Restpunkt: natives Toolbar-Tooltip verschwindet gelegentlich statt zu wechseln
 
@@ -1020,7 +1124,7 @@ Layout-Fix, Kate-artige Minimap-Scrollbar und RX/TX-Diagnosefilter im
 Hex-Monitor. Vollständig umgesetzt und verifiziert — Details in
 `TODO-ARCHIVE.md` Abschnitt 15.
 
-### Meilenstein 4 — Terminal-Upgrade (VT220 / erweiterter xterm-Farbraum) — offen
+### Meilenstein 4 — Terminal-Upgrade (VT220 / erweiterter xterm-Farbraum) — ✅ erledigt (2026-09-08)
 
 > Vollständige VT220-Kompatibilität sowie Integration moderner
 > xterm-Erweiterungen, damit komplexe CLI-Tools wie htop, tmux und farbige
@@ -1042,10 +1146,9 @@ Hex-Monitor. Vollständig umgesetzt und verifiziert — Details in
 >   `doDeviceAttributes()` immer als VT102, siehe `TODO-ARCHIVE.md` 8.2).
 > - Performance im Blick behalten, weiterhin 0 Warnungen bei `-Wall -Wextra`.
 
-Kein Automatismus, der ohne Weiteres "einfach mehr" macht — bewusst als
-eigener, noch nicht begonnener Auftrag stehen gelassen (größerer Eingriff in
-`komportemulation.cpp`, siehe auch die Scope-Diskussion zu VT100/VT102 vs.
-xterm-Erweiterungen in `CLAUDE.md`).
+Alle Punkte umgesetzt und über mehrere Codex-Review-Runden verifiziert —
+Details, Findings und Fixes in Abschnitt 0.8. Eine Lücke bewusst offen
+gelassen (DECOM/Origin-Mode, `CSI ?6h/l`), siehe Abschnitt 6.
 
 ### Meilenstein 5 — Konsolenkomfort (Aussehen-Tab, Farbschemata) — offen
 

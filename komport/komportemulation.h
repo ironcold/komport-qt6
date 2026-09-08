@@ -620,6 +620,8 @@ protected:
   virtual void doDeviceStatusReport();
   /** device attributes / "who are you" identification (CSI c) */
   virtual void doDeviceAttributes();
+  /** set scrolling region / DECSTBM (CSI Pt;Pb r) */
+  virtual void doSetScrollRegion();
 public slots:
   /** key press input. process and transmit the char. */
   virtual void slotKeyPressed(QKeyEvent* _e);
@@ -643,6 +645,20 @@ private:
   bool mPendingCharsetChar;
   /** DECCKM - application (ESC O x) vs. normal (ESC [ x) cursor key encoding */
   bool mApplicationCursorKeys;
+  /** DECIM - insert mode (CSI 4h/4l): printable characters shift the rest
+   *  of the row right instead of overwriting */
+  bool mInsertMode;
+  /** DECSTBM scroll region, 0-based, inclusive. mScrollTop defaults to 0
+   *  and mScrollBottom to INT_MAX so that scrollTop()/scrollBottom() below
+   *  clamp to "the whole current screen" and automatically track screen
+   *  resizes until an explicit "CSI Pt;Pb r" sets a real sub-region. */
+  int mScrollTop;
+  int mScrollBottom;
+  /** current scroll region, clamped to the live screen size on every call
+   *  (cheap defensive re-clamp instead of reacting to resize events - see
+   *  doSetScrollRegion()) */
+  int scrollTop() const;
+  int scrollBottom() const;
   /** what Return sends */
   LineEnding mLineEnding;
   /** parse mCtlSequence (optionally "?"-prefixed for private modes) as a
@@ -652,6 +668,14 @@ private:
    *  '[' in between) - Index, Reverse Index, Next Line, Save/Restore
    *  Cursor, Reset, keypad mode, charset select, ... */
   void shortEscape(char _ch);
+  /** advance the cursor one column, wrapping to the next line - and
+   *  scrolling at the *scroll region's* margin, not just the physical
+   *  screen's - when the wrap crosses the bottom row. Used for printable
+   *  characters instead of KomportCellArray::advanceCursor() (which has no
+   *  concept of a scroll region at all) so that DECSTBM is respected
+   *  whether output reaches the margin via LF/Index or via plain column
+   *  wrap. */
+  void advanceCursorWithWrap();
 public: // Public attributes
   /** save cursor position */
   QPoint mSaveCursor;
