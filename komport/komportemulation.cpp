@@ -732,7 +732,7 @@ void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
           // emulation's own generated escape sequences above (cursor
           // keys, Insert/Delete/Home/...) bypass this entirely, exactly
           // like the RX side bypasses translation for control codes.
-          char ch = KomportCharset::toWire(mCharset, text.at(0));
+          char ch = KomportCharset::toWire(mCharset, text.at(0), mCustomCharsetId);
           s->putChar(ch);
         }
         break;
@@ -1552,7 +1552,7 @@ void KomportEmulation::slotReceivedChar(char _ch)
       // is dispatched before this default: branch and never passes
       // through KomportCharset::toDisplay(), so escape-sequence parsing
       // is completely unaffected by whatever charset is selected.
-      cellArray()->drawChar( KomportCharset::toDisplay(mCharset, static_cast<unsigned char>(_ch)), cellArray()->cursor() );
+      cellArray()->drawChar( KomportCharset::toDisplay(mCharset, static_cast<unsigned char>(_ch), mCustomCharsetId), cellArray()->cursor() );
       advanceCursorWithWrap();
       break;
   }
@@ -1581,6 +1581,6 @@ void KomportEmulation::advanceCursorWithWrap()
 void KomportEmulation::slotSimKeyPressed(QChar _c){
    KomportSerial* s = serial();
    if ( s->isOpen() ) {
-      s->putChar( KomportCharset::toWire(mCharset, _c) ); // Milestone 7
+      s->putChar( KomportCharset::toWire(mCharset, _c, mCustomCharsetId) ); // Milestone 7
    }
 }

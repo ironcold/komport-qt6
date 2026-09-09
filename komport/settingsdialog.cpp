@@ -19,6 +19,8 @@
 #include "komportcharset.h"
 
 #include <QTabWidget>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QGroupBox>
 #include <QComboBox>
 #include <QSpinBox>
@@ -183,26 +185,51 @@ QWidget* SettingsDialog::createTerminalTab()
     // see KomportCharset for the mapping tables. Codex review finding:
     // an earlier version relied on the combo box's row position matching
     // KomportCharset::Id's numeric value (via toIndex()/fromIndex()) -
-    // correct today, but silently fragile against a future reordering of
-    // either the enum or names(). Each item now carries its actual Id
-    // explicitly as Qt::UserRole data instead, so display order and
-    // stored value can never drift apart even if one of them changes.
+    // correct then, but silently fragile against a future reordering of
+    // either the enum or names(). Each item now carries its settingsKey()-
+    // style *string* as Qt::UserRole data instead (not the bare Id) - the
+    // custom-charset addendum below is why: every loaded custom charset
+    // shares Id::Custom, so only the string (a built-in name, or a custom
+    // charset's own id) actually identifies a unique row.
     auto *charsetLabel = new QLabel( tr("Character Set:"), emulationGroup );
     CharsetComboBox = new QComboBox( emulationGroup );
     // displayEntries() is the single source of truth for name<->Id pairing
     // (see its own comment) - no separate list to keep in sync by hand.
     for ( const auto &entry : KomportCharset::displayEntries() ) {
-      CharsetComboBox->addItem( entry.second, static_cast<int>(entry.first) );
+      CharsetComboBox->addItem( entry.second, KomportCharset::settingsKey(entry.first) );
+    }
+    // Milestone 7 addendum (user request: "einen geeigneten Mechanismus
+    // vorsehen, so dass neue Tabellen einfach in ein entsprechendes
+    // Verzeichnis abgelegt werden und dann im Programm mit auswählbar
+    // sind"): anything the caller already found via reloadCustomCharsets()
+    // (KomportApp does this right before constructing this dialog) is
+    // just as selectable as the three built-ins above, with no code
+    // changes needed to add one - see KomportCharset::reloadCustomCharsets()
+    // for the *.charset file format.
+    for ( const auto &entry : KomportCharset::customCharsetEntries() ) {
+      CharsetComboBox->addItem( entry.second, entry.first );
     }
     CharsetComboBox->setToolTip( tr("Translate the raw byte stream between the serial\n"
                                      "device and the terminal display - for retro/industrial\n"
                                      "gear that doesn't speak plain ASCII/Latin-1.") );
+
+    OpenCustomCharsetsFolderButton = new QPushButton( tr("Custom Charsets Folder..."), emulationGroup );
+    OpenCustomCharsetsFolderButton->setToolTip(
+        tr("Open the folder where you can drop your own *.charset files -\n"
+           "see TODO.md for the file format. New files show up in the\n"
+           "dropdown above the next time this dialog is opened, no restart\n"
+           "or code change needed.") );
+    connect( OpenCustomCharsetsFolderButton, &QPushButton::clicked, this, [](){
+      QDesktopServices::openUrl( QUrl::fromLocalFile( KomportCharset::customCharsetsDirectory() ) );
+    } );
+
     VisualBellCheckBox = new QCheckBox( tr("Visual Bell"), emulationGroup );
     LocalEchoCheckBox = new QCheckBox( tr("Local Echo"), emulationGroup );
     auto *emulationLayout = new QVBoxLayout( emulationGroup );
     emulationLayout->addWidget( EmulationComboBox );
     emulationLayout->addWidget( charsetLabel );
     emulationLayout->addWidget( CharsetComboBox );
+    emulationLayout->addWidget( OpenCustomCharsetsFolderButton );
     emulationLayout->addWidget( VisualBellCheckBox );
     emulationLayout->addWidget( LocalEchoCheckBox );
     emulationLayout->addStretch( 1 );

@@ -92,6 +92,10 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   connect( view->getSerial(), &KomportSerial::settingsFailed, this, &KomportApp::slotSerialSettingsFailed );
 
   readOptions();
+  // Milestone 7 addendum: populate the custom-charset registry before any
+  // profile gets loaded below - a profile whose Charset value names a
+  // custom charset needs it to already be resolvable.
+  KomportCharset::reloadCustomCharsets();
   seedBuiltinProfiles();
   initProfiles();
 }
@@ -704,8 +708,15 @@ void KomportApp::loadProfile(const QString &_name)
   // Milestone 7: applied directly (not through a signal-driven toolbar
   // widget like lineEndingCombo above) so it's unconditional - no risk of
   // silently no-op'ing just because the new profile happens to already
-  // match whatever the previous one had selected.
-  view->mEmulation->setCharset( KomportCharset::fromSettingsKey(strCharset) );
+  // match whatever the previous one had selected. resolveSettingsKey()
+  // covers both the three built-ins and any loaded custom charset (see
+  // KomportCharset::Selection) - a profile referencing a custom charset
+  // whose file has since been deleted/renamed gracefully falls back to
+  // Standard rather than crashing or guessing.
+  {
+    const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( strCharset );
+    view->mEmulation->setCharset( sel.id, sel.customId );
+  }
 
   refreshProfileCombo( _name );
   // Don't stomp on a serial error applyConnectionSettings() may have just
@@ -1094,6 +1105,11 @@ void KomportApp::slotShowPreferences()
   // getting silently cleared by a stale flag from some earlier, unrelated
   // failure or overwritten by this method's own trailing "Ready.".
   mSerialErrorPending = false;
+  // Milestone 7 addendum: re-scan for custom *.charset files every time
+  // this dialog opens (cheap - typically a handful of small files), so a
+  // file the user just dropped into customCharsetsDirectory() shows up
+  // in the dropdown below without needing to restart the app.
+  KomportCharset::reloadCustomCharsets();
   ///////////////////////////////////////////////////////////////////
   // open the settings dialog...
   SettingsDialog settingsDialog(this);
@@ -1111,9 +1127,16 @@ void KomportApp::slotShowPreferences()
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
   // Codex review finding: read/write via the combo's own Qt::UserRole data
   // (findData()/currentData()) rather than row-index<->enum-value
-  // coupling - see KomportCharset::displayEntries()'s comment.
+  // coupling - see KomportCharset::displayEntries()'s comment. The
+  // payload is the settingsKey()-style string (not the bare Id) since
+  // Milestone 7's custom-charset addendum: every loaded custom charset
+  // shares Id::Custom, so only the string (built-in name, or a custom
+  // charset's own id) actually identifies a unique dropdown row.
   {
-    const int idx = settingsDialog.CharsetComboBox->findData( static_cast<int>( view->mEmulation->charset() ) );
+    const QString currentKey = ( view->mEmulation->charset() == KomportCharset::Custom )
+        ? view->mEmulation->customCharsetId()
+        : KomportCharset::settingsKey( view->mEmulation->charset() );
+    const int idx = settingsDialog.CharsetComboBox->findData( currentKey );
     if ( idx >= 0 ) settingsDialog.CharsetComboBox->setCurrentIndex( idx );
   }
   settingsDialog.setSelectedFont( view->font() ); // Milestone 5
@@ -1133,9 +1156,12 @@ void KomportApp::slotShowPreferences()
       // Milestone 7: font/colors below already apply live and independent
       // of the serial settings, same reasoning applies here - no port
       // re-open, no mSerialErrorPending interplay.
-      const KomportCharset::Id charset = static_cast<KomportCharset::Id>( settingsDialog.CharsetComboBox->currentData().toInt() );
-      strCharset = KomportCharset::settingsKey( charset );
-      view->mEmulation->setCharset( charset );
+      {
+        const QString key = settingsDialog.CharsetComboBox->currentData().toString();
+        const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( key );
+        strCharset = key;
+        view->mEmulation->setCharset( sel.id, sel.customId );
+      }
 
       view->setScrollBuffer( strScrollBuffer.toInt() );
       KomportSerial* serial = view->getSerial();
@@ -1257,9 +1283,10 @@ void KomportApp::slotMacroTriggered(const QString &command)
   // text sent as a macro vs. typed by hand could reach the wire
   // differently.
   const KomportCharset::Id charset = view->mEmulation->charset();
+  const QString customCharsetId = view->mEmulation->customCharsetId();
   QByteArray wireBytes;
   wireBytes.reserve( command.size() );
-  for ( const QChar &c : command ) wireBytes.append( KomportCharset::toWire(charset, c) );
+  for ( const QChar &c : command ) wireBytes.append( KomportCharset::toWire(charset, c, customCharsetId) );
   // Codex review finding (round 2, corrected in round 3): putStr()'s
   // null-terminated const char* overload would silently truncate at a
   // genuine embedded NUL (CP437's byte 0x00 is real Unicode NUL since the

@@ -40,6 +40,9 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QComboBox>
+#include <QTextStream>
+#include <QScopeGuard>
+#include <algorithm>
 
 class TstCharset : public QObject
 {
@@ -67,6 +70,11 @@ private slots:
   void emulationDefaultsToStandardCharset();
   void settingsDialogComboBoxStoresIdAsUserRoleNotRowPosition();
   void legacyProfileWithoutCharsetKeyFallsBackToStandard();
+  void customCharsetsDirectoryIsCreated();
+  void customCharsetFileMechanismLoadsAndTranslatesCorrectly();
+  void customCharsetMalformedLinesAreSkippedNotFatal();
+  void customCharsetIdCollidingWithBuiltinNameIsRejected();
+  void emulationTranslatesThroughLoadedCustomCharset();
 
 private:
   QString mTestConfigFile;
@@ -256,11 +264,19 @@ void TstCharset::namesAndIndexRoundTrip()
 
 void TstCharset::settingsKeyRoundTrips()
 {
+  // Milestone 7 custom-charset addendum: fromSettingsKey()->Id was
+  // replaced by resolveSettingsKey()->Selection, since a bare Id can no
+  // longer distinguish between "no custom charset" and "which of
+  // possibly many loaded custom charsets" - see KomportCharset::Selection.
   for ( auto id : { KomportCharset::Standard, KomportCharset::CP437, KomportCharset::PETSCII } ) {
-    QCOMPARE( KomportCharset::fromSettingsKey( KomportCharset::settingsKey(id) ), id );
+    const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( KomportCharset::settingsKey(id) );
+    QCOMPARE( sel.id, id );
+    QVERIFY( sel.customId.isEmpty() );
   }
   // an unrecognized/corrupted key must not crash and must fall back to Standard
-  QCOMPARE( KomportCharset::fromSettingsKey( QStringLiteral("NoSuchCharset") ), KomportCharset::Standard );
+  const KomportCharset::Selection unknown = KomportCharset::resolveSettingsKey( QStringLiteral("NoSuchCharset") );
+  QCOMPARE( unknown.id, KomportCharset::Standard );
+  QVERIFY( unknown.customId.isEmpty() );
 }
 
 void TstCharset::emulationTranslatesReceivedBytesThroughSelectedCharset()
@@ -313,24 +329,34 @@ void TstCharset::settingsDialogComboBoxStoresIdAsUserRoleNotRowPosition()
   // from KomportCharset::names() and read back via
   // fromIndex(currentIndex()) - correct only as long as row position
   // happened to match Id's numeric value, with nothing enforcing that.
-  // It's now populated from displayEntries() with each item's Id stored
-  // explicitly as Qt::UserRole data - this test checks that data
-  // directly, independent of row order, and that findData()/currentData()
-  // (as komport.cpp now uses) actually round-trip through it.
+  // Milestone 7 custom-charset addendum: the UserRole payload is now the
+  // settingsKey()-style *string*, not the bare Id, since every loaded
+  // custom charset shares Id::Custom - only the string uniquely
+  // identifies a row. This test deliberately doesn't assume zero custom
+  // entries (another test in this file may have loaded one into the
+  // process-wide registry already - see customCharsetFileMechanism...()
+  // below), it just checks the built-ins come first, in order, followed
+  // by whatever customCharsetEntries() currently reports.
   SettingsDialog dialog;
   QVERIFY( dialog.CharsetComboBox != nullptr );
 
-  const auto entries = KomportCharset::displayEntries();
-  QCOMPARE( dialog.CharsetComboBox->count(), entries.size() );
-  for ( int i = 0; i < entries.size(); ++i ) {
-    QCOMPARE( dialog.CharsetComboBox->itemData(i).toInt(), static_cast<int>(entries.at(i).first) );
-    QCOMPARE( dialog.CharsetComboBox->itemText(i), entries.at(i).second );
+  const auto builtins = KomportCharset::displayEntries();
+  const auto customs = KomportCharset::customCharsetEntries();
+  QCOMPARE( dialog.CharsetComboBox->count(), builtins.size() + customs.size() );
+  for ( int i = 0; i < builtins.size(); ++i ) {
+    QCOMPARE( dialog.CharsetComboBox->itemData(i).toString(), KomportCharset::settingsKey(builtins.at(i).first) );
+    QCOMPARE( dialog.CharsetComboBox->itemText(i), builtins.at(i).second );
+  }
+  for ( int i = 0; i < customs.size(); ++i ) {
+    QCOMPARE( dialog.CharsetComboBox->itemData(builtins.size() + i).toString(), customs.at(i).first );
+    QCOMPARE( dialog.CharsetComboBox->itemText(builtins.size() + i), customs.at(i).second );
   }
 
-  const int idx = dialog.CharsetComboBox->findData( static_cast<int>(KomportCharset::PETSCII) );
+  const QString petsciiKey = KomportCharset::settingsKey(KomportCharset::PETSCII);
+  const int idx = dialog.CharsetComboBox->findData( petsciiKey );
   QVERIFY( idx >= 0 );
   dialog.CharsetComboBox->setCurrentIndex(idx);
-  QCOMPARE( static_cast<KomportCharset::Id>(dialog.CharsetComboBox->currentData().toInt()), KomportCharset::PETSCII );
+  QCOMPARE( dialog.CharsetComboBox->currentData().toString(), petsciiKey );
 }
 
 void TstCharset::legacyProfileWithoutCharsetKeyFallsBackToStandard()
@@ -398,6 +424,172 @@ void TstCharset::legacyProfileWithoutCharsetKeyFallsBackToStandard()
 
   win->close();
   QTRY_VERIFY( guard.isNull() );
+}
+
+void TstCharset::customCharsetsDirectoryIsCreated()
+{
+  // Milestone 7 addendum (user request: "einen geeigneten Mechanismus
+  // vorsehen, so dass neue Tabellen einfach in ein entsprechendes
+  // Verzeichnis abgelegt werden") - the directory has to actually exist
+  // before a user can be told "drop a file in here", not just be a path
+  // string that happens to work once something else creates it first.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  QVERIFY( !dir.isEmpty() );
+  QVERIFY2( QDir(dir).exists(), qPrintable(QStringLiteral("%1 should have been created").arg(dir)) );
+  // this test's own org/app name (see initTestCase()) keeps it away from
+  // the real user's ~/.config/Komport-Qt6/charsets/ entirely.
+  QVERIFY( dir.contains(QStringLiteral("Komport-Qt6-Test-Charset")) );
+}
+
+void TstCharset::customCharsetFileMechanismLoadsAndTranslatesCorrectly()
+{
+  // End-to-end proof of the actual "drop a file in, it becomes
+  // selectable" mechanism: write a real *.charset file, reload the
+  // registry, verify it's listed with the right name/id, and that RX/TX
+  // translation genuinely reads from its table (not e.g. accidentally
+  // falling back to Standard/CP437's tables).
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstcustom.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "# Name: Test Custom Charset\n";
+    out << "DB=2588\n"; // full block
+    out << "41=03B1\n"; // 'A' (0x41) -> α, an arbitrary distinctive override
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets(); // leave the registry clean for later tests
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstcustom"); } );
+  QVERIFY2( it != customs.end(), "tstcustom.charset was not picked up by reloadCustomCharsets()" );
+  QCOMPARE( it->second, QStringLiteral("Test Custom Charset") );
+
+  // RX: the two overridden bytes translate as specified in the file...
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0xDB, QStringLiteral("tstcustom")), QChar(0x2588) );
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstcustom")), QChar(0x03B1) );
+  // ...and anything NOT listed defaults to identity, same policy as
+  // CP437/PETSCII's own control ranges - this is what makes control
+  // codes safe without the file author needing to think about VT100 at all.
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x42, QStringLiteral("tstcustom")), QChar('B') );
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x0D, QStringLiteral("tstcustom")), QChar(0x0D) );
+
+  // TX: reverse direction, derived automatically from the same table -
+  // no separate "reverse table" section in the file format.
+  QCOMPARE( KomportCharset::toWire(KomportCharset::Custom, QChar(0x2588), QStringLiteral("tstcustom")), static_cast<char>(0xDB) );
+  QCOMPARE( KomportCharset::toWire(KomportCharset::Custom, QChar(0x03B1), QStringLiteral("tstcustom")), static_cast<char>(0x41) );
+  QCOMPARE( KomportCharset::toWire(KomportCharset::Custom, QChar('B'), QStringLiteral("tstcustom")), 'B' );
+
+  // Persistence: the filename stem *is* the settings key directly - no
+  // "Custom:" prefix or similar needed.
+  const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( QStringLiteral("tstcustom") );
+  QCOMPARE( sel.id, KomportCharset::Custom );
+  QCOMPARE( sel.customId, QStringLiteral("tstcustom") );
+}
+
+void TstCharset::customCharsetMalformedLinesAreSkippedNotFatal()
+{
+  // Consistent with this codebase's general policy of clamping/skipping
+  // individual bad values instead of rejecting an entire file/profile
+  // over one bad line (see KomportApp::loadProfile()'s handling of a
+  // corrupted profile field) - a typo on one line must not lose every
+  // other, valid override in the same file.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstmalformed.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=03B1\n";        // valid
+    out << "this is garbage\n"; // malformed - no '='
+    out << "ZZ=03B2\n";        // malformed - byte not valid hex
+    out << "42=GGGG\n";        // malformed - code point not valid hex
+    out << "43=1FFFFF\n";      // malformed - code point out of range (>0xFFFF)
+    out << "FF=0100\n";        // valid
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstmalformed"); } );
+  QVERIFY2( it != customs.end(), "a file with some malformed lines must still load overall" );
+
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstmalformed")), QChar(0x03B1) ); // valid line took effect
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0xFF, QStringLiteral("tstmalformed")), QChar(0x0100) ); // valid line took effect
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x42, QStringLiteral("tstmalformed")), QChar('B') );    // malformed code point -> left at identity
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x43, QStringLiteral("tstmalformed")), QChar('C') );    // out-of-range code point -> left at identity
+}
+
+void TstCharset::customCharsetIdCollidingWithBuiltinNameIsRejected()
+{
+  // A file whose id (filename stem) matches a built-in name must not be
+  // able to shadow or interfere with that hardened, already-reviewed
+  // built-in implementation - see reloadCustomCharsets()'s own comment.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/CP437.charset"); // collides case-insensitively
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=03B1\n"; // if this somehow took effect, CP437's own 'A' would break
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first.compare(QStringLiteral("CP437"), Qt::CaseInsensitive) == 0; } );
+  QVERIFY2( it == customs.end(), "a custom charset file colliding with a built-in name must be rejected, not silently shadow it" );
+
+  // the real, built-in CP437 must be completely unaffected.
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::CP437, 0x41), QChar('A') );
+}
+
+void TstCharset::emulationTranslatesThroughLoadedCustomCharset()
+{
+  // Same integration-level check as
+  // emulationTranslatesReceivedBytesThroughSelectedCharset() above, but
+  // for a loaded custom charset instead of a built-in one - proves the
+  // KomportEmulation::setCharset(Id, customId)/mCustomCharsetId plumbing
+  // actually reaches KomportCharset::toDisplay(), not just the direct
+  // static-function call tested above.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstemu.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=2588\n"; // 'A' (0x41) -> █
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  KomportSerial serial;
+  KomportCellArray cellArray;
+  KomportEmulation emu(&serial, &cellArray);
+  emu.setCharset( KomportCharset::Custom, QStringLiteral("tstemu") );
+  QCOMPARE( emu.charset(), KomportCharset::Custom );
+  QCOMPARE( emu.customCharsetId(), QStringLiteral("tstemu") );
+
+  emu.slotReceivedChar('A');
+  KomportCell *cell = cellArray.cell(0, 0);
+  QVERIFY( cell != nullptr );
+  QCOMPARE( cell->character(), QChar(0x2588) );
 }
 
 QTEST_MAIN(TstCharset)

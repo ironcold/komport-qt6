@@ -49,21 +49,81 @@ Verifikationsprotokolle in `TODO-ARCHIVE.md`:
   sonst unauffindbar war). PR #3 + #4 auf Codeberg, beide gemergt,
   `master` auf Codeberg und GitHub synchron.
 - **Meilenstein 7 — Retro-/Industrie-Zeichensatz-Übersetzung** (2026-09-09,
-  Branch `milestone-7-charset`, noch nicht gemergt): neue
-  `KomportCharset`-Klasse, byte-basierte Übersetzung zwischen rohem
-  seriellem Bytestrom und Terminal-Emulation (RX in
-  `KomportEmulation::slotReceivedChar()`s `default:`-Zweig, TX in
-  `slotKeyPressed()`/`slotSimKeyPressed()`), vollständig in die
-  Profilverwaltung integriert. Umgesetzt: CP437 (0x80-0xFF-Bereich) und
-  PETSCII (ASCII-kompatibler Bereich + £/↑/←). Bewusst nicht umgesetzt:
-  "Amiga" (keine belastbare Quelle für die früher eigenständige
-  Amiga-1.x-Zeichenbelegung) und CP437s ikonischer 0x00-0x1F-Grafikbereich
-  (echter Konflikt mit VT100-Steuercodes, siehe Abschnitt 6.3). Gemma4 +
-  Codex (`gpt-5.6-sol`) Review: 3 Hoch-, 2 Mittel-, 1 Niedrig-Finding,
-  alle gefixt und verifiziert (u.a. eine Leerzeichen/NUL-Byte-Kollision im
-  CP437-Rückwärts-Mapping, ein Profil-Leck-Bug derselben Klasse wie bei
-  Meilenstein 5, ein stillschweigend falscher Fallback für nicht
-  darstellbare Zeichen). tests/tst_charset.cpp neu, 19 Testfunktionen.
+  PR #6, gemergt): neue `KomportCharset`-Klasse, byte-basierte
+  Übersetzung zwischen rohem seriellem Bytestrom und Terminal-Emulation
+  (RX in `KomportEmulation::slotReceivedChar()`s `default:`-Zweig, TX in
+  `slotKeyPressed()`/`slotSimKeyPressed()`/Makro-Text), vollständig in
+  die Profilverwaltung integriert. Umgesetzt: CP437 (0x80-0xFF-Bereich)
+  und PETSCII (ASCII-kompatibler Bereich + £/↑/← + C0-Steuerbereich als
+  Identität). Bewusst nicht umgesetzt: "Amiga" (keine belastbare Quelle
+  für die früher eigenständige Amiga-1.x-Zeichenbelegung) und CP437s
+  ikonischer 0x00-0x1F-Grafikbereich (echter Konflikt mit
+  VT100-Steuercodes, siehe Abschnitt 6.3). Vier Codex-Review-Runden
+  (`gpt-5.6-sol`, erste zusätzlich mit Gemma4-Gate) bis zur bestätigten
+  Konvergenz ("no Medium or High issues found"), 14 Findings insgesamt,
+  alle gefixt und verifiziert — u.a. eine Leerzeichen/NUL-Byte-Kollision
+  im CP437-Rückwärts-Mapping, ein Profil-Leck-Bug derselben Klasse wie
+  bei Meilenstein 5, mehrere stillschweigend-falsche-Byte-Fallbacks bei
+  CP437/PETSCII, eine neue längenbasierte `KomportSerial::putStr()`-
+  Überladung für korrekt übertragene eingebettete NUL-Bytes (echter
+  Pty-Paar-Regressionstest via `openpty()`). `tests/tst_charset.cpp` neu.
+  **Nachtrag — benutzerdefinierte Zeichensätze ohne Code (2026-09-09,
+  Nutzerwunsch):** `KomportCharset` lädt zusätzlich beliebig viele
+  `*.charset`-Dateien aus `customCharsetsDirectory()`
+  (`~/.config/Komport-Qt6/charsets/` — der "Custom Charsets Folder..."-
+  Button im Settings-Dialog öffnet ihn direkt), ohne Neubau nötig — siehe
+  Abschnitt 1 unten für Format und Details.
+
+## 1. Referenz: Benutzerdefinierte Zeichensätze (`*.charset`-Dateien)
+
+Seit Meilenstein 7 (siehe Abschnitt 0 oben) unterstützt der Zeichensatz-
+Dropdown im Settings-Dialog (Terminal-Tab) neben "Standard"/"IBM CP437"/
+"PETSCII" beliebig viele selbst hinzugefügte Zeichensätze — **ohne Code
+zu ändern oder neu zu bauen.** Eine Datei ablegen, Settings-Dialog neu
+öffnen, fertig.
+
+**Verzeichnis:** `KomportCharset::customCharsetsDirectory()` — praktisch
+immer `~/.config/Komport-Qt6/charsets/` (direkt neben der eigentlichen
+`Komport-Qt6.conf`), wird beim ersten Programmstart automatisch
+angelegt. Der Button "Custom Charsets Folder..." im Settings-Dialog
+(Terminal-Tab, unter dem Zeichensatz-Dropdown) öffnet ihn direkt im
+Dateimanager.
+
+**Dateiformat** (Klartext, eine `.charset`-Datei = ein Zeichensatz,
+Dateiname ohne Endung = interner Name = Wert in `Profiles/<Name>/
+Charset`):
+
+```
+# Name: Mein Zeichensatz
+#
+# Eine Zeile pro Abweichung: <Byte hex, 00-FF>=<Unicode-Codepoint hex, 0000-FFFF>
+# Nicht aufgeführte Bytes bleiben automatisch Identität (Byte == Codepoint) -
+# das macht Steuercodes (0x00-0x1F, 0x7F) sicher, ohne dass man beim
+# Schreiben der Datei an VT100-Semantik denken muss.
+DB=2588
+41=03B1
+```
+
+- `# Name: ...` (optional) setzt den im Dropdown angezeigten Namen —
+  fehlt die Zeile, wird der Dateiname selbst verwendet.
+- Andere `#`-Zeilen sind reine Kommentare.
+- Fehlerhafte einzelne Zeilen (kein `=`, ungültiges Hex, Codepoint über
+  `FFFF`) werden übersprungen und geloggt (`qWarning()`), nicht die ganze
+  Datei verworfen.
+- Die Rückrichtung (Tastatur/Einfügen/Makro → Draht) wird automatisch aus
+  derselben Tabelle abgeleitet — keine zweite Tabelle nötig. Ein Zeichen,
+  das der Zeichensatz nicht abbilden kann, wird beim Senden als `?`
+  markiert statt stillschweigend falsch/als NUL gesendet.
+- Ein Dateiname, der (Groß-/Kleinschreibung egal) mit einem eingebauten
+  Namen kollidiert ("Standard"/"CP437"/"PETSCII"), wird übersprungen und
+  geloggt — kein stilles Überschatten der eingebauten, bereits mehrfach
+  review-verifizierten Implementierungen.
+- Neu eingeladen wird beim Programmstart und jedes Mal, wenn der
+  Settings-Dialog geöffnet wird — kein Neustart nötig, um eine gerade
+  abgelegte Datei nutzen zu können.
+
+Vollständige technische Details/Rationale im Code-Kommentar von
+`KomportCharset::reloadCustomCharsets()` (`komport/komportcharset.h`).
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 
@@ -269,7 +329,7 @@ mit sichtbarem Text) — eigener, in sich abgeschlossener Auftrag, am besten
 NACH den funktionalen Meilensteinen 4/5, damit nicht doppelt an neu
 hinzukommenden Strings gearbeitet werden muss.
 
-### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09, noch nicht gemergt)
+### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09)
 
 > Option zur Zeichensatz-Übersetzung zwischen `QSerialPort` und der
 > Emulation, um die Kommunikation mit historischen Systemen zu
@@ -294,7 +354,9 @@ nicht umgesetzt (keine belastbare Quelle für die eigenständige
 Amiga-1.x-Zeichenbelegung, per Web-Recherche verifiziert statt geraten),
 CP437s 0x00-0x1F-Grafikbereich bewusst zurückgestellt (Abschnitt 6.3) —
 beide Abweichungen vom ursprünglichen Spec-Umfang sind bewusste,
-dokumentierte Entscheidungen, keine übersehenen Lücken.
+dokumentierte Entscheidungen, keine übersehenen Lücken. Nachtrag
+(Nutzerwunsch): benutzerdefinierte `*.charset`-Dateien ohne Code/Neubau
+möglich, siehe Abschnitt 1.
 
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 

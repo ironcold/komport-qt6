@@ -18,6 +18,14 @@
 #include "komportcharset.h"
 
 #include <QMap>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSettings>
+#include <QTextStream>
+#include <QRegularExpression>
+#include <QDebug>
+#include <array>
 
 namespace {
 
@@ -43,7 +51,12 @@ namespace {
  *  and only the unambiguous 0x80-0xFF extended range is real CP437.
  *  Tracked as a known, documented scope limitation in TODO.md - restoring
  *  the low-range glyphs would need either a dedicated "raw graphics mode"
- *  toggle or per-control-code special-casing, out of scope for this pass. */
+ *  toggle or per-control-code special-casing, out of scope for this pass.
+ *
+ *  A custom *.charset file (see reloadCustomCharsets()) that wants those
+ *  glyphs back can add them for itself - the file format has no such
+ *  built-in restriction, this restriction is specific to the built-in
+ *  CP437 table's own scope decision. */
 const char16_t kCp437[256] = {
   // 0x00-0x0F
   0x0000,0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007,
@@ -150,10 +163,103 @@ const QMap<char16_t, unsigned char> &cp437Reverse()
   return table;
 }
 
+/** one loaded *.charset file - always a full 256-entry table (unlisted
+ *  bytes default to identity, see loadCustomCharsetFile()), same shape
+ *  as kCp437 above, plus its own eagerly-built reverse lookup (same
+ *  "first insert wins" tie-break as cp437Reverse(), see its comment). */
+struct CustomEntry {
+  QString id;          // filename stem - also the persisted settings key
+  QString displayName; // dropdown label - "# Name: ..." in the file, or id
+  std::array<char16_t, 256> forward{};
+  QMap<char16_t, unsigned char> reverse;
+};
+
+/** in-memory registry of currently loaded custom charsets, rebuilt by
+ *  KomportCharset::reloadCustomCharsets(). A function-local static
+ *  mutable reference, same idiom already used for the tables above -
+ *  this whole class is otherwise stateless/static, this is the one
+ *  deliberate exception (the registry has to live somewhere between a
+ *  reload and the next one). */
+QVector<CustomEntry> &customRegistry()
+{
+  static QVector<CustomEntry> registry;
+  return registry;
+}
+
+/** parse one *.charset file into _out. Returns false (logs a qWarning())
+ *  only if the file itself couldn't be opened at all - a malformed
+ *  individual *line* is logged and skipped, not treated as a reason to
+ *  reject the whole file (consistent with this codebase's general
+ *  policy of clamping/defaulting bad individual values rather than
+ *  failing outright, e.g. KomportApp::loadProfile()'s handling of a
+ *  corrupted profile field). See KomportCharset::reloadCustomCharsets()'s
+ *  header comment for the format itself. */
+bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
+{
+  QFile file(_path);
+  if ( !file.open(QIODevice::ReadOnly | QIODevice::Text) ) {
+    qWarning() << "KomportCharset: could not open" << _path << "(" << file.errorString() << ")";
+    return false;
+  }
+
+  const QFileInfo info(_path);
+  _out.id = info.completeBaseName(); // filename without its ".charset" extension
+  _out.displayName = _out.id;        // fallback - "# Name: ..." below can override
+  for ( int b = 0; b < 256; ++b ) _out.forward[b] = static_cast<char16_t>(b); // default: identity
+
+  static const QRegularExpression nameDirective(
+      QStringLiteral("^#\\s*Name\\s*:\\s*(.+?)\\s*$"), QRegularExpression::CaseInsensitiveOption );
+
+  QTextStream in(&file);
+  int lineNo = 0;
+  while ( !in.atEnd() ) {
+    const QString rawLine = in.readLine();
+    ++lineNo;
+    const QString line = rawLine.trimmed();
+    if ( line.isEmpty() ) continue;
+    if ( line.startsWith(QLatin1Char('#')) ) {
+      const QRegularExpressionMatch m = nameDirective.match(line);
+      if ( m.hasMatch() ) _out.displayName = m.captured(1);
+      continue; // any other comment line is just a comment
+    }
+    const int eq = line.indexOf(QLatin1Char('='));
+    if ( eq <= 0 ) {
+      qWarning() << "KomportCharset:" << _path << "line" << lineNo
+                 << "- expected '<hex byte>=<hex code point>', skipping:" << rawLine;
+      continue;
+    }
+    bool byteOk = false, codeOk = false;
+    const uint byteVal = line.left(eq).trimmed().toUInt( &byteOk, 16 );
+    const uint codeVal = line.mid(eq + 1).trimmed().toUInt( &codeOk, 16 );
+    if ( !byteOk || !codeOk || byteVal > 0xFF || codeVal > 0xFFFF ) {
+      qWarning() << "KomportCharset:" << _path << "line" << lineNo
+                 << "- byte/code point out of range (byte must be 00-FF, code point"
+                    " 0000-FFFF - no surrogate-pair/astral support), skipping:" << rawLine;
+      continue;
+    }
+    _out.forward[byteVal] = static_cast<char16_t>(codeVal);
+  }
+
+  for ( int b = 0; b < 256; ++b ) {
+    const char16_t u = _out.forward[static_cast<std::size_t>(b)];
+    if ( !_out.reverse.contains(u) ) _out.reverse.insert( u, static_cast<unsigned char>(b) );
+  }
+  return true;
+}
+
 } // namespace
 
-QChar KomportCharset::toDisplay(Id _charset, unsigned char _rawByte)
+QChar KomportCharset::toDisplay(Id _charset, unsigned char _rawByte, const QString &_customId)
 {
+  if ( _charset == Custom ) {
+    for ( const CustomEntry &entry : customRegistry() ) {
+      if ( entry.id == _customId ) return QChar( entry.forward[_rawByte] );
+    }
+    // unknown/no-longer-loaded custom id (e.g. the file was deleted after
+    // a profile was saved referencing it) - Standard's identity behavior
+    // rather than crashing or guessing at a replacement.
+    return QChar( static_cast<uchar>(_rawByte) );
+  }
   switch ( _charset ) {
     case CP437:
       return QChar( kCp437[_rawByte] );
@@ -165,12 +271,13 @@ QChar KomportCharset::toDisplay(Id _charset, unsigned char _rawByte)
         return QChar( static_cast<uchar>(_rawByte) ); // identity fallback
       }
     case Standard:
+    case Custom: // unreachable - handled above
     default:
       return QChar( static_cast<uchar>(_rawByte) );
   }
 }
 
-char KomportCharset::toWire(Id _charset, QChar _ch)
+char KomportCharset::toWire(Id _charset, QChar _ch, const QString &_customId)
 {
   // Codex review finding: falling back to _ch.toLatin1() unconditionally
   // for *any* charset was silently wrong in two ways. (1) For CP437, its
@@ -185,7 +292,19 @@ char KomportCharset::toWire(Id _charset, QChar _ch)
   // indistinguishable from a deliberately-typed real NUL character, and a
   // NUL byte sent to real serial gear is far more likely to be
   // disruptive than a visibly-wrong placeholder. '?' now marks "this
-  // charset cannot represent this character" explicitly instead.
+  // charset cannot represent this character" explicitly instead. Custom
+  // charsets get the same exhaustive-reverse-table treatment as CP437,
+  // since a loaded custom table is always a full 256-entry table too.
+  if ( _charset == Custom ) {
+    for ( const CustomEntry &entry : customRegistry() ) {
+      if ( entry.id == _customId ) {
+        auto it = entry.reverse.constFind( _ch.unicode() );
+        return ( it != entry.reverse.constEnd() ) ? static_cast<char>( it.value() ) : '?';
+      }
+    }
+    // unknown/no-longer-loaded custom id - Standard's own fallback policy.
+    return ( _ch.unicode() <= 0xFF ) ? _ch.toLatin1() : '?';
+  }
   switch ( _charset ) {
     case CP437:
       {
@@ -236,6 +355,7 @@ char KomportCharset::toWire(Id _charset, QChar _ch)
         return controlOrAsciiIdentityRange ? _ch.toLatin1() : '?';
       }
     case Standard:
+    case Custom: // unreachable - handled above
     default:
       // Standard's whole definition is "byte value == code point", so
       // toLatin1() is correct here for the full Latin-1 range, not just a
@@ -251,6 +371,7 @@ char KomportCharset::toWire(Id _charset, QChar _ch)
 // maintenance hazard even though nothing had actually drifted yet. All
 // three now derive directly from displayEntries(), the one place that
 // pairs an Id with its display name, so they cannot drift from it.
+// Custom is deliberately excluded - see customCharsetEntries() instead.
 QVector<QPair<KomportCharset::Id, QString>> KomportCharset::displayEntries()
 {
   return {
@@ -288,14 +409,78 @@ QString KomportCharset::settingsKey(Id _charset)
   switch ( _charset ) {
     case CP437:   return QStringLiteral("CP437");
     case PETSCII: return QStringLiteral("PETSCII");
+    case Custom:
+      qWarning() << "KomportCharset::settingsKey() called with Custom - there is no single"
+                    " fixed key for it, use the loaded custom charset's own id"
+                    " (customCharsetEntries()) directly as the settings key instead";
+      return QStringLiteral("Standard");
     case Standard:
     default:      return QStringLiteral("Standard");
   }
 }
 
-KomportCharset::Id KomportCharset::fromSettingsKey(const QString &_key)
+KomportCharset::Selection KomportCharset::resolveSettingsKey(const QString &_key)
 {
-  if ( _key == QStringLiteral("CP437") ) return CP437;
-  if ( _key == QStringLiteral("PETSCII") ) return PETSCII;
-  return Standard;
+  if ( _key == QStringLiteral("CP437") ) return { CP437, QString() };
+  if ( _key == QStringLiteral("PETSCII") ) return { PETSCII, QString() };
+  if ( _key == QStringLiteral("Standard") ) return { Standard, QString() };
+  for ( const CustomEntry &entry : customRegistry() ) {
+    if ( entry.id == _key ) return { Custom, entry.id };
+  }
+  // Unrecognized (an old profile referencing a custom charset file that's
+  // since been deleted/renamed, a hand-edited config, ...) - same
+  // graceful-degradation policy as the rest of this codebase's profile
+  // loading: fall back to a safe, known-good default rather than
+  // crashing or guessing.
+  return { Standard, QString() };
+}
+
+QString KomportCharset::customCharsetsDirectory()
+{
+  // Derived directly from the real QSettings config file's own location
+  // (~/.config/Komport-Qt6/Komport-Qt6.conf on Linux -> .../Komport-Qt6/
+  // charsets/) rather than QStandardPaths::AppConfigLocation - that
+  // resolves to "~/.config/<organizationName>/<applicationName>" (BOTH,
+  // not just applicationName - both happen to be "Komport-Qt6", see
+  // main.cpp), landing in a *nested* .../Komport-Qt6/Komport-Qt6/
+  // directory rather than next to the actual .conf file. Using
+  // QSettings()'s own fileName() instead guarantees this always sits
+  // right beside whatever config file is *actually* in use - including
+  // under the test suite's own separate organization/application names
+  // (see tst_charset.cpp's initTestCase()), which keeps every test run
+  // completely isolated from the real user's own
+  // ~/.config/Komport-Qt6/charsets/. */
+  const QString configDir = QFileInfo( QSettings().fileName() ).absolutePath();
+  const QString dirPath = configDir + QStringLiteral("/charsets");
+  QDir().mkpath( dirPath ); // create if missing; a harmless no-op otherwise
+  return dirPath;
+}
+
+void KomportCharset::reloadCustomCharsets()
+{
+  auto &registry = customRegistry();
+  registry.clear();
+
+  QDir dir( customCharsetsDirectory() );
+  const QStringList files = dir.entryList( QStringList{ QStringLiteral("*.charset") }, QDir::Files, QDir::Name );
+  for ( const QString &fileName : files ) {
+    CustomEntry entry;
+    if ( !loadCustomCharsetFile( dir.filePath(fileName), entry ) ) continue;
+    if ( entry.id.compare( QStringLiteral("Standard"), Qt::CaseInsensitive ) == 0
+      || entry.id.compare( QStringLiteral("CP437"), Qt::CaseInsensitive ) == 0
+      || entry.id.compare( QStringLiteral("PETSCII"), Qt::CaseInsensitive ) == 0 ) {
+      qWarning() << "KomportCharset:" << fileName << "- id" << entry.id
+                 << "collides with a built-in charset name, skipping this file"
+                    " (rename it to something else)";
+      continue;
+    }
+    registry.append( entry );
+  }
+}
+
+QVector<QPair<QString, QString>> KomportCharset::customCharsetEntries()
+{
+  QVector<QPair<QString, QString>> result;
+  for ( const CustomEntry &entry : customRegistry() ) result.append( { entry.id, entry.displayName } );
+  return result;
 }
