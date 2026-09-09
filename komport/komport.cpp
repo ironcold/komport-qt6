@@ -500,6 +500,7 @@ void KomportApp::seedBuiltinProfiles()
     config->setValue( QStringLiteral("Emulation"), QStringLiteral("VT102") );
     config->setValue( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") );
     config->setValue( QStringLiteral("LineEnding"), QStringLiteral("CR") );
+    config->setValue( QStringLiteral("Charset"), KomportCharset::settingsKey(KomportCharset::Standard) ); // Milestone 7
     config->beginGroup( QStringLiteral("Macros") );
     for ( int i = 0; i < bp.macros.size() && i < 8; ++i ) { // 8 == KomportMacroBar::SlotCount
       const QString key = QStringLiteral("Slot%1").arg(i);
@@ -543,6 +544,7 @@ void KomportApp::initProfiles()
     strEmulation = config->value( QStringLiteral("Emulation"), QStringLiteral("VT102") ).toString();
     strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") ).toString();
     strLineEnding = config->value( QStringLiteral("LineEnding"), QStringLiteral("CR") ).toString();
+    strCharset = config->value( QStringLiteral("Charset"), QStringLiteral("Standard") ).toString();
     config->endGroup();
     macroBar->loadSettings(config); // reads the old flat top-level "Macros" group, if any
 
@@ -596,6 +598,7 @@ void KomportApp::saveProfile(const QString &_name)
   config->setValue( QStringLiteral("Emulation"), strEmulation );
   config->setValue( QStringLiteral("ScrollBuffer"), strScrollBuffer );
   config->setValue( QStringLiteral("LineEnding"), strLineEnding );
+  config->setValue( QStringLiteral("Charset"), strCharset );
   macroBar->saveSettings(config); // ends up nested under Profiles/<name>/Macros
   hexView->saveSettings(config);  // ends up nested under Profiles/<name>/HexMonitor
   view->saveSettings(config);     // ends up nested under Profiles/<name>/Appearance (Milestone 5)
@@ -677,6 +680,15 @@ void KomportApp::loadProfile(const QString &_name)
   strEmulation = config->value( QStringLiteral("Emulation"), strEmulation ).toString();
   strScrollBuffer = config->value( QStringLiteral("ScrollBuffer"), strScrollBuffer ).toString();
   strLineEnding = config->value( QStringLiteral("LineEnding"), strLineEnding ).toString();
+  // Codex review finding (same load-order-leakage class Milestone 5 fixed
+  // for Appearance settings): falling back to the *current* strCharset
+  // here meant a profile with no "Charset" key (an old profile predating
+  // Milestone 7, or - until the fix above - a freshly seeded built-in
+  // one) silently inherited whatever charset a *previously* loaded
+  // profile happened to have, and saving it afterwards would even
+  // persist that leaked value. Falls back to the fixed "Standard"
+  // baseline instead, regardless of what was active before.
+  strCharset = config->value( QStringLiteral("Charset"), KomportCharset::settingsKey(KomportCharset::Standard) ).toString();
   macroBar->loadSettings(config); // reads Profiles/<name>/Macros
   hexView->loadSettings(config);  // reads Profiles/<name>/HexMonitor
   view->loadSettings(config);     // reads Profiles/<name>/Appearance, applies immediately (Milestone 5)
@@ -689,6 +701,11 @@ void KomportApp::loadProfile(const QString &_name)
   mSerialErrorPending = false; // see slotSerialSettingsFailed()
   applyConnectionSettings();
   lineEndingCombo->setCurrentText( strLineEnding ); // triggers slotLineEndingChanged() if it actually changed
+  // Milestone 7: applied directly (not through a signal-driven toolbar
+  // widget like lineEndingCombo above) so it's unconditional - no risk of
+  // silently no-op'ing just because the new profile happens to already
+  // match whatever the previous one had selected.
+  view->mEmulation->setCharset( KomportCharset::fromSettingsKey(strCharset) );
 
   refreshProfileCombo( _name );
   // Don't stomp on a serial error applyConnectionSettings() may have just
@@ -1092,6 +1109,13 @@ void KomportApp::slotShowPreferences()
   settingsDialog.ParityComboBox->setCurrentText( strParity );
   settingsDialog.EmulationComboBox->setCurrentText( strEmulation );
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
+  // Codex review finding: read/write via the combo's own Qt::UserRole data
+  // (findData()/currentData()) rather than row-index<->enum-value
+  // coupling - see KomportCharset::displayEntries()'s comment.
+  {
+    const int idx = settingsDialog.CharsetComboBox->findData( static_cast<int>( view->mEmulation->charset() ) );
+    if ( idx >= 0 ) settingsDialog.CharsetComboBox->setCurrentIndex( idx );
+  }
   settingsDialog.setSelectedFont( view->font() ); // Milestone 5
   settingsDialog.setColors( view->cellArray()->defaultForegroundColor(), view->cellArray()->defaultBackgroundColor() );
   if ( settingsDialog.exec() == QDialog::Accepted ) {
@@ -1106,6 +1130,12 @@ void KomportApp::slotShowPreferences()
       strParity =  settingsDialog.ParityComboBox->currentText() ;
       strEmulation = settingsDialog.EmulationComboBox->currentText();
       strScrollBuffer = QString::number( settingsDialog.ScrollBufferSpinBox->value() );
+      // Milestone 7: font/colors below already apply live and independent
+      // of the serial settings, same reasoning applies here - no port
+      // re-open, no mSerialErrorPending interplay.
+      const KomportCharset::Id charset = static_cast<KomportCharset::Id>( settingsDialog.CharsetComboBox->currentData().toInt() );
+      strCharset = KomportCharset::settingsKey( charset );
+      view->mEmulation->setCharset( charset );
 
       view->setScrollBuffer( strScrollBuffer.toInt() );
       KomportSerial* serial = view->getSerial();
@@ -1219,7 +1249,31 @@ void KomportApp::slotMacroTriggered(const QString &command)
 {
   KomportSerial *serial = view->getSerial();
   if ( !serial->isOpen() || command.isEmpty() ) return;
-  serial->putStr( command.toLocal8Bit().constData() );
+  // Milestone 7 (Codex review finding): route each character through the
+  // same charset translation typed/pasted input already gets
+  // (KomportEmulation::slotKeyPressed()/slotSimKeyPressed()) - macro text
+  // used to bypass it entirely via toLocal8Bit(), a locale-dependent
+  // encoding with no relation to the selected charset at all, so the same
+  // text sent as a macro vs. typed by hand could reach the wire
+  // differently.
+  const KomportCharset::Id charset = view->mEmulation->charset();
+  QByteArray wireBytes;
+  wireBytes.reserve( command.size() );
+  for ( const QChar &c : command ) wireBytes.append( KomportCharset::toWire(charset, c) );
+  // Codex review finding (round 2, corrected in round 3): putStr()'s
+  // null-terminated const char* overload would silently truncate at a
+  // genuine embedded NUL (CP437's byte 0x00 is real Unicode NUL since the
+  // 0x00-0x7F identity scoping - see KomportCharset). Round 2's fix
+  // skipped NUL bytes instead - avoided the truncation, but silently
+  // dropped the byte rather than preserving it, a different (smaller,
+  // but still real) corruption. KomportSerial::putStr(const char*,
+  // qsizetype) - a new, minimal, length-aware overload added for exactly
+  // this call site - sends every byte verbatim, embedded NULs included.
+  serial->putStr( wireBytes.constData(), wireBytes.size() );
+  // Unrelated to the NUL fix above (never charset-translated, never
+  // contains a NUL) - left on the null-terminated overload rather than
+  // migrated, per instruction to touch only the actually-affected call
+  // site.
   serial->putStr( view->mEmulation->lineEndingBytes().constData() );
 }
 

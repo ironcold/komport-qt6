@@ -223,6 +223,11 @@ class KomportApp : public QMainWindow
     QString strEmulation;
     QString strScrollBuffer;
     QString strLineEnding;
+    /** Milestone 7: retro/industrial charset translation - one of
+     *  KomportCharset::settingsKey()'s values ("Standard"/"CP437"/
+     *  "PETSCII"), same string-based-profile-value convention as the
+     *  other str* members above. */
+    QString strCharset;
     /** name of the currently active device profile, or empty if none
      *  (e.g. it was just deleted) - see initProfiles()/loadProfile() */
     QString mCurrentProfile;

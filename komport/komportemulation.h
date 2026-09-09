@@ -25,6 +25,7 @@
 
 #include "komportcell.h"
 #include "komportcellarray.h"
+#include "komportcharset.h"
 #include "komportserial.h"
 
 /**impliments terminal emulation
@@ -578,6 +579,12 @@ public:
   /** the raw bytes for the current line ending, e.g. for use by callers
    *  that send a whole line themselves (the macro bar) */
   QByteArray lineEndingBytes() const;
+  /** Milestone 7: retro/industrial byte-level character-set translation -
+   *  see KomportCharset for the actual mapping tables and exactly which
+   *  call sites apply it (control codes/escape sequences are unaffected
+   *  regardless of the selected charset). */
+  KomportCharset::Id charset() const { return mCharset; }
+  void setCharset(KomportCharset::Id _cs) { mCharset = _cs; }
 protected:
   /** cursor to absolute x,y (CSI H/f) */
   virtual void  doCursorTo();
@@ -661,6 +668,8 @@ private:
   int scrollBottom() const;
   /** what Return sends */
   LineEnding mLineEnding;
+  /** current retro/industrial charset translation, see setCharset() above */
+  KomportCharset::Id mCharset = KomportCharset::Standard;
   /** parse mCtlSequence (optionally "?"-prefixed for private modes) as a
    *  single decimal parameter, defaulting to _def when absent/empty */
   int ctlParam(int _def = 1) const;

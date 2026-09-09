@@ -19,7 +19,12 @@ endfunction()
 komport_add_test(tst_cellarray)
 komport_add_test(tst_emulation)
 komport_add_test(tst_serial)
+# openpty() (used by the length-aware putStr() regression test, Milestone 7
+# round 3) lives in libutil on glibc - link it only for this one test, no
+# other target needs it.
+target_link_libraries(tst_serial PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
 komport_add_test(tst_appearance)
+komport_add_test(tst_charset)

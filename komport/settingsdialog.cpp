@@ -16,6 +16,7 @@
  ***************************************************************************/
 
 #include "settingsdialog.h"
+#include "komportcharset.h"
 
 #include <QTabWidget>
 #include <QGroupBox>
@@ -178,10 +179,30 @@ QWidget* SettingsDialog::createTerminalTab()
     auto *emulationGroup = new QGroupBox( tr("Emulation"), page );
     EmulationComboBox = new QComboBox( emulationGroup );
     EmulationComboBox->addItem( QStringLiteral("VT102") );
+    // Milestone 7: retro/industrial byte-level character-set translation -
+    // see KomportCharset for the mapping tables. Codex review finding:
+    // an earlier version relied on the combo box's row position matching
+    // KomportCharset::Id's numeric value (via toIndex()/fromIndex()) -
+    // correct today, but silently fragile against a future reordering of
+    // either the enum or names(). Each item now carries its actual Id
+    // explicitly as Qt::UserRole data instead, so display order and
+    // stored value can never drift apart even if one of them changes.
+    auto *charsetLabel = new QLabel( tr("Character Set:"), emulationGroup );
+    CharsetComboBox = new QComboBox( emulationGroup );
+    // displayEntries() is the single source of truth for name<->Id pairing
+    // (see its own comment) - no separate list to keep in sync by hand.
+    for ( const auto &entry : KomportCharset::displayEntries() ) {
+      CharsetComboBox->addItem( entry.second, static_cast<int>(entry.first) );
+    }
+    CharsetComboBox->setToolTip( tr("Translate the raw byte stream between the serial\n"
+                                     "device and the terminal display - for retro/industrial\n"
+                                     "gear that doesn't speak plain ASCII/Latin-1.") );
     VisualBellCheckBox = new QCheckBox( tr("Visual Bell"), emulationGroup );
     LocalEchoCheckBox = new QCheckBox( tr("Local Echo"), emulationGroup );
     auto *emulationLayout = new QVBoxLayout( emulationGroup );
     emulationLayout->addWidget( EmulationComboBox );
+    emulationLayout->addWidget( charsetLabel );
+    emulationLayout->addWidget( CharsetComboBox );
     emulationLayout->addWidget( VisualBellCheckBox );
     emulationLayout->addWidget( LocalEchoCheckBox );
     emulationLayout->addStretch( 1 );

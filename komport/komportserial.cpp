@@ -177,17 +177,34 @@ bool KomportSerial::putChar(char _ch){
   return false;
 }
 
-/** transmit a string */
+/** transmit a null-terminated string - delegates to the length-aware
+ *  overload below via strlen(); see the header for why a caller that
+ *  needs embedded NULs sent verbatim must call that overload directly
+ *  instead. */
 bool KomportSerial::putStr(const char* str){
+  if ( str == nullptr ) return false;
+  return putStr( str, static_cast<qsizetype>( strlen(str) ) );
+}
+
+/** transmit exactly _len bytes, verbatim (see header) */
+bool KomportSerial::putStr(const char* _str, qsizetype _len){
   // A single batched write() rather than looping putChar() per byte - one
   // syscall/QSerialPort call instead of N. sentChar() (for the hex
   // monitor) is still emitted once per byte actually written, just not
   // tangled up with how the bytes got onto the wire.
-  if ( str == nullptr || !isOpen() ) return false;
-  const qint64 len = static_cast<qint64>( strlen(str) );
-  const qint64 written = mPort.write( str, len );
+  // Codex review finding (round 4): _len is signed (qsizetype) but wasn't
+  // rejected when negative. For _len == -1, QIODevice::write() returns
+  // its own -1 error sentinel for a rejected/failed write - written(-1)
+  // != len(-1) was then false, so this returned true ("success") despite
+  // transmitting nothing. Not reachable from the current caller
+  // (KomportApp::slotMacroTriggered() always passes a real
+  // QByteArray::size()), but the public overload itself must not accept
+  // a negative length as if it meant something.
+  if ( _str == nullptr || !isOpen() || _len < 0 ) return false;
+  const qint64 len = static_cast<qint64>( _len );
+  const qint64 written = mPort.write( _str, len );
   for ( qint64 i = 0; i < written; ++i ) {
-    emit sentChar( str[i] );
+    emit sentChar( _str[i] );
   }
   if ( written != len ) {
     // write() returning less than the full length (a partial write, or -1

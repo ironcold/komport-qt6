@@ -7,10 +7,13 @@ erledigter Arbeit (Basis-Portierung, Admin-Tool-Features, sieben
 Review-Gate-Runden, Meilenstein 4, Meilenstein 5: Archiv-Abschnitte 1–21).
 Architektur/Ziele stehen in `CLAUDE.md`.
 
-Stand (2026-09-08): Meilenstein 4 (VT220/xterm) und Meilenstein 5
+Stand (2026-09-09): Meilenstein 4 (VT220/xterm) und Meilenstein 5
 (Appearance-Tab) sind abgeschlossen, gemergt und auf beiden Remotes
-(Codeberg/GitHub) synchron. Unten stehen nur die bewusst offen gelassenen
-Punkte (Abschnitt 6), die Wunschliste (Abschnitt 7) und die Roadmap.
+(Codeberg/GitHub) synchron. Meilenstein 7 (Retro-/Industrie-Zeichensatz-
+Übersetzung) ist implementiert und review-verifiziert, aber noch nicht
+gemergt (Branch `milestone-7-charset`). Unten stehen nur die bewusst
+offen gelassenen Punkte (Abschnitt 6), die Wunschliste (Abschnitt 7) und
+die Roadmap.
 
 ## 0. Review- und Meilenstein-Historie (archiviert)
 
@@ -45,6 +48,22 @@ Verifikationsprotokolle in `TODO-ARCHIVE.md`:
   Usability-Nachtrag (Settings-Menüpunkt umbenannt, da der Appearance-Tab
   sonst unauffindbar war). PR #3 + #4 auf Codeberg, beide gemergt,
   `master` auf Codeberg und GitHub synchron.
+- **Meilenstein 7 — Retro-/Industrie-Zeichensatz-Übersetzung** (2026-09-09,
+  Branch `milestone-7-charset`, noch nicht gemergt): neue
+  `KomportCharset`-Klasse, byte-basierte Übersetzung zwischen rohem
+  seriellem Bytestrom und Terminal-Emulation (RX in
+  `KomportEmulation::slotReceivedChar()`s `default:`-Zweig, TX in
+  `slotKeyPressed()`/`slotSimKeyPressed()`), vollständig in die
+  Profilverwaltung integriert. Umgesetzt: CP437 (0x80-0xFF-Bereich) und
+  PETSCII (ASCII-kompatibler Bereich + £/↑/←). Bewusst nicht umgesetzt:
+  "Amiga" (keine belastbare Quelle für die früher eigenständige
+  Amiga-1.x-Zeichenbelegung) und CP437s ikonischer 0x00-0x1F-Grafikbereich
+  (echter Konflikt mit VT100-Steuercodes, siehe Abschnitt 6.3). Gemma4 +
+  Codex (`gpt-5.6-sol`) Review: 3 Hoch-, 2 Mittel-, 1 Niedrig-Finding,
+  alle gefixt und verifiziert (u.a. eine Leerzeichen/NUL-Byte-Kollision im
+  CP437-Rückwärts-Mapping, ein Profil-Leck-Bug derselben Klasse wie bei
+  Meilenstein 5, ein stillschweigend falscher Fallback für nicht
+  darstellbare Zeichen). tests/tst_charset.cpp neu, 19 Testfunktionen.
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 
@@ -105,6 +124,52 @@ horizontales Scrollen/Clipping statt fester Breite, ein größeres Redesign
 außerhalb des Meilenstein-5-Umfangs. Falls das später relevant wird: die
 Spaltenzahl vom sichtbaren Ausschnitt entkoppeln (horizontale Scrollbar
 oder Clipping), statt die Fensterbreite an die Zeichenbreite zu koppeln.
+
+## 6.3 Restpunkt: CP437s ikonischer 0x00-0x1F-Grafikbereich nicht umgesetzt
+
+Aus einer Codex-Review-Runde zu Meilenstein 7: die erste Fassung von
+`KomportCharset` bildete CP437s komplette 256-Byte-Tabelle ab, inklusive
+der bekannten "Steuerzeichen-Bereich als Grafik"-Glyphen (☺♥♦♣♠ etc. bei
+0x01-0x06 usw. — ein echtes, bekanntes Merkmal der originalen IBM-PC-
+Bildschirmschriftart). Codex fand einen echten Konflikt: diese Emulation
+ist in erster Linie ein VT100/VT102-Interpreter, und mehrere reale
+C0-Steuercodes, die `KomportEmulation::slotReceivedChar()` nicht explizit
+behandelt (nur BEL/BS/HT/LF/CR/ESC sind es), fielen dadurch als CP437-
+Grafikzeichen in den `default:`-Zweig statt als Steuercode erkannt zu
+werden — z.B. hätte VT/FF (0x0B/0x0C, von vielen realen Hosts wie LF
+genutzt) ein ♂/♀-Symbol gezeichnet und den Cursor nur um eine Spalte
+verschoben statt einen Zeilenumbruch auszuführen. Ein nativer DOS-Textmodus
+hatte dieses Problem nie (keine gleichzeitige ANSI-Escape-Interpretation
+über denselben Bytebereich) — für ein VT100-Terminal ist es aber ein
+echter Korrektheits-Rückschritt.
+
+**Gefixt durch Scope-Reduktion (2026-09-09, Formulierung nach zweiter
+Codex-Review-Runde präzisiert):** `KomportCharset::CP437` deckt jetzt nur
+noch den unzweideutigen 0x80-0xFF-Bereich ab (Akzent-Buchstaben, Box-
+Drawing/Block-Zeichen); 0x00-0x7F ist bewusst Identität (wie "Standard").
+**Präzisierung:** das behebt nur die durch CP437 selbst neu eingeführte
+Regression (falsche Glyphen für nicht behandelte Steuercodes) — die
+zugrundeliegende Lücke selbst (VT/FF & Co. werden von
+`slotReceivedChar()` nicht wie LF behandelt) ist eine vorbestehende,
+von "Standard" geerbte Einschränkung dieser Emulation und bleibt
+unverändert bestehen, wird durch diesen Fix nicht gelöst — nur nicht
+mehr durch CP437 zusätzlich sichtbar verschlimmert. Opfert dafür die
+ikonischen Grafikzeichen im unteren Bereich.
+
+**Backlog-Vermerk (Nutzerwunsch: "gut dokumentieren und evtl. im
+Backlog vermerken, dass hier u.U. noch nachgebessert werden muss"):**
+falls die 0x00-0x1F-Grafikzeichen später gewünscht sind, bräuchte das
+entweder (a) einen expliziten, vom Nutzer zuschaltbaren "Raw-Grafik-
+Modus"-Schalter, der VT100-Steuercode-Interpretation für diese Bytes
+bewusst abschaltet (Trade-off klar an den Nutzer kommuniziert), oder
+(b) chirurgisches Einzelfall-Handling nur für die tatsächlich relevanten
+VT100-Codes (mindestens 0x0B/0x0C wie LF behandeln, 0x18/0x1A auch
+außerhalb einer CSI-Sequenz Escape-Sequenzen abbrechen lassen) bei
+gleichzeitigem Belassen der übrigen Bytes als CP437-Grafik — beide
+Optionen bewusst nicht in Meilenstein 7 umgesetzt (Aufwand/Risiko vs.
+Nutzen für den seriellen Werkstatt-Terminal-Anwendungsfall dieses
+Projekts), aber hier als möglicher künftiger Auftrag festgehalten statt
+stillschweigend verworfen.
 
 ## 7. Wunschliste / mögliche nächste Schritte
 
@@ -204,7 +269,7 @@ mit sichtbarem Text) — eigener, in sich abgeschlossener Auftrag, am besten
 NACH den funktionalen Meilensteinen 4/5, damit nicht doppelt an neu
 hinzukommenden Strings gearbeitet werden muss.
 
-### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — offen
+### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09, noch nicht gemergt)
 
 > Option zur Zeichensatz-Übersetzung zwischen `QSerialPort` und der
 > Emulation, um die Kommunikation mit historischen Systemen zu
@@ -223,6 +288,13 @@ Eigenständiges Feature, unabhängig von den VT220/Farbschema-Meilensteinen
 Sitzt an der gleichen Stelle im Datenfluss wie der Hex-Monitor (roher
 RX/TX-Bytestrom), bevor `KomportEmulation` die Escape-Sequenzen
 interpretiert.
+
+CP437 und PETSCII umgesetzt (siehe Abschnitt 0 oben), "Amiga" bewusst
+nicht umgesetzt (keine belastbare Quelle für die eigenständige
+Amiga-1.x-Zeichenbelegung, per Web-Recherche verifiziert statt geraten),
+CP437s 0x00-0x1F-Grafikbereich bewusst zurückgestellt (Abschnitt 6.3) —
+beide Abweichungen vom ursprünglichen Spec-Umfang sind bewusste,
+dokumentierte Entscheidungen, keine übersehenen Lücken.
 
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 

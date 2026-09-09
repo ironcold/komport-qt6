@@ -72,6 +72,9 @@ public:
     QComboBox* EmulationComboBox;
     QCheckBox* VisualBellCheckBox;
     QCheckBox* LocalEchoCheckBox;
+    /** Milestone 7: retro/industrial byte-level character-set translation
+     *  - see KomportCharset. Index matches KomportCharset::toIndex(). */
+    QComboBox* CharsetComboBox;
 
     // Appearance tab (Milestone 5: font family/size/spacing, color-scheme
     // presets, fg/bg color pickers)
