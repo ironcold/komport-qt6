@@ -123,32 +123,54 @@ DB=2588
   abgelegte Datei nutzen zu können.
 
 **Absicherung gegen fehlerhafte/pathologische Eingaben** (Codex-Review,
-zweite Runde, alle 5 Funde behoben — s. `TODO-ARCHIVE.md`):
+zwei Runden, alle 11 Funde behoben — s. `TODO-ARCHIVE.md`):
 - Einzelne Datei max. 1 MiB, Zeilen max. 4096 Zeichen, max. 100000
   gelesene Zeilen pro Datei — überschreitet eine Datei das Größenlimit,
   wird sie komplett übersprungen (geloggt), statt Programmstart/
   Settings-Dialog-Öffnen zu verlangsamen.
-- Max. 256 geladene `*.charset`-Dateien pro Verzeichnis (alphabetisch
-  nach Dateiname sortiert, überzählige werden übersprungen und geloggt).
+- Max. 256 **untersuchte** `*.charset`-Dateien pro Verzeichnis
+  (alphabetisch nach Dateiname sortiert) — die Grenze zählt jede
+  geöffnete Datei, nicht nur erfolgreich geladene, damit nicht beliebig
+  viele übergroße/kaputte Dateien am Cap vorbei trotzdem komplett
+  durchgearbeitet werden, bevor er greift.
 - Unicode-Surrogate (`D800`-`DFFF`) werden als Codepoint abgelehnt wie
   jeder andere ungültige Wert — kein gültiger eigenständiger Unicode-
-  Skalarwert.
-- Binär-/kaputte Dateien, bei denen `QTextStream` nach dem Einlesen einen
-  Fehlerstatus meldet, werden komplett verworfen statt stillschweigend
-  als (fast) leerer Identitäts-Zeichensatz zu erscheinen.
+  Skalarwert. Die direkt angrenzenden gültigen Werte (`D7FF`/`E000`)
+  bleiben erlaubt.
+- Dateien mit eingebettetem NUL-Byte gelten als binär und werden komplett
+  abgelehnt (der Standard-Heuristik-Ansatz für "das ist kein Textfile") —
+  `QTextStream::status()` allein erkennt kaputte/binäre Kodierung in
+  diesem Lesepfad nicht zuverlässig (Qt ersetzt ungültige Bytes
+  stillschweigend durch U+FFFD statt einen Stream-Fehler zu melden), der
+  Status-Check bleibt trotzdem als zusätzliche Absicherung bestehen.
+- Eine einzelne physische Zeile über dem 4096-Zeichen-Limit wird als
+  Ganzes verworfen (alle ihre Chunks), statt `QTextStream::readLine()`s
+  dokumentiertes Zeilen-Splitting jeden Chunk wie eine eigene, unabhängige
+  Zeile parsen zu lassen — sonst hätte der abgeschnittene Rest einer
+  überlangen Kommentarzeile versehentlich als echte Byte=Codepoint-Zeile
+  gelesen werden können.
 - Der angezeigte Name (`# Name: ...`) wird gegen Kollisionen mit
   eingebauten Namen und bereits geladenen anderen Custom-Zeichensätzen
   geprüft (Groß-/Kleinschreibung egal) — bei Kollision wird er um
   " (<Datei-ID>)" ergänzt, die Datei bleibt aber ganz normal nutzbar
   (anders als die reine ID-Kollision oben, die eine Datei komplett
-  ablehnt — hier geht es nur um die Anzeige, nicht um die Funktion).
+  ablehnt — hier geht es nur um die Anzeige, nicht um die Funktion). Der
+  erzeugte, disambiguierte Name wird dabei erneut auf Kollision geprüft
+  (nicht nur der ursprüngliche) und bei Bedarf weiter durchnummeriert, da
+  zwei Dateien rein zufällig denselben disambiguierten String erzeugen
+  könnten.
 - Verschwindet die Datei eines *aktuell ausgewählten* Custom-Zeichensatzes
   (gelöscht/umbenannt), wird die aktive Auswahl beim nächsten Öffnen des
-  Settings-Dialogs automatisch auf "Standard" zurückgesetzt
-  (`KomportApp::reconcileCharsetSelectionAfterReload()`), statt eine
-  Referenz auf eine nicht mehr existierende Datei stillschweigend
-  weiterzuführen (die sonst durch eine zufällig gleichnamige neue Datei
-  wieder unbeabsichtigt aktiv würde).
+  Settings-Dialogs automatisch auf "Standard" zurückgesetzt — und zwar in
+  **jedem** offenen Fenster (`KomportApp::
+  reconcileCharsetSelectionAfterReloadForAllWindows()`), nicht nur in dem
+  Fenster, das gerade Settings öffnet: die Custom-Zeichensatz-Registry ist
+  ein einziges, prozessweites Objekt, das sich alle Fenster teilen. Ein
+  Profil, das direkt (ohne vorheriges Live-Auswählen) auf eine bereits
+  fehlende Custom-Zeichensatz-ID verweist, wird ebenfalls vollständig
+  normalisiert — nicht nur die aktive Emulation, sondern auch der intern
+  gemerkte Wert, der beim erneuten Speichern des Profils sonst die
+  hängende Referenz weitergeschrieben hätte.
 - Kann das `charsets`-Verzeichnis nicht angelegt werden (z. B. Dateisystem
   read-only, oder es liegt bereits eine reguläre Datei an dieser Stelle),
   wird das jetzt geloggt (`qWarning()`) statt stillschweigend einen
@@ -156,7 +178,9 @@ zweite Runde, alle 5 Funde behoben — s. `TODO-ARCHIVE.md`):
 
 Vollständige technische Details/Rationale im Code-Kommentar von
 `KomportCharset::reloadCustomCharsets()`/`loadCustomCharsetFile()`
-(`komport/komportcharset.h`/`.cpp`).
+(`komport/komportcharset.h`/`.cpp`) sowie
+`KomportApp::reconcileCharsetSelectionAfterReload()`/
+`reconcileCharsetSelectionAfterReloadForAllWindows()` (`komport/komport.h`).
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 

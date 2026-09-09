@@ -166,6 +166,17 @@ class KomportApp : public QMainWindow
      *  awkward to unit-test directly - it opens a modal QDialog::exec())
      *  so tst_charset.cpp can exercise this specific behavior on its own. */
     void reconcileCharsetSelectionAfterReload();
+    /** Codex review round-3 finding: KomportCharset's custom-charset
+     *  registry is one process-wide static, shared by every open
+     *  KomportApp window (see slotFileNewWindow()) - calling
+     *  reconcileCharsetSelectionAfterReload() on only the window that
+     *  happens to be opening Settings left any *other* open window's live
+     *  Custom selection dangling against the shared, already-reloaded
+     *  registry. Walks every top-level KomportApp window (same
+     *  QApplication::topLevelWidgets() pattern already used by
+     *  slotFileQuit()) and reconciles each one - call this instead of the
+     *  per-instance method above after any KomportCharset::reloadCustomCharsets(). */
+    static void reconcileCharsetSelectionAfterReloadForAllWindows();
 
   public slots:
     /** loads Profiles/_name into strDevice... and macroBar, then applies it

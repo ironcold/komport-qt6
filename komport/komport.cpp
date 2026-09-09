@@ -686,6 +686,18 @@ void KomportApp::reconcileCharsetSelectionAfterReload()
   }
 }
 
+void KomportApp::reconcileCharsetSelectionAfterReloadForAllWindows()
+{
+  // Same QApplication::topLevelWidgets() + qobject_cast<KomportApp*> walk
+  // already used by slotFileQuit() to reach every open top-level window.
+  const QWidgetList windows = QApplication::topLevelWidgets();
+  for ( QWidget *w : windows ) {
+    if ( auto *win = qobject_cast<KomportApp*>(w) ) {
+      win->reconcileCharsetSelectionAfterReload();
+    }
+  }
+}
+
 void KomportApp::loadProfile(const QString &_name)
 {
   if ( _name.isEmpty() ) return;
@@ -742,6 +754,17 @@ void KomportApp::loadProfile(const QString &_name)
   {
     const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( strCharset );
     view->mEmulation->setCharset( sel.id, sel.customId );
+    // Codex review round-3 finding: resolveSettingsKey() already falls
+    // back the *live emulation* to Standard for an unrecognized/dangling
+    // Charset value (a stale custom-charset id whose file is gone), but
+    // strCharset itself - the string that gets *re-persisted* if this
+    // profile is saved again - was left holding the original, still-
+    // dangling raw value. Normalizing it here too closes that: a Custom
+    // selection keeps its own customId as strCharset (matching how it's
+    // stored/read everywhere else), anything else collapses to its fixed
+    // settingsKey() - which is a no-op for an already-valid built-in
+    // value, and only actually changes anything for the dangling case.
+    strCharset = ( sel.id == KomportCharset::Custom ) ? sel.customId : KomportCharset::settingsKey( sel.id );
   }
 
   refreshProfileCombo( _name );
@@ -1136,7 +1159,16 @@ void KomportApp::slotShowPreferences()
   // file the user just dropped into customCharsetsDirectory() shows up
   // in the dropdown below without needing to restart the app.
   KomportCharset::reloadCustomCharsets();
-  reconcileCharsetSelectionAfterReload();
+  // Codex review round-3 finding: KomportCharset's custom-charset registry
+  // is a single process-wide, function-local static (see its own comment)
+  // shared by *every* open KomportApp window (slotFileNewWindow() can
+  // create more than one) - reconciling only the window that happens to be
+  // opening Settings left any *other* open window's live Custom selection
+  // dangling against the now-reloaded (and possibly no-longer-matching)
+  // registry until *it* also happened to open Settings. Reconciling every
+  // open window right after the one shared reload keeps them all
+  // consistent with each other, not just with whichever window triggered it.
+  reconcileCharsetSelectionAfterReloadForAllWindows();
   ///////////////////////////////////////////////////////////////////
   // open the settings dialog...
   SettingsDialog settingsDialog(this);

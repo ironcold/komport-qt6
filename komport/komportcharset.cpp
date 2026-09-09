@@ -236,8 +236,25 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   }
 
   QFile file(_path);
-  if ( !file.open(QIODevice::ReadOnly | QIODevice::Text) ) {
+  if ( !file.open(QIODevice::ReadOnly) ) {
     qWarning() << "KomportCharset: could not open" << _path << "(" << file.errorString() << ")";
+    return false;
+  }
+  // Codex review round-3 finding: QTextStream::status() after the fact does
+  // NOT reliably detect a genuinely binary/malformed-encoding file in this
+  // parsing path - Qt's UTF-8 decoder silently substitutes U+FFFD for
+  // invalid byte sequences rather than raising a stream error, so a real
+  // binary file that happens to decode without a hard I/O error still
+  // "succeeds". Reading the whole file up front (size is already capped
+  // above, so this is bounded) and rejecting outright if it contains an
+  // embedded NUL byte is the standard, simple binary-content heuristic -
+  // no legitimate hand-written *.charset text file has any reason to
+  // contain one. QTextStream is then built from this in-memory buffer
+  // instead of the QFile directly - same parsing logic below, unchanged.
+  const QByteArray raw = file.readAll();
+  if ( raw.contains('\0') ) {
+    qWarning() << "KomportCharset:" << _path << "- contains an embedded NUL byte, looks binary rather than a text"
+                  " *.charset file, skipping";
     return false;
   }
 
@@ -248,11 +265,35 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   static const QRegularExpression nameDirective(
       QStringLiteral("^#\\s*Name\\s*:\\s*(.+?)\\s*$"), QRegularExpression::CaseInsensitiveOption );
 
-  QTextStream in(&file);
+  QTextStream in(raw);
   int lineNo = 0;
   while ( !in.atEnd() && lineNo < MaxCustomCharsetLinesRead ) {
     const QString rawLine = in.readLine( MaxCustomCharsetLineLength );
     ++lineNo;
+    // Codex review round-3 finding: QTextStream::readLine(maxlen)'s
+    // documented behavior for a physical line longer than maxlen is to
+    // *split* it across multiple readLine() calls, not to reject/truncate
+    // it - treating each split chunk as if it were its own independent
+    // logical line let an oversized comment's tail chunk be silently
+    // misparsed as a real "<byte>=<code>" entry (e.g. one huge "#..."
+    // comment line whose split-off tail happens to look like "41=2588").
+    // A returned chunk exactly MaxCustomCharsetLineLength long is the
+    // split signal (the one false-positive case - a real line exactly
+    // that long - just means it's conservatively skipped too, not
+    // misparsed, which is the safe direction to be wrong in). Consume and
+    // discard every remaining chunk of this SAME physical line as one
+    // unit instead of parsing any of them.
+    if ( rawLine.length() >= MaxCustomCharsetLineLength ) {
+      qWarning() << "KomportCharset:" << _path << "line" << lineNo
+                 << "- exceeds the" << MaxCustomCharsetLineLength
+                 << "character line-length limit, skipping the rest of this line";
+      QString chunk = rawLine;
+      while ( chunk.length() >= MaxCustomCharsetLineLength && !in.atEnd() && lineNo < MaxCustomCharsetLinesRead ) {
+        chunk = in.readLine( MaxCustomCharsetLineLength );
+        ++lineNo;
+      }
+      continue;
+    }
     const QString line = rawLine.trimmed();
     if ( line.isEmpty() ) continue;
     if ( line.startsWith(QLatin1Char('#')) ) {
@@ -285,11 +326,9 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
     }
     _out.forward[byteVal] = static_cast<char16_t>(codeVal);
   }
-  // Codex review finding: a genuinely binary/non-UTF-8 file could still
-  // "succeed" as a no-op identity charset without this - QTextStream's
-  // own status() after a full read is the cheapest available signal that
-  // something about the underlying data was actually wrong, on top of
-  // (not instead of) the per-line validation above.
+  // kept as defense-in-depth for a genuine stream/decoding error on top of
+  // (not instead of) the NUL-byte sniff and per-line validation above -
+  // see the round-3 finding comment above for why it alone isn't enough.
   if ( in.status() != QTextStream::Ok ) {
     qWarning() << "KomportCharset:" << _path << "- stream error while reading (status" << in.status() << "), skipping the file";
     return false;
@@ -607,6 +646,25 @@ QString KomportCharset::customCharsetsDirectory()
   return dirPath;
 }
 
+namespace {
+
+/** true if _name (case-insensitively) matches a built-in charset's display
+ *  name or any display name already sitting in _registry - shared by the
+ *  original-name check and the disambiguated-name re-check below (Codex
+ *  review round 3 finding: re-check needed, see its call sites). */
+bool displayNameCollides( const QString &_name, const QMap<QString, CustomEntry> &_registry )
+{
+  for ( const auto &builtin : KomportCharset::displayEntries() ) {
+    if ( builtin.second.compare(_name, Qt::CaseInsensitive) == 0 ) return true;
+  }
+  for ( auto it = _registry.constBegin(); it != _registry.constEnd(); ++it ) {
+    if ( it->displayName.compare(_name, Qt::CaseInsensitive) == 0 ) return true;
+  }
+  return false;
+}
+
+} // namespace
+
 void KomportCharset::reloadCustomCharsets()
 {
   auto &registry = customRegistry();
@@ -614,17 +672,23 @@ void KomportCharset::reloadCustomCharsets()
 
   QDir dir( customCharsetsDirectory() );
   const QStringList files = dir.entryList( QStringList{ QStringLiteral("*.charset") }, QDir::Files, QDir::Name );
+  // Codex review round-3 finding: the previous version's cap only counted
+  // *successfully registered* entries, so an oversized/corrupt/colliding
+  // file didn't count against it - a directory full of such files was
+  // still opened and parsed in full before the cap ever took effect,
+  // defeating the point of bounding reload cost. filesExamined counts
+  // every file this loop looks at (successful or not) and stops the loop
+  // outright once that reaches MaxCustomCharsetCount, before even
+  // attempting to open the next one.
+  int filesExamined = 0;
   for ( const QString &fileName : files ) {
-    // Codex review finding: an unbounded number of files could make
-    // every reload (startup, every Settings-dialog reopen) slow - files
-    // are listed alphabetically, so this deterministically keeps the
-    // first MaxCustomCharsetCount of them rather than an arbitrary subset.
-    if ( registry.size() >= MaxCustomCharsetCount ) {
+    if ( filesExamined >= MaxCustomCharsetCount ) {
       qWarning() << "KomportCharset:" << customCharsetsDirectory() << "has more than"
                  << MaxCustomCharsetCount << "*.charset files - ignoring the rest"
                     " (starting at" << fileName << ")";
       break;
     }
+    ++filesExamined;
     CustomEntry entry;
     if ( !loadCustomCharsetFile( dir.filePath(fileName), entry ) ) continue;
     if ( entry.id.compare( QStringLiteral("Standard"), Qt::CaseInsensitive ) == 0
@@ -645,17 +709,24 @@ void KomportCharset::reloadCustomCharsets()
     // underlying ids (and therefore the actual behavior) differ.
     // Disambiguate rather than reject outright - the file is still
     // perfectly loadable and usable, this is purely a display concern.
-    bool nameCollides = false;
-    for ( const auto &builtin : KomportCharset::displayEntries() ) {
-      if ( builtin.second.compare(entry.displayName, Qt::CaseInsensitive) == 0 ) { nameCollides = true; break; }
-    }
-    if ( !nameCollides ) {
-      for ( auto it = registry.constBegin(); it != registry.constEnd(); ++it ) {
-        if ( it->displayName.compare(entry.displayName, Qt::CaseInsensitive) == 0 ) { nameCollides = true; break; }
+    //
+    // Codex review round-3 finding: the first version of this check only
+    // validated the *original* declared name, then applied the " (<id>)"
+    // suffix unconditionally without re-checking whether that generated
+    // string itself now collided with an already-registered entry (e.g.
+    // one file's raw, uncollided "# Name: Standard (b)" happening to
+    // equal what a *different* file "b.charset" generates after its own
+    // "Standard" collision gets suffixed with its own id "b"). Loops,
+    // re-validating the candidate after every disambiguation attempt,
+    // rather than trusting a single suffix pass to always be enough.
+    if ( displayNameCollides(entry.displayName, registry) ) {
+      const QString original = entry.displayName;
+      entry.displayName = QStringLiteral("%1 (%2)").arg(original, entry.id);
+      int disambiguationCounter = 2;
+      while ( displayNameCollides(entry.displayName, registry) ) {
+        entry.displayName = QStringLiteral("%1 (%2) [%3]").arg(original, entry.id).arg(disambiguationCounter);
+        ++disambiguationCounter;
       }
-    }
-    if ( nameCollides ) {
-      entry.displayName = QStringLiteral("%1 (%2)").arg(entry.displayName, entry.id);
     }
     registry.insert( entry.id, entry );
   }

@@ -84,6 +84,14 @@ private slots:
   void deletedCustomCharsetSelectionIsReconciledToStandard();
   void stillLoadedCustomCharsetSelectionSurvivesReconciliation();
   void customCharsetsDirectoryMkpathFailureIsLoggedNotCrashing();
+  void customCharsetFileSizeBoundaryIsInclusive();
+  void customCharsetOverlongLineIsDiscardedWholeNotMisparsedAsTailChunk();
+  void customCharsetBinaryFileWithEmbeddedNulIsRejected();
+  void customCharsetSurrogateBoundaryValues();
+  void customCharsetSuffixDisambiguationItselfCannotCollide();
+  void multiWindowCustomCharsetSelectionIsReconciledInAllWindows();
+  void loadProfileNormalizesDanglingStrCharsetNotJustLiveEmulation();
+  void customCharsetCapCountsExaminedFilesNotJustSuccessful();
 
 private:
   QString mTestConfigFile;
@@ -659,13 +667,24 @@ void TstCharset::customCharsetCountIsCapped()
   // startup, every Settings-dialog reopen) slow - reloadCustomCharsets()
   // now stops after MaxCustomCharsetCount (256) files, in the same
   // alphabetical order QDir::entryList(..., QDir::Name) already lists
-  // them in, so which ones get kept is deterministic. Measured relative
-  // to whatever the registry already held before this test (rather than
-  // assuming it starts empty), so this doesn't depend on exact test
-  // execution order/leftover state from other tests in this file.
+  // them in, so which ones get kept is deterministic.
+  //
+  // Codex review round-3 finding: the original version of this test
+  // measured a "sizeBefore" baseline instead of assuming the directory
+  // starts empty, and claimed that made it independent of execution
+  // order/leftover state - not actually true (the cap applies to the
+  // *entire* directory's contents, not additively per call, so the math
+  // silently breaks if enough pre-existing files were already present).
+  // Deletes every pre-existing *.charset file up front instead, so the
+  // starting state is a real, verified empty directory rather than an
+  // assumed one - the guarantee this test actually needs.
   const QString dir = KomportCharset::customCharsetsDirectory();
-  KomportCharset::reloadCustomCharsets(); // baseline, no changes yet
-  const int sizeBefore = KomportCharset::customCharsetEntries().size();
+  {
+    QDir d(dir);
+    for ( const QString &leftover : d.entryList(QStringList{QStringLiteral("*.charset")}, QDir::Files) ) {
+      QFile::remove( d.filePath(leftover) );
+    }
+  }
 
   constexpr int kFileCount = 257; // one past the production 256 cap
   QStringList createdPaths;
@@ -684,8 +703,19 @@ void TstCharset::customCharsetCountIsCapped()
   } );
 
   KomportCharset::reloadCustomCharsets();
-  const int sizeAfter = KomportCharset::customCharsetEntries().size();
-  QCOMPARE( sizeAfter - sizeBefore, 256 ); // capped, not 257
+  const auto customs = KomportCharset::customCharsetEntries();
+  QCOMPARE( customs.size(), 256 ); // capped, not 257, from a verified-empty starting point
+
+  // the alphabetically-first 256 (tstcap000..tstcap255) must have been
+  // kept, the last one (tstcap256, examined 257th) must not have been -
+  // pins *which* ones survive the cap, not just the total count.
+  auto has = [&customs]( const QString &id ) {
+    return std::any_of( customs.begin(), customs.end(),
+        [&id]( const QPair<QString,QString> &e ) { return e.first == id; } );
+  };
+  QVERIFY( has(QStringLiteral("tstcap000")) );
+  QVERIFY( has(QStringLiteral("tstcap255")) );
+  QVERIFY2( !has(QStringLiteral("tstcap256")), "the 257th file (examined only after the cap is already full) must not have been loaded" );
 }
 
 void TstCharset::customCharsetSurrogateCodePointIsRejected()
@@ -882,6 +912,352 @@ void TstCharset::customCharsetsDirectoryMkpathFailureIsLoggedNotCrashing()
   const QString result = KomportCharset::customCharsetsDirectory(); // must not crash
   QCOMPARE( result, dir );
   QVERIFY2( !QDir(dir).exists(), "the collision must still block an actual directory from existing at that path" );
+}
+
+void TstCharset::customCharsetFileSizeBoundaryIsInclusive()
+{
+  // Codex review round-3 finding: the size-cap test only checked well
+  // above the 1 MiB limit, not the boundary itself - pins that exactly
+  // 1 MiB is still accepted (the check is "> limit", not ">= limit") and
+  // one byte over is rejected, so the boundary can't silently drift to an
+  // off-by-one in either direction later.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const qint64 oneMiB = 1024 * 1024;
+
+  const QString atLimitPath = dir + QStringLiteral("/tstatlimit.charset");
+  const QString overLimitPath = dir + QStringLiteral("/tstoverlimit.charset");
+  auto cleanup = qScopeGuard( [&atLimitPath, &overLimitPath]() {
+    QFile::remove(atLimitPath);
+    QFile::remove(overLimitPath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+
+  {
+    // "41=2588\n" is 8 bytes - pad with comment filler up to exactly 1 MiB.
+    QFile f(atLimitPath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    const QByteArray mapping = "41=2588\n";
+    QByteArray padding( oneMiB - mapping.size() - 1, '#' ); // '#' lines are comments, harmless filler
+    padding += '\n';
+    QVERIFY( f.write(padding) == padding.size() );
+    QVERIFY( f.write(mapping) == mapping.size() );
+    f.close(); // flush to disk before checking the size below - QFileInfo on a still-open, unflushed QFile can read a stale/short size
+  }
+  QCOMPARE( QFileInfo(atLimitPath).size(), oneMiB );
+  {
+    QFile f(overLimitPath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray oneOver( oneMiB + 1, 'a' );
+    QVERIFY( f.write(oneOver) == oneOver.size() );
+  }
+
+  KomportCharset::reloadCustomCharsets();
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto has = [&customs]( const QString &id ) {
+    return std::any_of( customs.begin(), customs.end(),
+        [&id]( const QPair<QString,QString> &e ) { return e.first == id; } );
+  };
+  QVERIFY2( has(QStringLiteral("tstatlimit")), "a file at exactly the 1 MiB limit must still be accepted" );
+  QVERIFY2( !has(QStringLiteral("tstoverlimit")), "a file one byte over the 1 MiB limit must be rejected" );
+}
+
+void TstCharset::customCharsetOverlongLineIsDiscardedWholeNotMisparsedAsTailChunk()
+{
+  // Codex review round-3 finding (Low): QTextStream::readLine(maxlen)
+  // *splits* an over-length physical line across multiple readLine()
+  // calls rather than rejecting it - the exact scenario Codex described:
+  // one physical line consisting of a "#" comment marker, filler up to
+  // the 4096-character chunk limit, immediately followed (still on the
+  // very same physical line, no real newline yet) by what looks like a
+  // real "41=2588" mapping. Under the bug, the split-off tail chunk
+  // ("41=2588") would be parsed as its own independent, valid line. This
+  // proves it is NOT: 0x41 must stay at its default identity mapping.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstoverlong.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    // one single physical line: "#" + exactly enough 'x' filler to reach
+    // the 4096-char readLine() chunk size, then "41=2588" glued on with NO
+    // real newline in between yet, then a real newline, then a second,
+    // genuinely valid, independent line to prove the parser resyncs.
+    QByteArray commentPrefix = "#" + QByteArray(4095, 'x'); // exactly 4096 chars so far
+    QByteArray line1 = commentPrefix + "41=2588\n";
+    QVERIFY( f.write(line1) == line1.size() );
+    QByteArray line2 = "42=0041\n"; // genuinely independent, valid second line
+    QVERIFY( f.write(line2) == line2.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstoverlong")), QChar('A') ); // NOT 0x2588 - the split tail must not have been parsed as a mapping
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x42, QStringLiteral("tstoverlong")), QChar(0x0041) ); // the real next line still parses correctly - parser resynced
+}
+
+void TstCharset::customCharsetBinaryFileWithEmbeddedNulIsRejected()
+{
+  // Codex review round-3 finding (Low): QTextStream::status() does not
+  // reliably detect a genuinely binary/malformed-encoding file in this
+  // parsing path (Qt's decoder substitutes replacement characters rather
+  // than raising a stream error) - loadCustomCharsetFile() now sniffs for
+  // an embedded NUL byte up front instead, the standard binary-content
+  // heuristic. A real *.charset text file has no legitimate reason to
+  // contain one.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstbinary.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray content = "41=2588\n";
+    content.insert( 2, '\0' ); // embed a NUL byte in otherwise-plausible content
+    QVERIFY( f.write(content) == content.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstbinary"); } );
+  QVERIFY2( it == customs.end(), "a file with an embedded NUL byte must be rejected as binary, not loaded" );
+}
+
+void TstCharset::customCharsetSurrogateBoundaryValues()
+{
+  // Codex review round-3 finding: the original surrogate test only
+  // exercised 0xD800 - a faulty implementation rejecting just that one
+  // value would still have passed. Covers both ends of the D800-DFFF
+  // surrogate range plus the immediately adjacent, genuinely valid code
+  // points on either side (D7FF and E000), so an off-by-one at either
+  // boundary would be caught.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstsurrogateboundary.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=D7FF\n"; // valid - just below the surrogate range
+    out << "42=D800\n"; // invalid - first surrogate
+    out << "43=DFFF\n"; // invalid - last surrogate
+    out << "44=E000\n"; // valid - just above the surrogate range
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstsurrogateboundary")), QChar(0xD7FF) );
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x42, QStringLiteral("tstsurrogateboundary")), QChar('B') ); // rejected -> identity
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x43, QStringLiteral("tstsurrogateboundary")), QChar('C') ); // rejected -> identity
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x44, QStringLiteral("tstsurrogateboundary")), QChar(0xE000) );
+}
+
+void TstCharset::customCharsetSuffixDisambiguationItselfCannotCollide()
+{
+  // Codex review round-3 finding (Low): the first version of the
+  // disambiguation logic only checked the *original* declared name, then
+  // applied the " (<id>)" suffix unconditionally without re-checking
+  // whether the generated result itself now collided with an
+  // already-registered entry. Reproduces exactly the scenario Codex gave:
+  // "tstdupa.charset" declares the literal name "Standard (tstdupb)" (no
+  // collision by itself), while "tstdupb.charset" declares "Standard"
+  // (collides with the built-in) - naively suffixing the latter with its
+  // own id would produce the *same* string "Standard (tstdupb)" the first
+  // file already claimed. Both final names must be distinct.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString pathA = dir + QStringLiteral("/tstdupa.charset"); // alphabetically first
+  const QString pathB = dir + QStringLiteral("/tstdupb.charset");
+  {
+    QFile f(pathA);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "# Name: Standard (tstdupb)\n"; // deliberately what tstdupb's own suffix would produce
+    out << "41=2588\n";
+  }
+  {
+    QFile f(pathB);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "# Name: Standard\n"; // collides with the built-in "Standard"
+    out << "41=2588\n";
+  }
+  auto cleanup = qScopeGuard( [&pathA, &pathB]() {
+    QFile::remove(pathA);
+    QFile::remove(pathB);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto find = [&customs]( const QString &id ) {
+    return std::find_if( customs.begin(), customs.end(),
+        [&id]( const QPair<QString,QString> &e ) { return e.first == id; } );
+  };
+  const auto itA = find( QStringLiteral("tstdupa") );
+  const auto itB = find( QStringLiteral("tstdupb") );
+  QVERIFY( itA != customs.end() );
+  QVERIFY( itB != customs.end() );
+  QCOMPARE( itA->second, QStringLiteral("Standard (tstdupb)") ); // unmodified - no collision when it was registered first
+  QVERIFY2( itB->second != itA->second, "the disambiguated name must not collide with an already-registered entry's name" );
+  QVERIFY2( itB->second != QStringLiteral("Standard"), "must still be disambiguated away from the built-in it originally collided with" );
+}
+
+void TstCharset::multiWindowCustomCharsetSelectionIsReconciledInAllWindows()
+{
+  // Codex review round-3 finding (Medium): KomportCharset's custom-charset
+  // registry is one process-wide static shared by every open KomportApp
+  // window - reconciling only the window that happens to be opening
+  // Settings left any *other* open window's live Custom selection
+  // dangling. Two windows, both pointed at the same now-deleted custom
+  // charset, reconciled via the static all-windows helper (what
+  // slotShowPreferences() now actually calls) - both must end up reset,
+  // not just the one that would have opened Settings.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstmultiwin.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=2588\n";
+  }
+  KomportCharset::reloadCustomCharsets();
+
+  KomportApp *winA = new KomportApp();
+  winA->show();
+  QPointer<KomportApp> guardA(winA);
+  KomportApp *winB = new KomportApp();
+  winB->show();
+  QPointer<KomportApp> guardB(winB);
+
+  KomportView *viewA = winA->findChild<KomportView *>();
+  KomportView *viewB = winB->findChild<KomportView *>();
+  QVERIFY( viewA != nullptr );
+  QVERIFY( viewB != nullptr );
+
+  viewA->mEmulation->setCharset( KomportCharset::Custom, QStringLiteral("tstmultiwin") );
+  winA->strCharset = QStringLiteral("tstmultiwin");
+  viewB->mEmulation->setCharset( KomportCharset::Custom, QStringLiteral("tstmultiwin") );
+  winB->strCharset = QStringLiteral("tstmultiwin");
+
+  QFile::remove(filePath);
+  KomportCharset::reloadCustomCharsets(); // registry no longer has "tstmultiwin" - neither window has reconciled yet
+
+  KomportApp::reconcileCharsetSelectionAfterReloadForAllWindows();
+
+  QCOMPARE( viewA->mEmulation->charset(), KomportCharset::Standard );
+  QCOMPARE( viewB->mEmulation->charset(), KomportCharset::Standard );
+  QCOMPARE( winA->strCharset, KomportCharset::settingsKey(KomportCharset::Standard) );
+  QCOMPARE( winB->strCharset, KomportCharset::settingsKey(KomportCharset::Standard) );
+
+  winA->close();
+  winB->close();
+  QTRY_VERIFY( guardA.isNull() );
+  QTRY_VERIFY( guardB.isNull() );
+}
+
+void TstCharset::loadProfileNormalizesDanglingStrCharsetNotJustLiveEmulation()
+{
+  // Codex review round-3 finding (Medium): loadProfile() correctly reset
+  // the *live emulation* to Standard for a profile referencing a
+  // now-missing custom charset id (via resolveSettingsKey()'s own
+  // fallback), but left strCharset itself holding the original, still-
+  // dangling raw id - which then got re-persisted verbatim if the profile
+  // was saved again, and reconcileCharsetSelectionAfterReload() can't
+  // catch this case either (it only acts when charset()==Custom, which is
+  // no longer true once resolveSettingsKey() has already downgraded it).
+  // Checks strCharset directly (TstCharset is a friend of KomportApp),
+  // not just view->mEmulation->charset().
+  {
+    QSettings settings;
+    settings.beginGroup( QStringLiteral("Profiles/DanglingCharsetProfile") );
+    settings.setValue( QStringLiteral("Device"), QStringLiteral("/dev/null") );
+    settings.setValue( QStringLiteral("BaudRate"), QStringLiteral("9600") );
+    settings.setValue( QStringLiteral("DataBits"), QStringLiteral("8") );
+    settings.setValue( QStringLiteral("StartBits"), QStringLiteral("1") );
+    settings.setValue( QStringLiteral("StopBits"), QStringLiteral("1") );
+    settings.setValue( QStringLiteral("Parity"), QStringLiteral("NONE") );
+    settings.setValue( QStringLiteral("FlowControl"), QStringLiteral("NONE") );
+    settings.setValue( QStringLiteral("RXQueue"), QStringLiteral("1024") );
+    settings.setValue( QStringLiteral("FlushRate"), QStringLiteral("256") );
+    settings.setValue( QStringLiteral("ScrollBuffer"), QStringLiteral("1024") );
+    settings.setValue( QStringLiteral("LineEnding"), QStringLiteral("CR") );
+    // references a custom charset id that was never loaded/no longer exists
+    settings.setValue( QStringLiteral("Charset"), QStringLiteral("nonexistentcustomcharset") );
+    settings.endGroup();
+  }
+
+  KomportApp *win = new KomportApp();
+  win->show();
+  QPointer<KomportApp> guard(win);
+  KomportView *view = win->findChild<KomportView *>();
+  QVERIFY( view != nullptr );
+
+  win->loadProfile( QStringLiteral("DanglingCharsetProfile") );
+
+  QCOMPARE( view->mEmulation->charset(), KomportCharset::Standard ); // already worked before this fix
+  QCOMPARE( win->strCharset, KomportCharset::settingsKey(KomportCharset::Standard) ); // this is what round-3 fixed
+
+  win->close();
+  QTRY_VERIFY( guard.isNull() );
+}
+
+void TstCharset::customCharsetCapCountsExaminedFilesNotJustSuccessful()
+{
+  // Codex review round-3 finding (Medium): the original cap only counted
+  // *successfully registered* entries, so files that fail to load (too
+  // large, corrupt, id-colliding, ...) didn't count against it -
+  // arbitrarily many such files could still be opened and parsed before
+  // the cap ever took effect. This is the one test that can actually tell
+  // "examined" and "successful" apart: 3 deliberately oversized (thus
+  // failing) files, alphabetically first, followed by 257 valid ones -
+  // under the fixed behavior the failures consume 3 of the 256-file
+  // examination budget, so only 253 end up successfully registered, not
+  // 256. The old, buggy "only count successes" cap would have let the
+  // loop keep going past the 3 failures and still land on exactly 256
+  // registered - so this specific count (253, not 256) is what
+  // distinguishes the two implementations from each other.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  {
+    QDir d(dir);
+    for ( const QString &leftover : d.entryList(QStringList{QStringLiteral("*.charset")}, QDir::Files) ) {
+      QFile::remove( d.filePath(leftover) );
+    }
+  }
+
+  QStringList createdPaths;
+  // 3 files, alphabetically before "valid...", each over the 1 MiB size
+  // limit so loadCustomCharsetFile() rejects them outright.
+  for ( int i = 0; i < 3; ++i ) {
+    const QString filePath = dir + QStringLiteral("/aaafail%1.charset").arg(i);
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray oversized( 1024 * 1024 + 1024, 'a' );
+    QVERIFY( f.write(oversized) == oversized.size() );
+    createdPaths << filePath;
+  }
+  // 257 valid files, alphabetically after the 3 failing ones.
+  for ( int i = 0; i < 257; ++i ) {
+    const QString filePath = dir + QStringLiteral("/validcap%1.charset").arg(i, 3, 10, QLatin1Char('0'));
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=2588\n";
+    createdPaths << filePath;
+  }
+  auto cleanup = qScopeGuard( [&createdPaths]() {
+    for ( const QString &p : createdPaths ) QFile::remove(p);
+    KomportCharset::reloadCustomCharsets();
+  } );
+
+  KomportCharset::reloadCustomCharsets();
+  const auto customs = KomportCharset::customCharsetEntries();
+  QCOMPARE( customs.size(), 253 ); // 256-file examination budget minus the 3 failures, not 256
 }
 
 QTEST_MAIN(TstCharset)
