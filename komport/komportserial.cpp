@@ -192,7 +192,15 @@ bool KomportSerial::putStr(const char* _str, qsizetype _len){
   // syscall/QSerialPort call instead of N. sentChar() (for the hex
   // monitor) is still emitted once per byte actually written, just not
   // tangled up with how the bytes got onto the wire.
-  if ( _str == nullptr || !isOpen() ) return false;
+  // Codex review finding (round 4): _len is signed (qsizetype) but wasn't
+  // rejected when negative. For _len == -1, QIODevice::write() returns
+  // its own -1 error sentinel for a rejected/failed write - written(-1)
+  // != len(-1) was then false, so this returned true ("success") despite
+  // transmitting nothing. Not reachable from the current caller
+  // (KomportApp::slotMacroTriggered() always passes a real
+  // QByteArray::size()), but the public overload itself must not accept
+  // a negative length as if it meant something.
+  if ( _str == nullptr || !isOpen() || _len < 0 ) return false;
   const qint64 len = static_cast<qint64>( _len );
   const qint64 written = mPort.write( _str, len );
   for ( qint64 i = 0; i < written; ++i ) {

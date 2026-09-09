@@ -26,9 +26,11 @@
 #include "komportserial.h"
 
 #include <QTest>
+#include <QScopeGuard>
 #include <pty.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 
 class TstSerial : public QObject
@@ -38,6 +40,7 @@ private slots:
   void rxQueueClampsToPositive();
   void flushRateClampsToPositive();
   void putCharAndPutStrReportFailureWhenClosed();
+  void lengthAwarePutStrRejectsNegativeLength();
   void lengthAwarePutStrPreservesEmbeddedNulAndFollowingControlChar();
 };
 
@@ -110,6 +113,14 @@ void TstSerial::lengthAwarePutStrPreservesEmbeddedNulAndFollowingControlChar()
     QSKIP( "openpty() unavailable in this sandbox - cannot verify real wire bytes without a pty pair" );
   }
   ::close(slaveFd); // KomportSerial/QSerialPort opens its own fd on the slave path below
+  // Codex review finding (round 4): masterFd used to have no
+  // failure-safe cleanup - an assertion failure below (open()/putStr()/
+  // the final QCOMPARE) returned early without closing it. qScopeGuard()
+  // runs on every exit path (normal return, an early QVERIFY2/QCOMPARE
+  // failure, even an exception), so this now always closes masterFd
+  // exactly once, however the function actually exits.
+  auto masterFdGuard = qScopeGuard( [&masterFd]() { if ( masterFd >= 0 ) ::close(masterFd); } );
+
   // masterFd is blocking by default - without O_NONBLOCK, the read loop
   // below's very first ::read() call would block indefinitely if
   // putStr()'s write hasn't actually reached the kernel pty buffer yet
@@ -118,7 +129,13 @@ void TstSerial::lengthAwarePutStrPreservesEmbeddedNulAndFollowingControlChar()
   // blocking mode plus the polling loop's own QDeadlineTimer/QTest::qWait()
   // is what actually gives Qt's event loop a chance to flush the pending
   // write between read attempts.
-  ::fcntl( masterFd, F_SETFL, O_NONBLOCK );
+  //
+  // Codex review finding (round 4): fcntl()'s own return value used to be
+  // ignored - if it failed, masterFd would stay blocking and the first
+  // ::read() below could hang forever regardless of the QDeadlineTimer,
+  // since a blocking read() never even reaches the loop condition check.
+  QVERIFY2( ::fcntl(masterFd, F_SETFL, O_NONBLOCK) == 0,
+            qPrintable(QStringLiteral("fcntl(O_NONBLOCK) failed: %1").arg(QString::fromLocal8Bit(strerror(errno)))) );
 
   KomportSerial serial;
   serial.setDeviceName( QString::fromLocal8Bit(slaveName) );
@@ -139,8 +156,46 @@ void TstSerial::lengthAwarePutStrPreservesEmbeddedNulAndFollowingControlChar()
 
   QCOMPARE( received, QByteArray(payload, sizeof(payload)) );
 
+  serial.close(); // masterFd itself is closed by masterFdGuard above
+}
+
+void TstSerial::lengthAwarePutStrRejectsNegativeLength()
+{
+  // Codex review finding (round 4): qsizetype is signed, but a negative
+  // _len wasn't rejected before reaching QIODevice::write(). For
+  // _len == -1 specifically, write() returns its own -1 error sentinel,
+  // and the old "written != len" check (-1 != -1, false) then reported
+  // *success* despite transmitting nothing - the opposite of what a
+  // caller checking the return value would expect. isOpen() alone
+  // already returns false on an unopened KomportSerial regardless of
+  // this fix (see putCharAndPutStrReportFailureWhenClosed() above), so a
+  // real open port (the same pty-pair technique as the test above) is
+  // needed here to actually exercise the negative-length check in
+  // isolation, rather than accidentally passing for the wrong reason.
+  int masterFd = -1, slaveFd = -1;
+  char slaveName[256];
+  if ( ::openpty(&masterFd, &slaveFd, slaveName, nullptr, nullptr) != 0 ) {
+    QSKIP( "openpty() unavailable in this sandbox - cannot verify against a real open port" );
+  }
+  ::close(slaveFd);
+  auto masterFdGuard = qScopeGuard( [&masterFd]() { if ( masterFd >= 0 ) ::close(masterFd); } );
+  QVERIFY2( ::fcntl(masterFd, F_SETFL, O_NONBLOCK) == 0,
+            qPrintable(QStringLiteral("fcntl(O_NONBLOCK) failed: %1").arg(QString::fromLocal8Bit(strerror(errno)))) );
+
+  KomportSerial serial;
+  serial.setDeviceName( QString::fromLocal8Bit(slaveName) );
+  QVERIFY2( serial.open(), qPrintable(QStringLiteral("failed to open pty slave %1 via KomportSerial").arg(slaveName)) );
+
+  QCOMPARE( serial.putStr("x", -1), false );
+
+  // Confirm nothing was actually written to the wire either - a false
+  // return that still silently sent bytes would be its own bug.
+  char buf[8];
+  QTest::qWait(50);
+  QCOMPARE( ::read(masterFd, buf, sizeof(buf)), -1 );
+  QVERIFY( errno == EAGAIN || errno == EWOULDBLOCK );
+
   serial.close();
-  ::close(masterFd);
 }
 
 QTEST_MAIN(TstSerial)
