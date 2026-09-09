@@ -209,17 +209,31 @@ char KomportCharset::toWire(Id _charset, QChar _ch)
         // silent-wrong-byte class this function exists to prevent); same
         // problem for '^'/'_' (-> ↑/←), and for any lowercase letter
         // (0x61-0x7A sits inside PETSCII's unmapped graphics range, not
-        // real lowercase text). The safe identity range is exactly
-        // 0x20-0x5B plus 0x5D - everything else in 0x00-0x7F either has
-        // its own distinctive substitution above, or falls into the
-        // deliberately-unmapped graphics range and must not be sent as
-        // if it meant something else.
+        // real lowercase text). Narrowed to exactly the printable
+        // 0x20-0x5B plus 0x5D range.
+        //
+        // Codex review finding (round 3): that narrowing went too far the
+        // other way - it also excluded the C0 control range (0x00-0x1F)
+        // and DEL (0x7F), so pasting multi-line clipboard text under
+        // PETSCII turned every '\r'/'\n' into '?' ("line1\nline2" became
+        // "line1?line2"). Applying the *same* reasoning already used for
+        // CP437's control range (see KomportCharset::Id::CP437's comment
+        // and the kCp437 table comment: this emulation is a VT100
+        // interpreter first, control bytes stay literal/identity rather
+        // than getting reinterpreted through a retro charset, regardless
+        // of which charset is selected) - the control range plus DEL is
+        // now identity for PETSCII's fallback too, consistent with
+        // CP437's already-established scope decision rather than
+        // attempting authentic PETSCII control-code semantics (real C64
+        // PETSCII's LF-equivalent is at a completely different byte,
+        // 0x8D, not 0x0A - reproducing that faithfully was never this
+        // milestone's goal, see TODO.md).
         const auto &rev = petsciiReverse();
         auto it = rev.constFind( _ch.unicode() );
         if ( it != rev.constEnd() ) return static_cast<char>( it.value() );
         const ushort u = _ch.unicode();
-        const bool asciiIdentityRange = ( u >= 0x20 && u <= 0x5B ) || u == 0x5D;
-        return asciiIdentityRange ? _ch.toLatin1() : '?';
+        const bool controlOrAsciiIdentityRange = ( u <= 0x5B ) || u == 0x5D || u == 0x7F;
+        return controlOrAsciiIdentityRange ? _ch.toLatin1() : '?';
       }
     case Standard:
     default:

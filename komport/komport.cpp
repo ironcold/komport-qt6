@@ -1259,22 +1259,21 @@ void KomportApp::slotMacroTriggered(const QString &command)
   const KomportCharset::Id charset = view->mEmulation->charset();
   QByteArray wireBytes;
   wireBytes.reserve( command.size() );
-  for ( const QChar &c : command ) {
-    const char wireByte = KomportCharset::toWire(charset, c);
-    // Codex review finding (round 2): putStr() takes a null-terminated
-    // const char* (KomportSerial::putStr(), no separate length
-    // parameter) - a genuine embedded NUL character in the macro text
-    // (CP437's byte 0x00 is real Unicode NUL since the 0x00-0x7F scope
-    // reduction above) would silently truncate everything after it, with
-    // the line ending still appended afterwards as if nothing were
-    // wrong. Macro command text is a single-line QLineEdit value with no
-    // legitimate reason to contain a real NUL, so skipping it here is
-    // safe and keeps putStr()'s existing null-terminated-string contract
-    // (shared by every other call site in this codebase) untouched.
-    if ( wireByte == '\0' ) continue;
-    wireBytes.append( wireByte );
-  }
-  serial->putStr( wireBytes.constData() );
+  for ( const QChar &c : command ) wireBytes.append( KomportCharset::toWire(charset, c) );
+  // Codex review finding (round 2, corrected in round 3): putStr()'s
+  // null-terminated const char* overload would silently truncate at a
+  // genuine embedded NUL (CP437's byte 0x00 is real Unicode NUL since the
+  // 0x00-0x7F identity scoping - see KomportCharset). Round 2's fix
+  // skipped NUL bytes instead - avoided the truncation, but silently
+  // dropped the byte rather than preserving it, a different (smaller,
+  // but still real) corruption. KomportSerial::putStr(const char*,
+  // qsizetype) - a new, minimal, length-aware overload added for exactly
+  // this call site - sends every byte verbatim, embedded NULs included.
+  serial->putStr( wireBytes.constData(), wireBytes.size() );
+  // Unrelated to the NUL fix above (never charset-translated, never
+  // contains a NUL) - left on the null-terminated overload rather than
+  // migrated, per instruction to touch only the actually-affected call
+  // site.
   serial->putStr( view->mEmulation->lineEndingBytes().constData() );
 }
 

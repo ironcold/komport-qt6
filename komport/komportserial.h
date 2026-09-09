@@ -108,12 +108,25 @@ public slots: // Public slots
    *  know whether a byte actually made it out (e.g. file transfers) can
    *  check this instead of assuming success. */
   bool putChar(char _ch);
-  /** transmit a string. Returns false if the port isn't open or the write
-   *  was partial/failed (logged via qWarning() either way) - most callers
-   *  (keyboard escape sequences, device-status replies) are fire-and-
-   *  forget and don't check this, but it's available for callers that
-   *  want to. */
+  /** transmit a null-terminated string. Returns false if the port isn't
+   *  open or the write was partial/failed (logged via qWarning() either
+   *  way) - most callers (keyboard escape sequences, device-status
+   *  replies) are fire-and-forget and don't check this, but it's
+   *  available for callers that want to. Delegates to the length-aware
+   *  overload below via strlen(str) - any embedded NUL truncates the
+   *  string at that point, same as any other null-terminated-string API;
+   *  a caller that needs to send bytes verbatim (including a real
+   *  embedded NUL) must use the length-aware overload directly instead. */
   bool putStr(const char* str);
+  /** transmit exactly _len bytes starting at _str, verbatim - including
+   *  any embedded NUL bytes, unlike the null-terminated overload above.
+   *  Milestone 7 (Codex review finding): KomportApp::slotMacroTriggered()
+   *  needs this - charset-translated macro text can legitimately contain
+   *  a byte value of 0x00 (e.g. CP437's byte 0x00, which is real Unicode
+   *  NUL after Milestone 7's 0x00-0x7F identity scoping - see
+   *  KomportCharset), and the null-terminated overload's strlen()-based
+   *  length would have silently truncated everything after it. */
+  bool putStr(const char* _str, qsizetype _len);
 signals: // Signals
   /** Whenever a communications port setting is changed such as baud rate, etc. */
   void settingsChanged();

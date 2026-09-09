@@ -26,6 +26,10 @@
 #include "komportserial.h"
 
 #include <QTest>
+#include <pty.h>
+#include <unistd.h>
+#include <cerrno>
+#include <fcntl.h>
 
 class TstSerial : public QObject
 {
@@ -34,6 +38,7 @@ private slots:
   void rxQueueClampsToPositive();
   void flushRateClampsToPositive();
   void putCharAndPutStrReportFailureWhenClosed();
+  void lengthAwarePutStrPreservesEmbeddedNulAndFollowingControlChar();
 };
 
 void TstSerial::rxQueueClampsToPositive()
@@ -77,6 +82,65 @@ void TstSerial::putCharAndPutStrReportFailureWhenClosed()
   QCOMPARE( serial.putStr("hello"), false );
   // Must not crash on a null string either.
   QCOMPARE( serial.putStr(nullptr), false );
+}
+
+void TstSerial::lengthAwarePutStrPreservesEmbeddedNulAndFollowingControlChar()
+{
+  // Milestone 7 (Codex review finding, round 3): KomportApp::
+  // slotMacroTriggered() can produce charset-translated macro text
+  // containing a genuine embedded NUL byte (CP437's byte 0x00 is real
+  // Unicode NUL - see KomportCharset). The null-terminated putStr(const
+  // char*) overload would silently *truncate* everything after such a
+  // NUL (strlen()-based length); a first fix attempt instead silently
+  // *skipped* the NUL byte, which avoided the truncation but still
+  // dropped/altered data without telling anyone. The new
+  // putStr(const char*, qsizetype) overload must send every byte
+  // verbatim, embedded NUL included - this test writes a payload with a
+  // NUL followed immediately by a control character (CR) followed by
+  // more data, and reads the raw bytes back from the other end of a real
+  // local pty pair to prove the exact byte sequence made it onto the
+  // wire unmodified. A payload that only *changed* (rather than got
+  // shorter) would still be a bug this specific pattern is chosen to
+  // catch: truncation would stop the read at "A" (1 byte total),
+  // NUL-skipping would deliver "A\rB" (3 bytes, missing the NUL), and
+  // only a genuinely correct implementation delivers all 4 bytes intact.
+  int masterFd = -1, slaveFd = -1;
+  char slaveName[256];
+  if ( ::openpty(&masterFd, &slaveFd, slaveName, nullptr, nullptr) != 0 ) {
+    QSKIP( "openpty() unavailable in this sandbox - cannot verify real wire bytes without a pty pair" );
+  }
+  ::close(slaveFd); // KomportSerial/QSerialPort opens its own fd on the slave path below
+  // masterFd is blocking by default - without O_NONBLOCK, the read loop
+  // below's very first ::read() call would block indefinitely if
+  // putStr()'s write hasn't actually reached the kernel pty buffer yet
+  // (no explicit waitForBytesWritten() anywhere in this codebase's
+  // putStr(), so that's a real race, not a hypothetical one) - non-
+  // blocking mode plus the polling loop's own QDeadlineTimer/QTest::qWait()
+  // is what actually gives Qt's event loop a chance to flush the pending
+  // write between read attempts.
+  ::fcntl( masterFd, F_SETFL, O_NONBLOCK );
+
+  KomportSerial serial;
+  serial.setDeviceName( QString::fromLocal8Bit(slaveName) );
+  QVERIFY2( serial.open(), qPrintable(QStringLiteral("failed to open pty slave %1 via KomportSerial").arg(slaveName)) );
+
+  const char payload[] = { 'A', '\0', 0x0D, 'B' }; // embedded NUL, then a control char (CR), then more data
+  QVERIFY( serial.putStr( payload, static_cast<qsizetype>(sizeof(payload)) ) );
+
+  QByteArray received;
+  QDeadlineTimer deadline(2000);
+  while ( received.size() < static_cast<int>(sizeof(payload)) && !deadline.hasExpired() ) {
+    char buf[64];
+    const ssize_t n = ::read( masterFd, buf, sizeof(buf) );
+    if ( n > 0 ) received.append( buf, static_cast<int>(n) );
+    else if ( n < 0 && errno != EAGAIN && errno != EWOULDBLOCK ) break;
+    QTest::qWait(10);
+  }
+
+  QCOMPARE( received, QByteArray(payload, sizeof(payload)) );
+
+  serial.close();
+  ::close(masterFd);
 }
 
 QTEST_MAIN(TstSerial)

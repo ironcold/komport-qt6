@@ -177,17 +177,26 @@ bool KomportSerial::putChar(char _ch){
   return false;
 }
 
-/** transmit a string */
+/** transmit a null-terminated string - delegates to the length-aware
+ *  overload below via strlen(); see the header for why a caller that
+ *  needs embedded NULs sent verbatim must call that overload directly
+ *  instead. */
 bool KomportSerial::putStr(const char* str){
+  if ( str == nullptr ) return false;
+  return putStr( str, static_cast<qsizetype>( strlen(str) ) );
+}
+
+/** transmit exactly _len bytes, verbatim (see header) */
+bool KomportSerial::putStr(const char* _str, qsizetype _len){
   // A single batched write() rather than looping putChar() per byte - one
   // syscall/QSerialPort call instead of N. sentChar() (for the hex
   // monitor) is still emitted once per byte actually written, just not
   // tangled up with how the bytes got onto the wire.
-  if ( str == nullptr || !isOpen() ) return false;
-  const qint64 len = static_cast<qint64>( strlen(str) );
-  const qint64 written = mPort.write( str, len );
+  if ( _str == nullptr || !isOpen() ) return false;
+  const qint64 len = static_cast<qint64>( _len );
+  const qint64 written = mPort.write( _str, len );
   for ( qint64 i = 0; i < written; ++i ) {
-    emit sentChar( str[i] );
+    emit sentChar( _str[i] );
   }
   if ( written != len ) {
     // write() returning less than the full length (a partial write, or -1

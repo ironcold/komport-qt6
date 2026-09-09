@@ -57,6 +57,7 @@ private slots:
   void petsciiAsciiCompatibleRangePassesThrough();
   void petsciiGraphicsRangeIsDeliberatelyUnmapped();
   void petsciiDisplacedAsciiCharactersDoNotSilentlySendWrongByte();
+  void petsciiControlCharactersSurviveMultilinePaste();
   void unrepresentableCharacterOnCp437ReturnsPlaceholderNotWrongByte();
   void nonLatin1CharacterNeverSilentlyBecomesNul();
   void namesAndIndexRoundTrip();
@@ -193,6 +194,23 @@ void TstCharset::petsciiDisplacedAsciiCharactersDoNotSilentlySendWrongByte()
   // ']' (0x5D) sits directly between the displaced bytes and is
   // genuinely ASCII-identical under PETSCII - must still work.
   QCOMPARE( KomportCharset::toWire(KomportCharset::PETSCII, QChar(']')), ']' );
+}
+
+void TstCharset::petsciiControlCharactersSurviveMultilinePaste()
+{
+  // Codex review finding (round 3): narrowing the PETSCII identity range
+  // to exactly the printable 0x20-0x5B/0x5D bytes (the fix just above)
+  // went too far - it also excluded the C0 control range, so pasting
+  // multi-line clipboard text under PETSCII turned every line break into
+  // '?' ("line1\nline2" -> "line1?line2"). Same reasoning already applied
+  // to CP437's control range (see KomportCharset::Id::CP437): this
+  // emulation treats control bytes as identity/literal regardless of the
+  // selected charset, it doesn't reinterpret them through a retro
+  // charset's own (different) control-code semantics.
+  for ( char c : { '\r', '\n', '\t' } ) {
+    QCOMPARE( KomportCharset::toWire(KomportCharset::PETSCII, QChar(c)), c );
+  }
+  QCOMPARE( KomportCharset::toWire(KomportCharset::PETSCII, QChar(0x7F)), static_cast<char>(0x7F) ); // DEL
 }
 
 void TstCharset::unrepresentableCharacterOnCp437ReturnsPlaceholderNotWrongByte()
