@@ -76,6 +76,12 @@ class KomportApp : public QMainWindow
   Q_OBJECT
 
   friend class KomportView;
+  /** Milestone 7 custom-charset addendum: lets tst_charset.cpp exercise
+   *  reconcileCharsetSelectionAfterReload() directly, without needing to
+   *  drive it through slotShowPreferences()'s modal QDialog::exec() (same
+   *  friend-for-testability pattern already used by KomportView's
+   *  "friend class TstAppearance" above). */
+  friend class TstCharset;
 
   public:
     /** construtor of KomportApp, calls all init functions to create the application. */
@@ -148,6 +154,18 @@ class KomportApp : public QMainWindow
      *  footer from strDevice/strBaudRate/strDataBits/strParity/strStopBits/
      *  strLineEnding - call after anything that changes them */
     void updateConnectionStatusLabel();
+    /** Milestone 7 custom-charset addendum, Codex review finding: if
+     *  view->mEmulation is currently selected on a Custom charset whose
+     *  id is no longer present in KomportCharset::customCharsetEntries()
+     *  (its *.charset file was deleted/renamed since it was selected -
+     *  KomportCharset::reloadCustomCharsets() must already have been
+     *  called before this), resets both the live selection and strCharset
+     *  back to Standard rather than leaving a dangling reference that
+     *  would silently reactivate if a future file happened to reuse the
+     *  same id. Factored out of slotShowPreferences() (which is otherwise
+     *  awkward to unit-test directly - it opens a modal QDialog::exec())
+     *  so tst_charset.cpp can exercise this specific behavior on its own. */
+    void reconcileCharsetSelectionAfterReload();
 
   public slots:
     /** loads Profiles/_name into strDevice... and macroBar, then applies it

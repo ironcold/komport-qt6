@@ -179,12 +179,39 @@ struct CustomEntry {
  *  mutable reference, same idiom already used for the tables above -
  *  this whole class is otherwise stateless/static, this is the one
  *  deliberate exception (the registry has to live somewhere between a
- *  reload and the next one). */
-QVector<CustomEntry> &customRegistry()
+ *  reload and the next one).
+ *
+ *  Codex review finding: a QVector here (as the first version had) meant
+ *  toDisplay()/toWire() linearly scanned every loaded custom charset for
+ *  every single translated byte - fine for a handful of files, but an
+ *  unnecessary O(n) cost that grows with however many *.charset files
+ *  happen to be sitting in the directory, on the hottest path this class
+ *  has (one lookup per received/typed byte). QMap<id, CustomEntry> gives
+ *  O(log n) lookup by id instead, and - as a side benefit neither
+ *  strictly required nor a regression risk - a stable, alphabetically
+ *  sorted dropdown order for free, without needing a separate
+ *  "remember file order" mechanism on top. */
+QMap<QString, CustomEntry> &customRegistry()
 {
-  static QVector<CustomEntry> registry;
+  static QMap<QString, CustomEntry> registry;
   return registry;
 }
+
+/** Codex review finding: loadCustomCharsetFile()/reloadCustomCharsets()
+ *  had no bound on file size, individual line length, or how many
+ *  *.charset files get loaded - a huge or pathological file/directory
+ *  could make every app startup (or every Settings-dialog reopen, which
+ *  reloads the registry too) slow or memory-hungry. Same "clamp rather
+ *  than trust unbounded input" philosophy already used elsewhere in this
+ *  codebase (MaxCtlSequenceLength in komportemulation.cpp,
+ *  MaxLineBufferLength in komportsessionlogger.cpp, MaxDimension/MaxCells
+ *  in komportcellarray.cpp, ...) - generous enough that no legitimate
+ *  hand-written *.charset file (at most 256 real override lines) could
+ *  ever hit them, just bounding the pathological case. */
+constexpr qint64 MaxCustomCharsetFileSize = 1 * 1024 * 1024; // 1 MiB
+constexpr int MaxCustomCharsetLineLength = 4096;
+constexpr int MaxCustomCharsetLinesRead = 100000; // defense in depth even if a huge file somehow had short lines
+constexpr int MaxCustomCharsetCount = 256;
 
 /** parse one *.charset file into _out. Returns false (logs a qWarning())
  *  only if the file itself couldn't be opened at all - a malformed
@@ -196,13 +223,24 @@ QVector<CustomEntry> &customRegistry()
  *  header comment for the format itself. */
 bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
 {
+  const QFileInfo info(_path);
+  // Codex review finding: an unbounded file could make loading slow/
+  // memory-hungry - reject oversized files up front rather than reading
+  // them at all. No legitimate hand-written table (at most 256 real
+  // override lines) comes anywhere close to this.
+  if ( info.size() > MaxCustomCharsetFileSize ) {
+    qWarning() << "KomportCharset:" << _path << "is" << info.size()
+               << "bytes, exceeding the" << MaxCustomCharsetFileSize
+               << "byte limit for a *.charset file - skipping";
+    return false;
+  }
+
   QFile file(_path);
   if ( !file.open(QIODevice::ReadOnly | QIODevice::Text) ) {
     qWarning() << "KomportCharset: could not open" << _path << "(" << file.errorString() << ")";
     return false;
   }
 
-  const QFileInfo info(_path);
   _out.id = info.completeBaseName(); // filename without its ".charset" extension
   _out.displayName = _out.id;        // fallback - "# Name: ..." below can override
   for ( int b = 0; b < 256; ++b ) _out.forward[b] = static_cast<char16_t>(b); // default: identity
@@ -212,8 +250,8 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
 
   QTextStream in(&file);
   int lineNo = 0;
-  while ( !in.atEnd() ) {
-    const QString rawLine = in.readLine();
+  while ( !in.atEnd() && lineNo < MaxCustomCharsetLinesRead ) {
+    const QString rawLine = in.readLine( MaxCustomCharsetLineLength );
     ++lineNo;
     const QString line = rawLine.trimmed();
     if ( line.isEmpty() ) continue;
@@ -231,13 +269,30 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
     bool byteOk = false, codeOk = false;
     const uint byteVal = line.left(eq).trimmed().toUInt( &byteOk, 16 );
     const uint codeVal = line.mid(eq + 1).trimmed().toUInt( &codeOk, 16 );
-    if ( !byteOk || !codeOk || byteVal > 0xFF || codeVal > 0xFFFF ) {
+    // Codex review finding: 0xD800-0xDFFF are UTF-16 surrogate halves,
+    // not valid standalone Unicode scalar values on their own - QChar
+    // will happily hold one anyway (it's just a 16-bit code unit), but
+    // accepting one here would silently create a table entry that can
+    // never correctly round-trip through real Unicode-aware text
+    // handling. Rejected the same way as any other out-of-range value.
+    const bool isSurrogate = codeOk && codeVal >= 0xD800 && codeVal <= 0xDFFF;
+    if ( !byteOk || !codeOk || byteVal > 0xFF || codeVal > 0xFFFF || isSurrogate ) {
       qWarning() << "KomportCharset:" << _path << "line" << lineNo
                  << "- byte/code point out of range (byte must be 00-FF, code point"
-                    " 0000-FFFF - no surrogate-pair/astral support), skipping:" << rawLine;
+                    " 0000-FFFF excluding the D800-DFFF surrogate range - no"
+                    " surrogate-pair/astral support), skipping:" << rawLine;
       continue;
     }
     _out.forward[byteVal] = static_cast<char16_t>(codeVal);
+  }
+  // Codex review finding: a genuinely binary/non-UTF-8 file could still
+  // "succeed" as a no-op identity charset without this - QTextStream's
+  // own status() after a full read is the cheapest available signal that
+  // something about the underlying data was actually wrong, on top of
+  // (not instead of) the per-line validation above.
+  if ( in.status() != QTextStream::Ok ) {
+    qWarning() << "KomportCharset:" << _path << "- stream error while reading (status" << in.status() << "), skipping the file";
+    return false;
   }
 
   for ( int b = 0; b < 256; ++b ) {
@@ -254,9 +309,17 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
  *  finds their way into the folder (e.g. via the Settings dialog's
  *  "Custom Charsets Folder..." button) sees the file format explained
  *  right there, without needing to already know about TODO.md or the
- *  source code. Only writes it if no file of that name exists yet - a
- *  user who deletes it (or edits it) isn't fighting it being silently
- *  recreated on every launch. */
+ *  source code. Only writes it if no file of that name exists *right
+ *  now* - editing it in place is respected (won't be overwritten while
+ *  it's still there). Codex review finding, comment corrected: an
+ *  earlier version of this comment claimed deleting the file would keep
+ *  it gone permanently - not true, since this check re-runs on every
+ *  call (every app start, every Settings-dialog open) and can only see
+ *  "does it exist right now", not "did a user delete it on purpose" - a
+ *  deleted README.txt *will* reappear on the next call, the same way
+ *  customCharsetsDirectory()'s own mkpath() call below recreates the
+ *  whole directory if that got deleted too. Consistent, if not what
+ *  that first version promised. */
 void writeReadmeIfMissing(const QString &_dirPath)
 {
   const QString readmePath = _dirPath + QStringLiteral("/README.txt");
@@ -331,9 +394,8 @@ void writeReadmeIfMissing(const QString &_dirPath)
 QChar KomportCharset::toDisplay(Id _charset, unsigned char _rawByte, const QString &_customId)
 {
   if ( _charset == Custom ) {
-    for ( const CustomEntry &entry : customRegistry() ) {
-      if ( entry.id == _customId ) return QChar( entry.forward[_rawByte] );
-    }
+    const auto it = customRegistry().constFind( _customId );
+    if ( it != customRegistry().constEnd() ) return QChar( it->forward[_rawByte] );
     // unknown/no-longer-loaded custom id (e.g. the file was deleted after
     // a profile was saved referencing it) - Standard's identity behavior
     // rather than crashing or guessing at a replacement.
@@ -375,11 +437,10 @@ char KomportCharset::toWire(Id _charset, QChar _ch, const QString &_customId)
   // charsets get the same exhaustive-reverse-table treatment as CP437,
   // since a loaded custom table is always a full 256-entry table too.
   if ( _charset == Custom ) {
-    for ( const CustomEntry &entry : customRegistry() ) {
-      if ( entry.id == _customId ) {
-        auto it = entry.reverse.constFind( _ch.unicode() );
-        return ( it != entry.reverse.constEnd() ) ? static_cast<char>( it.value() ) : '?';
-      }
+    const auto entryIt = customRegistry().constFind( _customId );
+    if ( entryIt != customRegistry().constEnd() ) {
+      const auto it = entryIt->reverse.constFind( _ch.unicode() );
+      return ( it != entryIt->reverse.constEnd() ) ? static_cast<char>( it.value() ) : '?';
     }
     // unknown/no-longer-loaded custom id - Standard's own fallback policy.
     return ( _ch.unicode() <= 0xFF ) ? _ch.toLatin1() : '?';
@@ -503,9 +564,7 @@ KomportCharset::Selection KomportCharset::resolveSettingsKey(const QString &_key
   if ( _key == QStringLiteral("CP437") ) return { CP437, QString() };
   if ( _key == QStringLiteral("PETSCII") ) return { PETSCII, QString() };
   if ( _key == QStringLiteral("Standard") ) return { Standard, QString() };
-  for ( const CustomEntry &entry : customRegistry() ) {
-    if ( entry.id == _key ) return { Custom, entry.id };
-  }
+  if ( customRegistry().contains(_key) ) return { Custom, _key };
   // Unrecognized (an old profile referencing a custom charset file that's
   // since been deleted/renamed, a hand-edited config, ...) - same
   // graceful-degradation policy as the rest of this codebase's profile
@@ -531,7 +590,19 @@ QString KomportCharset::customCharsetsDirectory()
   // ~/.config/Komport-Qt6/charsets/. */
   const QString configDir = QFileInfo( QSettings().fileName() ).absolutePath();
   const QString dirPath = configDir + QStringLiteral("/charsets");
-  QDir().mkpath( dirPath ); // create if missing; a harmless no-op otherwise
+  // Codex review finding: mkpath()'s result was ignored - a read-only
+  // filesystem, or a *file* already sitting at this path instead of a
+  // directory, would silently hand back a path that doesn't actually
+  // work for anything using it afterwards (reloadCustomCharsets()'s own
+  // QDir::entryList() on a nonexistent/non-directory path just returns
+  // an empty list, no crash, but with no diagnostic explaining why
+  // custom charsets never show up). Logged, not otherwise handled -
+  // there's no better fallback location to offer instead.
+  if ( !QDir().mkpath(dirPath) ) {
+    qWarning() << "KomportCharset: could not create" << dirPath
+               << "- custom *.charset files will not be found until this is fixed"
+                  " (read-only filesystem? a file already exists at this path?)";
+  }
   writeReadmeIfMissing( dirPath );
   return dirPath;
 }
@@ -544,6 +615,16 @@ void KomportCharset::reloadCustomCharsets()
   QDir dir( customCharsetsDirectory() );
   const QStringList files = dir.entryList( QStringList{ QStringLiteral("*.charset") }, QDir::Files, QDir::Name );
   for ( const QString &fileName : files ) {
+    // Codex review finding: an unbounded number of files could make
+    // every reload (startup, every Settings-dialog reopen) slow - files
+    // are listed alphabetically, so this deterministically keeps the
+    // first MaxCustomCharsetCount of them rather than an arbitrary subset.
+    if ( registry.size() >= MaxCustomCharsetCount ) {
+      qWarning() << "KomportCharset:" << customCharsetsDirectory() << "has more than"
+                 << MaxCustomCharsetCount << "*.charset files - ignoring the rest"
+                    " (starting at" << fileName << ")";
+      break;
+    }
     CustomEntry entry;
     if ( !loadCustomCharsetFile( dir.filePath(fileName), entry ) ) continue;
     if ( entry.id.compare( QStringLiteral("Standard"), Qt::CaseInsensitive ) == 0
@@ -554,7 +635,29 @@ void KomportCharset::reloadCustomCharsets()
                     " (rename it to something else)";
       continue;
     }
-    registry.append( entry );
+    // Codex review finding: the id-collision check above only protects
+    // the *persisted key* (unique by construction - QDir::entryList()
+    // never lists two different files under the exact same name) - it
+    // said nothing about the *displayed* name, which comes from an
+    // unchecked "# Name: ..." line and could just as easily claim to be
+    // "Standard" or duplicate another custom entry's name, making the
+    // dropdown show two indistinguishable rows even though the
+    // underlying ids (and therefore the actual behavior) differ.
+    // Disambiguate rather than reject outright - the file is still
+    // perfectly loadable and usable, this is purely a display concern.
+    bool nameCollides = false;
+    for ( const auto &builtin : KomportCharset::displayEntries() ) {
+      if ( builtin.second.compare(entry.displayName, Qt::CaseInsensitive) == 0 ) { nameCollides = true; break; }
+    }
+    if ( !nameCollides ) {
+      for ( auto it = registry.constBegin(); it != registry.constEnd(); ++it ) {
+        if ( it->displayName.compare(entry.displayName, Qt::CaseInsensitive) == 0 ) { nameCollides = true; break; }
+      }
+    }
+    if ( nameCollides ) {
+      entry.displayName = QStringLiteral("%1 (%2)").arg(entry.displayName, entry.id);
+    }
+    registry.insert( entry.id, entry );
   }
 }
 

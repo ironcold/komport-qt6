@@ -21,6 +21,7 @@
 #include <QTabWidget>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QMessageBox>
 #include <QGroupBox>
 #include <QComboBox>
 #include <QSpinBox>
@@ -219,8 +220,21 @@ QWidget* SettingsDialog::createTerminalTab()
            "see TODO.md for the file format. New files show up in the\n"
            "dropdown above the next time this dialog is opened, no restart\n"
            "or code change needed.") );
-    connect( OpenCustomCharsetsFolderButton, &QPushButton::clicked, this, [](){
-      QDesktopServices::openUrl( QUrl::fromLocalFile( KomportCharset::customCharsetsDirectory() ) );
+    connect( OpenCustomCharsetsFolderButton, &QPushButton::clicked, this, [this](){
+      // Codex review finding: openUrl()'s result was ignored - on a
+      // system with no file manager registered for local directories
+      // (unusual, but not impossible, e.g. some minimal setups), the
+      // button would just silently do nothing with no clue why. Unlike
+      // customCharsetsDirectory()'s own mkpath() failure (a background
+      // condition, logged), this is a direct response to an explicit
+      // click, so a visible message fits this codebase's established
+      // pattern for user-initiated-action failures (e.g. the file-
+      // transfer error dialogs) better than a log-only qWarning().
+      const QString dir = KomportCharset::customCharsetsDirectory();
+      if ( !QDesktopServices::openUrl(QUrl::fromLocalFile(dir)) ) {
+        QMessageBox::warning( this, tr("Could Not Open Folder"),
+            tr("Could not open a file manager for:\n%1").arg(dir) );
+      }
     } );
 
     VisualBellCheckBox = new QCheckBox( tr("Visual Bell"), emulationGroup );

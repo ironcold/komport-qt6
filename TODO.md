@@ -122,8 +122,41 @@ DB=2588
   Settings-Dialog geöffnet wird — kein Neustart nötig, um eine gerade
   abgelegte Datei nutzen zu können.
 
+**Absicherung gegen fehlerhafte/pathologische Eingaben** (Codex-Review,
+zweite Runde, alle 5 Funde behoben — s. `TODO-ARCHIVE.md`):
+- Einzelne Datei max. 1 MiB, Zeilen max. 4096 Zeichen, max. 100000
+  gelesene Zeilen pro Datei — überschreitet eine Datei das Größenlimit,
+  wird sie komplett übersprungen (geloggt), statt Programmstart/
+  Settings-Dialog-Öffnen zu verlangsamen.
+- Max. 256 geladene `*.charset`-Dateien pro Verzeichnis (alphabetisch
+  nach Dateiname sortiert, überzählige werden übersprungen und geloggt).
+- Unicode-Surrogate (`D800`-`DFFF`) werden als Codepoint abgelehnt wie
+  jeder andere ungültige Wert — kein gültiger eigenständiger Unicode-
+  Skalarwert.
+- Binär-/kaputte Dateien, bei denen `QTextStream` nach dem Einlesen einen
+  Fehlerstatus meldet, werden komplett verworfen statt stillschweigend
+  als (fast) leerer Identitäts-Zeichensatz zu erscheinen.
+- Der angezeigte Name (`# Name: ...`) wird gegen Kollisionen mit
+  eingebauten Namen und bereits geladenen anderen Custom-Zeichensätzen
+  geprüft (Groß-/Kleinschreibung egal) — bei Kollision wird er um
+  " (<Datei-ID>)" ergänzt, die Datei bleibt aber ganz normal nutzbar
+  (anders als die reine ID-Kollision oben, die eine Datei komplett
+  ablehnt — hier geht es nur um die Anzeige, nicht um die Funktion).
+- Verschwindet die Datei eines *aktuell ausgewählten* Custom-Zeichensatzes
+  (gelöscht/umbenannt), wird die aktive Auswahl beim nächsten Öffnen des
+  Settings-Dialogs automatisch auf "Standard" zurückgesetzt
+  (`KomportApp::reconcileCharsetSelectionAfterReload()`), statt eine
+  Referenz auf eine nicht mehr existierende Datei stillschweigend
+  weiterzuführen (die sonst durch eine zufällig gleichnamige neue Datei
+  wieder unbeabsichtigt aktiv würde).
+- Kann das `charsets`-Verzeichnis nicht angelegt werden (z. B. Dateisystem
+  read-only, oder es liegt bereits eine reguläre Datei an dieser Stelle),
+  wird das jetzt geloggt (`qWarning()`) statt stillschweigend einen
+  unbrauchbaren Pfad zurückzugeben.
+
 Vollständige technische Details/Rationale im Code-Kommentar von
-`KomportCharset::reloadCustomCharsets()` (`komport/komportcharset.h`).
+`KomportCharset::reloadCustomCharsets()`/`loadCustomCharsetFile()`
+(`komport/komportcharset.h`/`.cpp`).
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 

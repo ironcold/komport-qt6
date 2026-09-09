@@ -660,6 +660,32 @@ void KomportApp::updateConnectionStatusLabel()
           .arg( mCurrentProfile.isEmpty() ? tr("(none)") : mCurrentProfile, strDevice, strBaudRate, framing, strFlowControl, strLineEnding ) );
 }
 
+void KomportApp::reconcileCharsetSelectionAfterReload()
+{
+  // Codex review finding: a custom charset the *live* session already has
+  // selected can have its file deleted or renamed since - already handled
+  // safely for actual RX/TX (KomportCharset::toDisplay()/toWire() degrade
+  // to Standard's identity behavior for an unknown id), but that alone
+  // left the *stored* selection itself dangling: view->mEmulation stayed
+  // reporting charset()==Custom with a now-nonexistent customCharsetId(),
+  // slotShowPreferences()'s combo-box pre-fill would then also fail to
+  // find it (a plain "leave the combo at its own default" rather than an
+  // honest reset), and saving the profile as-is would re-persist the same
+  // broken reference - worse, a future file that happened to reuse that
+  // exact id would silently reactivate without the user ever re-selecting
+  // anything. Call this right after every KomportCharset::reloadCustomCharsets()
+  // to close all of that at the source.
+  if ( view->mEmulation->charset() != KomportCharset::Custom ) return;
+  bool stillLoaded = false;
+  for ( const auto &entry : KomportCharset::customCharsetEntries() ) {
+    if ( entry.first == view->mEmulation->customCharsetId() ) { stillLoaded = true; break; }
+  }
+  if ( !stillLoaded ) {
+    view->mEmulation->setCharset( KomportCharset::Standard );
+    strCharset = KomportCharset::settingsKey( KomportCharset::Standard );
+  }
+}
+
 void KomportApp::loadProfile(const QString &_name)
 {
   if ( _name.isEmpty() ) return;
@@ -1110,6 +1136,7 @@ void KomportApp::slotShowPreferences()
   // file the user just dropped into customCharsetsDirectory() shows up
   // in the dropdown below without needing to restart the app.
   KomportCharset::reloadCustomCharsets();
+  reconcileCharsetSelectionAfterReload();
   ///////////////////////////////////////////////////////////////////
   // open the settings dialog...
   SettingsDialog settingsDialog(this);
