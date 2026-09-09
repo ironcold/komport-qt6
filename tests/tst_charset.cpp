@@ -92,6 +92,16 @@ void TstCharset::initTestCase()
 void TstCharset::cleanupTestCase()
 {
   const QString dirPath = QFileInfo(mTestConfigFile).absolutePath();
+  // Milestone 7 custom-charset addendum: this directory now also holds a
+  // charsets/ subdirectory (an auto-written README.txt, plus whatever
+  // *.charset files an individual test didn't already clean up itself
+  // via its own qScopeGuard) - remove it too, or the plain rmdir() below
+  // (which only succeeds on an already-empty directory) would silently
+  // leave this whole tree behind across test binary runs, contaminating
+  // the *next* run's "was this really just created?" assertions (see
+  // customCharsetsDirectoryIsCreated() - caught exactly this way while
+  // red/green-verifying the README-writing fix).
+  QDir(dirPath + QStringLiteral("/charsets")).removeRecursively();
   QFile::remove(mTestConfigFile);
   QDir().rmdir(dirPath);
 }
@@ -439,6 +449,20 @@ void TstCharset::customCharsetsDirectoryIsCreated()
   // this test's own org/app name (see initTestCase()) keeps it away from
   // the real user's ~/.config/Komport-Qt6/charsets/ entirely.
   QVERIFY( dir.contains(QStringLiteral("Komport-Qt6-Test-Charset")) );
+
+  // Milestone 7 addendum (user request: "die Benutzung auch sauber
+  // dokumentieren, so dass das für jeden sofort verständlich ist") - a
+  // short usage README should already be sitting right there the first
+  // time anyone opens this folder, not just an empty directory with no
+  // explanation.
+  const QString readmePath = dir + QStringLiteral("/README.txt");
+  QVERIFY2( QFile::exists(readmePath), "customCharsetsDirectory() should write a usage README.txt on first creation" );
+  QFile readme(readmePath);
+  QVERIFY( readme.open(QIODevice::ReadOnly | QIODevice::Text) );
+  const QString content = QString::fromUtf8( readme.readAll() );
+  QVERIFY2( content.contains(QStringLiteral(".charset")), "README should mention the *.charset file extension" );
+  QVERIFY2( content.contains(QStringLiteral("EN:")) && content.contains(QStringLiteral("DE:")),
+            "README should be bilingual (EN/DE), per the user's explicit request" );
 }
 
 void TstCharset::customCharsetFileMechanismLoadsAndTranslatesCorrectly()

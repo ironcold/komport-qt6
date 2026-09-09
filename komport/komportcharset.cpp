@@ -247,6 +247,85 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   return true;
 }
 
+/** Milestone 7 addendum (user request: "die Benutzung auch sauber
+ *  dokumentieren, so dass das für jeden sofort verständlich ist"):
+ *  writes a short, bilingual (EN/DE) usage README directly into
+ *  customCharsetsDirectory() the first time it's created, so anyone who
+ *  finds their way into the folder (e.g. via the Settings dialog's
+ *  "Custom Charsets Folder..." button) sees the file format explained
+ *  right there, without needing to already know about TODO.md or the
+ *  source code. Only writes it if no file of that name exists yet - a
+ *  user who deletes it (or edits it) isn't fighting it being silently
+ *  recreated on every launch. */
+void writeReadmeIfMissing(const QString &_dirPath)
+{
+  const QString readmePath = _dirPath + QStringLiteral("/README.txt");
+  if ( QFile::exists(readmePath) ) return;
+
+  QFile f(readmePath);
+  if ( !f.open(QIODevice::WriteOnly | QIODevice::Text) ) {
+    qWarning() << "KomportCharset: could not write" << readmePath << "(" << f.errorString() << ")";
+    return;
+  }
+  QTextStream out(&f);
+  out <<
+    "Komport-Qt6 - Custom Character Sets / Benutzerdefinierte Zeichensaetze\n"
+    "========================================================================\n"
+    "\n"
+    "EN: Drop a *.charset file into this folder to add a new selectable\n"
+    "    character set to Komport-Qt6's Settings dialog (Terminal tab) -\n"
+    "    no code change or rebuild needed. Re-open the Settings dialog\n"
+    "    (or restart the app) to pick up a new or changed file.\n"
+    "\n"
+    "DE: Eine *.charset-Datei in diesen Ordner legen, um einen neuen,\n"
+    "    auswaehlbaren Zeichensatz im Settings-Dialog (Terminal-Tab) von\n"
+    "    Komport-Qt6 hinzuzufuegen - ohne Code-Aenderung oder Neubau. Den\n"
+    "    Settings-Dialog neu oeffnen (oder die App neu starten), um eine\n"
+    "    neue oder geaenderte Datei zu uebernehmen.\n"
+    "\n"
+    "File format / Dateiformat:\n"
+    "---------------------------\n"
+    "# Name: <display name shown in the dropdown / im Dropdown angezeigter Name>\n"
+    "<hex byte 00-FF>=<hex Unicode code point 0000-FFFF>\n"
+    "...\n"
+    "\n"
+    "EN:\n"
+    "- The filename (without \".charset\") becomes the internal id and is\n"
+    "  what gets stored in a saved profile.\n"
+    "- Any byte you don't list keeps its default identity mapping (byte\n"
+    "  value == Unicode code point) - this is what keeps control codes\n"
+    "  (0x00-0x1F, 0x7F) safe without you needing to think about\n"
+    "  terminal/VT100 semantics at all.\n"
+    "- Lines starting with \"#\" are comments; a malformed individual line\n"
+    "  is skipped (and logged), not the whole file.\n"
+    "- The reverse direction (typing/pasting -> what gets sent over the\n"
+    "  wire) is derived automatically from the same table - no separate\n"
+    "  section needed.\n"
+    "\n"
+    "DE:\n"
+    "- Der Dateiname (ohne \".charset\") wird zur internen ID und ist das,\n"
+    "  was in einem gespeicherten Profil abgelegt wird.\n"
+    "- Jedes nicht aufgefuehrte Byte bleibt bei der Standard-Identitaets-\n"
+    "  Zuordnung (Byte-Wert == Unicode-Codepoint) - das haelt Steuercodes\n"
+    "  (0x00-0x1F, 0x7F) sicher, ohne dass man ueberhaupt an Terminal-/\n"
+    "  VT100-Semantik denken muss.\n"
+    "- Zeilen, die mit \"#\" beginnen, sind Kommentare; eine fehlerhafte\n"
+    "  einzelne Zeile wird uebersprungen (und geloggt), nicht die ganze Datei.\n"
+    "- Die Rueckrichtung (Tippen/Einfuegen -> was ueber die Leitung\n"
+    "  gesendet wird) wird automatisch aus derselben Tabelle abgeleitet -\n"
+    "  kein separater Abschnitt noetig.\n"
+    "\n"
+    "Example / Beispiel (would live in amiga.charset):\n"
+    "----------------------------------------------------\n"
+    "# Name: Amiga (example)\n"
+    "DB=2588\n"
+    "41=03B1\n"
+    "\n"
+    "Full reference / Vollstaendige Referenz: TODO.md section/Abschnitt 1\n"
+    "in the Komport-Qt6 source repository, or the code comment on\n"
+    "KomportCharset::reloadCustomCharsets() (komport/komportcharset.h).\n";
+}
+
 } // namespace
 
 QChar KomportCharset::toDisplay(Id _charset, unsigned char _rawByte, const QString &_customId)
@@ -453,6 +532,7 @@ QString KomportCharset::customCharsetsDirectory()
   const QString configDir = QFileInfo( QSettings().fileName() ).absolutePath();
   const QString dirPath = configDir + QStringLiteral("/charsets");
   QDir().mkpath( dirPath ); // create if missing; a harmless no-op otherwise
+  writeReadmeIfMissing( dirPath );
   return dirPath;
 }
 

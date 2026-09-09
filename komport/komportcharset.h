@@ -164,11 +164,16 @@ public:
   static Selection resolveSettingsKey(const QString &_key);
 
   /** Directory scanned by reloadCustomCharsets() for *.charset files -
-   *  QStandardPaths::AppConfigLocation + "charsets" (typically
-   *  ~/.config/Komport-Qt6/charsets/ on Linux), created if it doesn't
-   *  exist yet so there's always somewhere obvious to drop a file into.
-   *  Exposed so the UI can tell the user exactly where that is (and open
-   *  it directly) instead of them having to know/guess. */
+   *  derived from the real QSettings config file's own location
+   *  (typically ~/.config/Komport-Qt6/charsets/ on Linux, right next to
+   *  Komport-Qt6.conf - see the .cpp for why this isn't simply
+   *  QStandardPaths::AppConfigLocation). Created if it doesn't exist yet,
+   *  with a short bilingual (EN/DE) README.txt explaining the file
+   *  format written into it at the same time, so there's always
+   *  somewhere obvious to drop a file into - and once there, an
+   *  immediate explanation of what to do. Exposed so the UI can tell the
+   *  user exactly where that is (and open it directly) instead of them
+   *  having to know/guess. */
   static QString customCharsetsDirectory();
 
   /** (re-)scan customCharsetsDirectory() for *.charset files and rebuild
