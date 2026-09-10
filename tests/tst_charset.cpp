@@ -92,6 +92,8 @@ private slots:
   void multiWindowCustomCharsetSelectionIsReconciledInAllWindows();
   void loadProfileNormalizesDanglingStrCharsetNotJustLiveEmulation();
   void customCharsetCapCountsExaminedFilesNotJustSuccessful();
+  void customCharsetLineExactlyAtLengthLimitIsAccepted();
+  void newWindowConstructionReconcilesOtherOpenWindows();
 
 private:
   QString mTestConfigFile;
@@ -1258,6 +1260,100 @@ void TstCharset::customCharsetCapCountsExaminedFilesNotJustSuccessful()
   KomportCharset::reloadCustomCharsets();
   const auto customs = KomportCharset::customCharsetEntries();
   QCOMPARE( customs.size(), 253 ); // 256-file examination budget minus the 3 failures, not 256
+}
+
+void TstCharset::customCharsetLineExactlyAtLengthLimitIsAccepted()
+{
+  // Codex review round-4 finding (Low): the round-3 fix's "a returned
+  // chunk >= the length limit means this physical line was split" rule
+  // had a false positive - QTextStream::readLine(maxlen) returns a chunk
+  // of exactly maxlen characters both when a longer line got split AND
+  // when a physical line just happens to be exactly maxlen characters
+  // long, so the old code rejected the second, entirely legitimate case
+  // too. The round-4 fix reads the file into memory and splits on '\n'
+  // directly instead, giving each physical line's real, unambiguous
+  // length. Uses a "# Name: ..." line built to be exactly
+  // MaxCustomCharsetLineLength (4096) characters long - if it were
+  // wrongly rejected as "too long", the fallback (filename-as-)id would
+  // be what shows up as the display name instead.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstexactlimit.charset");
+  const QString namePrefix = QStringLiteral("# Name: "); // 8 characters
+  const int fillerLength = 4096 - namePrefix.size(); // exactly 4096 chars total for the whole line
+  const QString filler( fillerLength, QLatin1Char('X') );
+  QVERIFY( QStringLiteral("%1%2").arg(namePrefix, filler).size() == 4096 );
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    const QByteArray line1 = QStringLiteral("%1%2\n").arg(namePrefix, filler).toUtf8();
+    QCOMPARE( line1.size(), 4097 ); // 4096 chars + the trailing '\n' itself
+    QVERIFY( f.write(line1) == line1.size() );
+    const QByteArray line2 = "41=2588\n";
+    QVERIFY( f.write(line2) == line2.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstexactlimit"); } );
+  QVERIFY2( it != customs.end(), "the file must still load" );
+  QCOMPARE( it->second, filler ); // the exactly-4096-char "# Name: ..." line must have been parsed, not skipped as over-length
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstexactlimit")), QChar(0x2588) ); // the following line still parses too
+}
+
+void TstCharset::newWindowConstructionReconcilesOtherOpenWindows()
+{
+  // Codex review round-4 finding (Medium): the KomportApp constructor
+  // calls KomportCharset::reloadCustomCharsets() directly (to have the
+  // registry populated before its own profile load) - just as capable of
+  // invalidating an *already open* window's live Custom selection as the
+  // reload in slotShowPreferences() is, but wasn't followed by a
+  // reconcile-all-windows call. Unlike multiWindowCustomCharsetSelectionIsReconciledInAllWindows()
+  // above (which calls the reconcile helper directly), this one
+  // reproduces the *real* code path: winA's selection must be fixed up
+  // purely as a side effect of *constructing* winB, without anything
+  // calling a reconcile method on winA directly.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstnewwin.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=2588\n";
+  }
+  KomportCharset::reloadCustomCharsets();
+
+  KomportApp *winA = new KomportApp();
+  winA->show();
+  QPointer<KomportApp> guardA(winA);
+  KomportView *viewA = winA->findChild<KomportView *>();
+  QVERIFY( viewA != nullptr );
+
+  viewA->mEmulation->setCharset( KomportCharset::Custom, QStringLiteral("tstnewwin") );
+  winA->strCharset = QStringLiteral("tstnewwin");
+  QCOMPARE( viewA->mEmulation->charset(), KomportCharset::Custom ); // sanity check on the setup itself
+
+  QFile::remove(filePath); // the file winA is relying on disappears
+
+  // Constructing winB reloads the shared registry as one of its very
+  // first steps (before this call returns) - winA must come out of this
+  // reconciled too, even though nothing touched winA directly.
+  KomportApp *winB = new KomportApp();
+  winB->show();
+  QPointer<KomportApp> guardB(winB);
+
+  QCOMPARE( viewA->mEmulation->charset(), KomportCharset::Standard );
+  QCOMPARE( winA->strCharset, KomportCharset::settingsKey(KomportCharset::Standard) );
+
+  winA->close();
+  winB->close();
+  QTRY_VERIFY( guardA.isNull() );
+  QTRY_VERIFY( guardB.isNull() );
+  KomportCharset::reloadCustomCharsets(); // leave the registry clean for later tests
 }
 
 QTEST_MAIN(TstCharset)

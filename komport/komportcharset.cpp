@@ -19,12 +19,15 @@
 
 #include <QMap>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
 #include <QTextStream>
 #include <QRegularExpression>
 #include <QDebug>
+#include <iterator>
+#include <set>
 #include <array>
 
 namespace {
@@ -249,9 +252,35 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   // above, so this is bounded) and rejecting outright if it contains an
   // embedded NUL byte is the standard, simple binary-content heuristic -
   // no legitimate hand-written *.charset text file has any reason to
-  // contain one. QTextStream is then built from this in-memory buffer
-  // instead of the QFile directly - same parsing logic below, unchanged.
+  // contain one.
+  //
+  // Codex review round-4 finding: the NUL-byte heuristic also rejects a
+  // *legitimate* UTF-16-encoded text file, since ordinary ASCII characters
+  // are NUL-padded in that encoding (e.g. 'A' = 0x41 0x00) - true, but this
+  // is a deliberate scope decision rather than a bug: the *.charset format
+  // is documented (TODO.md, README.md, the auto-written README.txt) only
+  // with plain ASCII/UTF-8 examples, and every existing file this codebase
+  // ships or the test suite writes is plain UTF-8. Declaring the format
+  // UTF-8-only (documented explicitly, see the doc comment on this
+  // function's own declaration in komportcharset.h) turns the NUL-byte
+  // check from an incomplete binary-content heuristic into a correct
+  // encoding-scope check instead.
   const QByteArray raw = file.readAll();
+  // Codex review round-4 finding: the QFileInfo::size() check above happens
+  // *before* file.open()/readAll() - a file that grows past the limit in
+  // between (replaced/appended to concurrently) wasn't re-checked, and a
+  // partial read caused by a genuine I/O error midway through readAll()
+  // wasn't detected either, so either case would have silently been parsed
+  // as if it were the complete, valid file. Both are cheap to catch here.
+  if ( raw.size() > MaxCustomCharsetFileSize ) {
+    qWarning() << "KomportCharset:" << _path << "grew past the" << MaxCustomCharsetFileSize
+               << "byte limit for a *.charset file while being read - skipping";
+    return false;
+  }
+  if ( file.error() != QFile::NoError ) {
+    qWarning() << "KomportCharset:" << _path << "- read error (" << file.errorString() << "), skipping";
+    return false;
+  }
   if ( raw.contains('\0') ) {
     qWarning() << "KomportCharset:" << _path << "- contains an embedded NUL byte, looks binary rather than a text"
                   " *.charset file, skipping";
@@ -265,36 +294,37 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   static const QRegularExpression nameDirective(
       QStringLiteral("^#\\s*Name\\s*:\\s*(.+?)\\s*$"), QRegularExpression::CaseInsensitiveOption );
 
-  QTextStream in(raw);
+  // Codex review round-4 finding: QTextStream::readLine(maxlen) cannot
+  // itself distinguish "this maxlen-long chunk is the split-off head of a
+  // longer physical line" from "this physical line just happens to be
+  // exactly maxlen characters long" - Qt's own scanner stops at exactly
+  // maxlen either way (confirmed against Qt's readLine() implementation),
+  // so the round-3 fix's "treat exactly-maxlen as split, discard" rule
+  // necessarily also rejected the second, entirely legitimate case. Since
+  // the whole file is already in memory as `raw` (see the NUL-byte check
+  // above), splitting on '\n' directly gives the real, unambiguous length
+  // of every physical line - no chunking behavior to work around at all.
+  // (A lone '\r'-only line ending, classic-Mac style, won't be split this
+  // way - real enough for a plain UTF-8 *.charset file that this format
+  // has never claimed to support, and the resulting single giant "line"
+  // is still caught by the length/line-count limits below rather than
+  // silently misparsed.)
+  const QList<QByteArray> physicalLines = raw.split('\n');
   int lineNo = 0;
-  while ( !in.atEnd() && lineNo < MaxCustomCharsetLinesRead ) {
-    const QString rawLine = in.readLine( MaxCustomCharsetLineLength );
+  for ( const QByteArray &lineBytes : physicalLines ) {
+    if ( lineNo >= MaxCustomCharsetLinesRead ) {
+      qWarning() << "KomportCharset:" << _path << "has more than" << MaxCustomCharsetLinesRead
+                 << "lines - ignoring the rest";
+      break;
+    }
     ++lineNo;
-    // Codex review round-3 finding: QTextStream::readLine(maxlen)'s
-    // documented behavior for a physical line longer than maxlen is to
-    // *split* it across multiple readLine() calls, not to reject/truncate
-    // it - treating each split chunk as if it were its own independent
-    // logical line let an oversized comment's tail chunk be silently
-    // misparsed as a real "<byte>=<code>" entry (e.g. one huge "#..."
-    // comment line whose split-off tail happens to look like "41=2588").
-    // A returned chunk exactly MaxCustomCharsetLineLength long is the
-    // split signal (the one false-positive case - a real line exactly
-    // that long - just means it's conservatively skipped too, not
-    // misparsed, which is the safe direction to be wrong in). Consume and
-    // discard every remaining chunk of this SAME physical line as one
-    // unit instead of parsing any of them.
-    if ( rawLine.length() >= MaxCustomCharsetLineLength ) {
+    if ( lineBytes.size() > MaxCustomCharsetLineLength ) {
       qWarning() << "KomportCharset:" << _path << "line" << lineNo
                  << "- exceeds the" << MaxCustomCharsetLineLength
-                 << "character line-length limit, skipping the rest of this line";
-      QString chunk = rawLine;
-      while ( chunk.length() >= MaxCustomCharsetLineLength && !in.atEnd() && lineNo < MaxCustomCharsetLinesRead ) {
-        chunk = in.readLine( MaxCustomCharsetLineLength );
-        ++lineNo;
-      }
+                 << "character line-length limit, skipping";
       continue;
     }
-    const QString line = rawLine.trimmed();
+    const QString line = QString::fromUtf8(lineBytes).trimmed();
     if ( line.isEmpty() ) continue;
     if ( line.startsWith(QLatin1Char('#')) ) {
       const QRegularExpressionMatch m = nameDirective.match(line);
@@ -304,7 +334,7 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
     const int eq = line.indexOf(QLatin1Char('='));
     if ( eq <= 0 ) {
       qWarning() << "KomportCharset:" << _path << "line" << lineNo
-                 << "- expected '<hex byte>=<hex code point>', skipping:" << rawLine;
+                 << "- expected '<hex byte>=<hex code point>', skipping:" << line;
       continue;
     }
     bool byteOk = false, codeOk = false;
@@ -321,17 +351,10 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
       qWarning() << "KomportCharset:" << _path << "line" << lineNo
                  << "- byte/code point out of range (byte must be 00-FF, code point"
                     " 0000-FFFF excluding the D800-DFFF surrogate range - no"
-                    " surrogate-pair/astral support), skipping:" << rawLine;
+                    " surrogate-pair/astral support), skipping:" << line;
       continue;
     }
     _out.forward[byteVal] = static_cast<char16_t>(codeVal);
-  }
-  // kept as defense-in-depth for a genuine stream/decoding error on top of
-  // (not instead of) the NUL-byte sniff and per-line validation above -
-  // see the round-3 finding comment above for why it alone isn't enough.
-  if ( in.status() != QTextStream::Ok ) {
-    qWarning() << "KomportCharset:" << _path << "- stream error while reading (status" << in.status() << "), skipping the file";
-    return false;
   }
 
   for ( int b = 0; b < 256; ++b ) {
@@ -392,6 +415,10 @@ void writeReadmeIfMissing(const QString &_dirPath)
     "...\n"
     "\n"
     "EN:\n"
+    "- The file must be plain UTF-8 text (plain ASCII, used in every example\n"
+    "  here, is valid UTF-8 too) - not UTF-16/UTF-32. A file containing a\n"
+    "  NUL byte (which a real UTF-8/ASCII text file never does) is rejected\n"
+    "  outright as not being one.\n"
     "- The filename (without \".charset\") becomes the internal id and is\n"
     "  what gets stored in a saved profile.\n"
     "- Any byte you don't list keeps its default identity mapping (byte\n"
@@ -405,6 +432,10 @@ void writeReadmeIfMissing(const QString &_dirPath)
     "  section needed.\n"
     "\n"
     "DE:\n"
+    "- Die Datei muss reines UTF-8 sein (reines ASCII, wie in jedem Beispiel\n"
+    "  hier verwendet, ist ebenfalls gueltiges UTF-8) - nicht UTF-16/UTF-32.\n"
+    "  Eine Datei mit einem NUL-Byte (das in einer echten UTF-8/ASCII-\n"
+    "  Textdatei nie vorkommt) wird deshalb komplett abgelehnt.\n"
     "- Der Dateiname (ohne \".charset\") wird zur internen ID und ist das,\n"
     "  was in einem gespeicherten Profil abgelegt wird.\n"
     "- Jedes nicht aufgefuehrte Byte bleibt bei der Standard-Identitaets-\n"
@@ -670,25 +701,49 @@ void KomportCharset::reloadCustomCharsets()
   auto &registry = customRegistry();
   registry.clear();
 
-  QDir dir( customCharsetsDirectory() );
-  const QStringList files = dir.entryList( QStringList{ QStringLiteral("*.charset") }, QDir::Files, QDir::Name );
-  // Codex review round-3 finding: the previous version's cap only counted
-  // *successfully registered* entries, so an oversized/corrupt/colliding
-  // file didn't count against it - a directory full of such files was
-  // still opened and parsed in full before the cap ever took effect,
-  // defeating the point of bounding reload cost. filesExamined counts
-  // every file this loop looks at (successful or not) and stops the loop
-  // outright once that reaches MaxCustomCharsetCount, before even
-  // attempting to open the next one.
-  int filesExamined = 0;
-  for ( const QString &fileName : files ) {
-    if ( filesExamined >= MaxCustomCharsetCount ) {
-      qWarning() << "KomportCharset:" << customCharsetsDirectory() << "has more than"
-                 << MaxCustomCharsetCount << "*.charset files - ignoring the rest"
-                    " (starting at" << fileName << ")";
-      break;
+  const QString dirPath = customCharsetsDirectory();
+  QDir dir( dirPath );
+  // Codex review round-3 finding: a cap that only counted *successfully
+  // registered* entries let a directory full of oversized/corrupt/
+  // colliding files be opened and parsed in full before the cap ever took
+  // effect, defeating the point of bounding reload cost.
+  //
+  // Codex review round-4 finding: even after fixing that, QDir::entryList()
+  // itself still materializes and sorts *every* matching filename up
+  // front, regardless of the cap - a directory with a huge number of files
+  // paid that full listing/sorting cost before any per-file cap could
+  // apply. QDirIterator (unsorted, lazy - one entry at a time, no sort) plus
+  // a std::set capped at MaxCustomCharsetCount entries ("keep the smallest
+  // N filenames seen so far, evicting the current largest kept entry when
+  // a smaller one arrives") gets the exact same deterministic result
+  // QDir::Name would have (the alphabetically-first MaxCustomCharsetCount
+  // filenames) without ever holding or sorting more than
+  // MaxCustomCharsetCount filenames in memory at once - this also means
+  // the loop below can never examine more than MaxCustomCharsetCount files
+  // in the first place, closing the round-3 finding at the same time.
+  std::set<QString> files;
+  int totalFilesSeen = 0;
+  {
+    QDirIterator dirIt( dirPath, QStringList{ QStringLiteral("*.charset") }, QDir::Files );
+    while ( dirIt.hasNext() ) {
+      dirIt.next();
+      ++totalFilesSeen;
+      const QString fileName = dirIt.fileName();
+      if ( static_cast<int>(files.size()) < MaxCustomCharsetCount ) {
+        files.insert( fileName );
+      } else if ( fileName < *files.rbegin() ) {
+        files.erase( std::prev(files.end()) );
+        files.insert( fileName );
+      }
     }
-    ++filesExamined;
+  }
+  if ( totalFilesSeen > MaxCustomCharsetCount ) {
+    qWarning() << "KomportCharset:" << dirPath << "has" << totalFilesSeen << "*.charset files, more than the"
+               << MaxCustomCharsetCount << "file limit - keeping only the alphabetically first"
+               << MaxCustomCharsetCount << "and ignoring the rest";
+  }
+
+  for ( const QString &fileName : files ) { // std::set<QString> iterates in ascending (alphabetical) order
     CustomEntry entry;
     if ( !loadCustomCharsetFile( dir.filePath(fileName), entry ) ) continue;
     if ( entry.id.compare( QStringLiteral("Standard"), Qt::CaseInsensitive ) == 0

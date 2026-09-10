@@ -96,6 +96,14 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   // profile gets loaded below - a profile whose Charset value names a
   // custom charset needs it to already be resolvable.
   KomportCharset::reloadCustomCharsets();
+  // Codex review round-4 finding (Medium): this reload is just as capable
+  // of invalidating an *already open* window's live Custom selection as
+  // the one in slotShowPreferences() is (e.g. "New Window" while another
+  // window has a since-deleted custom charset selected) - the registry is
+  // the same process-wide shared object either way. initView() above
+  // already ran, so `this` window's own view->mEmulation exists and is
+  // safe to reconcile here too, alongside every other already-open window.
+  reconcileCharsetSelectionAfterReloadForAllWindows();
   seedBuiltinProfiles();
   initProfiles();
 }

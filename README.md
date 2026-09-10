@@ -41,6 +41,7 @@ Komport-Qt6 comes with **IBM CP437** and **PETSCII** built in, selectable from t
    DB=2588
    41=03B1
    ```
+   - The file must be plain UTF-8 text (plain ASCII, as in the example above, is valid UTF-8 too) — not UTF-16/UTF-32.
    - The optional `# Name: ...` line sets what shows up in the dropdown; without it, the filename itself is used.
    - Every byte you *don't* list keeps its default meaning (byte value == the same Unicode code point) — this is exactly what keeps control codes (Ctrl characters, Escape, ...) working normally without you having to think about terminal protocol details at all.
    - The reverse direction (what gets sent back over the wire when you type or paste a character shown by your custom table) is worked out automatically from the very same list — there's nothing extra to write for that.
