@@ -97,6 +97,11 @@ private slots:
   void customCharsetAmbiguousReverseMappingIsWarnedAndLowerByteWins();
   void customCharsetLineCountCapStopsProcessingWithoutCrashing();
   void customCharsetLineLengthMeasuredInCharactersNotUtf8BytesOrCrlf();
+  void customCharsetUnrepresentableCharacterUsesTablesOwnQuestionMarkByte();
+  void customCharsetLineCountCapExactBoundaryIsPrecise();
+  void customCharsetLineLengthCountsCodePointsNotUtf16Units();
+  void customCharsetMalformedUtf8IsRejected();
+  void customCharsetExactly100000LinesWithTrailingNewlineDoesNotWarn();
 
 private:
   QString mTestConfigFile;
@@ -1383,7 +1388,15 @@ void TstCharset::customCharsetAmbiguousReverseMappingIsWarnedAndLowerByteWins()
     QFile::remove(filePath);
     KomportCharset::reloadCustomCharsets();
   } );
-  QTest::ignoreMessage( QtWarningMsg, QRegularExpression(QStringLiteral("ambiguous table")) );
+  // Codex review round-6 finding: an earlier version of this message
+  // mixed hex and decimal for the byte values across the same message
+  // (some printed via Qt::hex, the final one left in decimal after a
+  // stray Qt::dec) - this regex pins that every byte value in the
+  // message uses the same "0x..." hex form throughout, not just that the
+  // word "ambiguous" appears somewhere.
+  QTest::ignoreMessage( QtWarningMsg, QRegularExpression(
+      QStringLiteral("both byte 0x1 and byte 0x41 map to the same character U\\+2588 - ambiguous table.*"
+                      "transmit byte 0x1 \\(the numerically lower one\\), not byte 0x41")) );
   KomportCharset::reloadCustomCharsets();
 
   // both bytes still display as the same glyph...
@@ -1492,6 +1505,182 @@ void TstCharset::customCharsetLineLengthMeasuredInCharactersNotUtf8BytesOrCrlf()
     QCOMPARE( it->second, filler );
     QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstcrlf")), QChar(0x2588) );
   }
+}
+
+void TstCharset::customCharsetUnrepresentableCharacterUsesTablesOwnQuestionMarkByte()
+{
+  // Codex review round-6 finding (High - CNC-transfer-relevant): an
+  // unrepresentable character under a custom charset used to fall back
+  // to the literal byte 0x3F unconditionally - wrong whenever the table
+  // itself redefines what 0x3F displays as. This table redefines 0x3F to
+  // display as a full block (not '?') and gives byte 0x40 the job of
+  // displaying '?' instead - an unrepresentable character must now come
+  // back as 0x40 (this table's own byte for '?'), not the old, wrong 0x3F.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstquestionmark.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "3F=2588\n"; // byte 0x3F no longer means '?' under this table - it means a full block
+    out << "40=003F\n"; // byte 0x40 is what THIS table uses to display '?'
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  // sanity check on the setup: '?' really does display as 0x40 here, and 0x3F really does NOT display as '?'.
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x40, QStringLiteral("tstquestionmark")), QChar('?') );
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x3F, QStringLiteral("tstquestionmark")), QChar(0x2588) );
+
+  const QChar farOutside(0x0100); // well outside what this table can represent - only 0x3F/0x40 are overridden, everything else stays identity (max byte 0xFF)
+  QCOMPARE( KomportCharset::toWire(KomportCharset::Custom, farOutside, QStringLiteral("tstquestionmark")), static_cast<char>(0x40) );
+}
+
+void TstCharset::customCharsetLineCountCapExactBoundaryIsPrecise()
+{
+  // Codex review round-6 finding (Low, test quality): the previous
+  // line-count-cap test only checked that a mapping placed *way* past the
+  // cap didn't take effect - which would also pass if the whole file were
+  // rejected outright, or if the real cutoff were badly wrong in either
+  // direction. Puts distinct, verifiable mappings exactly ON the cap
+  // (physical line 100000) and just past it (line 100001): the first
+  // must take effect, the second must not, and the file must genuinely
+  // have loaded (not been rejected wholesale).
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstlineboundary.charset");
+  constexpr int kBlankLinesBeforeBoundary = 99999; // lines 1..99999
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray content;
+    content.reserve(kBlankLinesBeforeBoundary + 20);
+    for ( int i = 0; i < kBlankLinesBeforeBoundary; ++i ) content += '\n';
+    content += "41=2588\n"; // physical line 100000 - exactly at the cap, must take effect
+    content += "42=0041\n"; // physical line 100001 - one past the cap, must NOT take effect
+    QVERIFY( f.write(content) == content.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  QTest::ignoreMessage( QtWarningMsg, QRegularExpression(QStringLiteral("more than 100000 lines")) );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstlineboundary"); } );
+  QVERIFY2( it != customs.end(), "the file must genuinely have loaded, not been rejected wholesale" );
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstlineboundary")), QChar(0x2588) ); // line 100000 - at the cap, took effect
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x42, QStringLiteral("tstlineboundary")), QChar('B') );    // line 100001 - past the cap, identity
+}
+
+void TstCharset::customCharsetLineLengthCountsCodePointsNotUtf16Units()
+{
+  // Codex review round-6 finding (Low): QString::size() counts UTF-16
+  // *code units*, not Unicode code points - a non-BMP ("astral") code
+  // point occupies two UTF-16 units (a surrogate pair) despite being one
+  // real character, so measuring line.size() alone could reject a
+  // "# Name: ..." line that's actually well within the real 4096-
+  // character limit. 2100 repeats of an astral emoji (U+1F600) is 2100
+  // real characters but 4200 UTF-16 units.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstastral.charset");
+  const QVector<char32_t> codepoints( 2100, static_cast<char32_t>(0x1F600) );
+  const QString name = QString::fromUcs4( codepoints.constData(), codepoints.size() );
+  QVERIFY( name.size() > 4096 );          // UTF-16 code units - over the limit if measured naively
+  QCOMPARE( name.toUcs4().size(), 2100 ); // real code-point count - comfortably under the limit
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    const QByteArray line1 = (QStringLiteral("# Name: ") + name + QStringLiteral("\n")).toUtf8();
+    QVERIFY( f.write(line1) == line1.size() );
+    const QByteArray line2 = "41=2588\n";
+    QVERIFY( f.write(line2) == line2.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstastral"); } );
+  QVERIFY2( it != customs.end(), "the file must still load" );
+  QCOMPARE( it->second, name ); // the "# Name: ..." line must have been parsed, not skipped as over-length
+}
+
+void TstCharset::customCharsetMalformedUtf8IsRejected()
+{
+  // Codex review round-6 finding (Low): the NUL-byte sniff only catches
+  // UTF-16/UTF-32-*like* binary content - malformed UTF-8 containing no
+  // NUL byte at all (e.g. a stray continuation/invalid byte) previously
+  // passed straight through, silently "repaired" with U+FFFD by
+  // QString::fromUtf8() rather than being rejected, weaker than the
+  // documented "must be UTF-8" contract. 0xFF is never valid in any
+  // position of a UTF-8 byte sequence.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstbadutf8.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray content = "41=2588\n";
+    content += static_cast<char>(0xFF);
+    content += '\n';
+    QVERIFY( f.write(content) == content.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstbadutf8"); } );
+  QVERIFY2( it == customs.end(), "a file containing invalid UTF-8 must be rejected entirely, not partially repaired and loaded" );
+}
+
+void TstCharset::customCharsetExactly100000LinesWithTrailingNewlineDoesNotWarn()
+{
+  // Codex review round-6 finding (Low): a file with an ordinary single
+  // trailing newline - the completely normal case, not a deliberately
+  // authored blank final line - used to produce a spurious, misleading
+  // "has more than 100000 lines" warning right at the exact 100000-line
+  // boundary, purely an artifact of how the manual line scanner detected
+  // "no more input" (see the fix's own comment in loadCustomCharsetFile()).
+  // No data was ever actually lost by this, only the diagnostic was
+  // wrong - verified here via a temporary message handler rather than
+  // QTest::ignoreMessage (which only asserts a message DOES occur, there
+  // is no built-in "assert this message does NOT occur").
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstexactcap.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray content;
+    content.reserve(100000);
+    for ( int i = 0; i < 100000; ++i ) content += '\n'; // exactly 100000 lines, one ordinary trailing newline
+    QVERIFY( f.write(content) == content.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+
+  static bool sSawLineCountWarning = false;
+  sSawLineCountWarning = false;
+  const QtMessageHandler previousHandler = qInstallMessageHandler(
+      []( QtMsgType _type, const QMessageLogContext &, const QString &_msg ) {
+        if ( _type == QtWarningMsg && _msg.contains(QStringLiteral("more than 100000 lines")) ) sSawLineCountWarning = true;
+      } );
+  KomportCharset::reloadCustomCharsets();
+  qInstallMessageHandler(previousHandler);
+
+  QVERIFY2( !sSawLineCountWarning, "a file with exactly 100000 lines and one ordinary trailing newline must not warn about exceeding the line-count cap" );
 }
 
 QTEST_MAIN(TstCharset)

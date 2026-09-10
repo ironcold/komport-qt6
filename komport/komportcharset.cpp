@@ -25,6 +25,7 @@
 #include <QSettings>
 #include <QTextStream>
 #include <QRegularExpression>
+#include <QStringConverter>
 #include <QDebug>
 #include <iterator>
 #include <set>
@@ -294,6 +295,25 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
                   " *.charset file, skipping";
     return false;
   }
+  // Codex review round-6 finding (Low): the NUL-byte sniff above only
+  // catches UTF-16/UTF-32-*like* binary content - it says nothing about
+  // NUL-free malformed UTF-8, which QString::fromUtf8() (used per-line
+  // below) silently repairs with U+FFFD replacement characters rather
+  // than rejecting, quietly weaker than the "must be UTF-8" contract this
+  // format is documented with (komportcharset.h). QStringDecoder's own
+  // error tracking is Qt's actual strict-UTF-8-validation primitive
+  // (QString::fromUtf8() has no equivalent) - decode the whole buffer
+  // once here and reject the file outright if any invalid sequence was
+  // found, rather than only *some* of its lines silently losing content.
+  {
+    QStringDecoder utf8Decoder( QStringConverter::Utf8 );
+    const QString strictlyDecoded = utf8Decoder.decode( raw );
+    Q_UNUSED( strictlyDecoded );
+    if ( utf8Decoder.hasError() ) {
+      qWarning() << "KomportCharset:" << _path << "- not valid UTF-8, skipping";
+      return false;
+    }
+  }
 
   _out.id = info.completeBaseName(); // filename without its ".charset" extension
   _out.displayName = _out.id;        // fallback - "# Name: ..." below can override
@@ -336,7 +356,21 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   // both - '\r' is whitespace, trimmed() already removes it.
   int lineNo = 0;
   qsizetype searchFrom = 0;
-  while ( searchFrom <= raw.size() ) {
+  // Codex review round-6 finding (Low): "searchFrom <= raw.size()" let a
+  // file ending in a single trailing '\n' produce one extra, phantom
+  // empty "line" beyond the real content (searchFrom lands exactly on
+  // raw.size() right after consuming that final newline, and <= still
+  // let the loop run once more for it) - harmless in practice (an empty
+  // line is skipped either way), but it could trip the
+  // MaxCustomCharsetLinesRead cap one line early and print a misleading
+  // "more than N lines" warning for a file at exactly the real limit.
+  // "searchFrom == 0" only matters for a genuinely empty file (raw.size()
+  // == 0, searchFrom stays 0 for that one intentional pass); for every
+  // other file, requiring strictly "<" stops right after the last real
+  // line's content was consumed, whether or not it ended in '\n' - see
+  // the two comment blocks above for the "no trailing newline" and
+  // "deliberate blank final line" cases, both still handled correctly.
+  while ( searchFrom < raw.size() || searchFrom == 0 ) {
     if ( lineNo >= MaxCustomCharsetLinesRead ) {
       qWarning() << "KomportCharset:" << _path << "has more than" << MaxCustomCharsetLinesRead
                  << "lines - ignoring the rest";
@@ -350,7 +384,19 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
     searchFrom = ( newlineAt < 0 ) ? raw.size() + 1 : newlineAt + 1; // +1 past raw.size() ends the while loop after this line
 
     const QString line = QString::fromUtf8(lineBytes).trimmed();
-    if ( line.size() > MaxCustomCharsetLineLength ) {
+    // Codex review round-6 finding (Low): QString::size() counts UTF-16
+    // *code units*, not Unicode code points - a non-BMP ("astral") code
+    // point (e.g. an emoji) takes two UTF-16 units (a surrogate pair) but
+    // is one real character, so line.size() alone could over-count and
+    // reject a line that's actually well within the real 4096-character
+    // limit. line.size() is always >= the true code-point count, though,
+    // so it's a cheap, always-safe *pre*-check - the exact, potentially
+    // more expensive toUcs4() count only needs to run for the rare line
+    // that's even a candidate for rejection in the first place (mapped
+    // byte values themselves stay BMP-only per the surrogate-rejection
+    // check below, so this only realistically matters for "# Name: ..."
+    // display-name lines).
+    if ( line.size() > MaxCustomCharsetLineLength && line.toUcs4().size() > MaxCustomCharsetLineLength ) {
       qWarning() << "KomportCharset:" << _path << "line" << lineNo
                  << "- exceeds the" << MaxCustomCharsetLineLength
                  << "character line-length limit, skipping";
@@ -407,12 +453,21 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
     if ( existing == _out.reverse.constEnd() ) {
       _out.reverse.insert( u, static_cast<unsigned char>(b) );
     } else {
-      // cast the byte values to int explicitly - QDebug's uchar overload
-      // would otherwise print them as character literals, not hex numbers.
-      qWarning() << "KomportCharset:" << _path << "- both byte" << Qt::hex << static_cast<int>(existing.value())
-                 << "and byte" << Qt::hex << b << "map to the same character U+" << Qt::hex << static_cast<int>(u) << Qt::dec
-                 << "- ambiguous table, typing/pasting/sending that character will transmit byte"
-                 << Qt::hex << static_cast<int>(existing.value()) << Qt::dec << "(the numerically lower one), not byte" << b;
+      // Codex review round-6 finding (Low): QDebug's Qt::hex/Qt::dec
+      // stream state is easy to lose track of across a long chained
+      // qWarning() call - an earlier version of this message switched
+      // back to Qt::dec before the final byte value, so that one number
+      // printed in decimal while every other one in the same message
+      // printed in hex, a misleading mix. Building each hex string
+      // explicitly via QString::number(...,16) instead of relying on
+      // QDebug's stream state sidesteps the whole class of bug.
+      const QString existingHex = QString::number( existing.value(), 16 );
+      const QString bHex = QString::number( b, 16 );
+      const QString codePointHex = QString::number( u, 16 );
+      qWarning().noquote() << QStringLiteral("KomportCharset: %1 - both byte 0x%2 and byte 0x%3 map to the same"
+          " character U+%4 - ambiguous table, typing/pasting/sending that character will transmit byte 0x%2"
+          " (the numerically lower one), not byte 0x%3")
+          .arg( _path, existingHex, bHex, codePointHex );
     }
   }
   return true;
@@ -564,7 +619,26 @@ char KomportCharset::toWire(Id _charset, QChar _ch, const QString &_customId)
     const auto entryIt = customRegistry().constFind( _customId );
     if ( entryIt != customRegistry().constEnd() ) {
       const auto it = entryIt->reverse.constFind( _ch.unicode() );
-      return ( it != entryIt->reverse.constEnd() ) ? static_cast<char>( it.value() ) : '?';
+      if ( it != entryIt->reverse.constEnd() ) return static_cast<char>( it.value() );
+      // Codex review round-6 finding (High - CNC-transfer-relevant): the
+      // literal byte 0x3F ('?') is only a safe "can't represent this"
+      // placeholder under charsets where 0x3F actually displays as '?'
+      // (true for Standard/CP437/PETSCII's identity fallback range) - a
+      // CUSTOM table is free to redefine byte 0x3F to mean something else
+      // entirely (e.g. an explicit "3F=2588" entry displaying it as a
+      // full block), in which case sending literal 0x3F for an
+      // unrepresentable character would silently transmit whatever THAT
+      // table defines 0x3F as, not a generic placeholder. Look up what
+      // byte this table itself uses to represent a literal '?' (U+003F)
+      // instead - guaranteed to exist unless the table both redefines
+      // byte 0x3F to something else AND provides no other byte for '?'
+      // either (every byte's forward mapping, identity-default or
+      // explicit, feeds the reverse table - see loadCustomCharsetFile() -
+      // so U+003F is covered unless the file goes out of its way to avoid
+      // it). Falls back to the literal byte only in that last, genuinely
+      // pathological case, where there is no better answer available.
+      const auto qMarkIt = entryIt->reverse.constFind( QChar(u'?').unicode() );
+      return ( qMarkIt != entryIt->reverse.constEnd() ) ? static_cast<char>( qMarkIt.value() ) : '?';
     }
     // unknown/no-longer-loaded custom id - Standard's own fallback policy.
     return ( _ch.unicode() <= 0xFF ) ? _ch.toLatin1() : '?';

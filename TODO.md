@@ -135,20 +135,24 @@ relevant werden, wenn während einer Sitzung interaktiv getippt/eingefügt
 oder ein Makro gesendet wird, während dieser Zeichensatz aktiv ist — dann
 landet ein falsches Byte auf der Leitung, nicht nur ein Anzeigefehler):
 - Datei-Format ist bewusst **nur UTF-8** (inkl. reinem ASCII) — nicht
-  UTF-16/UTF-32. Eine Datei mit eingebettetem NUL-Byte gilt als binär/
-  falsch kodiert und wird komplett abgelehnt (der praktikable Ansatz, da
-  `QTextStream`/`QString::fromUtf8()` ungültige Bytes stillschweigend durch
-  U+FFFD ersetzen statt einen Fehler zu melden).
+  UTF-16/UTF-32, und das wird jetzt auch strikt geprüft (`QStringDecoder`
+  mit Fehlererkennung, einmal über die ganze Datei), nicht nur per
+  NUL-Byte-Heuristik: eine Datei mit *irgendeiner* ungültigen UTF-8-Sequenz
+  wird komplett abgelehnt, statt dass `QString::fromUtf8()` sie
+  stillschweigend mit U+FFFD "repariert".
 - Einzelne Datei max. 1 MiB (erneut nach dem Einlesen geprüft, nicht nur
   vorher — eine zwischen Größenprüfung und Lesevorgang gewachsene Datei
-  wird nicht mehr übersehen; ein Lesefehler mittendrin wird ebenfalls
-  erkannt statt eine unvollständige Datei als vollständig zu behandeln),
-  Zeilen max. 4096 Zeichen (exakt 4096 sind noch erlaubt — geprüft anhand
-  der tatsächlichen, eindeutigen Zeilenlänge aus dem bereits eingelesenen
-  Byte-Puffer, nicht mehr über `QTextStream::readLine(maxlen)`s
-  Chunk-Splitting, das eine exakt grenzwertige Zeile nicht von einer
-  abgeschnittenen unterscheiden konnte), max. 100000 gelesene Zeilen pro
-  Datei.
+  wird nicht mehr übersehen, und der Lesevorgang selbst liest nie mehr als
+  das Limit+1 Byte ein; ein Lesefehler mittendrin wird ebenfalls erkannt
+  statt eine unvollständige Datei als vollständig zu behandeln), Zeilen
+  max. 4096 **Unicode-Zeichen** (nicht UTF-16-Einheiten — ein Emoji
+  o. ä. zählt als ein Zeichen, nicht zwei; exakt 4096 sind noch erlaubt),
+  max. 100000 Zeilen pro Datei (eine gewöhnliche Datei mit genau 100000
+  Zeilen und einem einzelnen abschließenden Zeilenumbruch löst dabei
+  *nicht* fälschlich die "mehr als 100000 Zeilen"-Warnung aus). Das
+  Zeilen-Einlesen selbst verarbeitet dabei eine Zeile nach der anderen und
+  hält nie mehr als eine Zeile gleichzeitig im Speicher, unabhängig davon,
+  wie viele Leerzeilen eine erlaubte 1-MiB-Datei enthält.
 - Max. 256 `*.charset`-Dateien pro Verzeichnis (alphabetisch), sowohl was
   tatsächlich geladen wird als auch was überhaupt erst geöffnet/untersucht
   wird — die Verzeichnisauflistung selbst nutzt einen unsortierten,
@@ -166,6 +170,12 @@ landet ein falsches Byte auf der Leitung, nicht nur ein Anzeigefehler):
   vorher stillschweigend mehrdeutig — direkt relevant für den
   Anwendungsfall oben, da genau das den falschen Steuercode auf die
   Leitung legen könnte.
+- Ein Zeichen, das ein Custom-Zeichensatz nicht darstellen kann, sendet
+  jetzt das Byte, das **diese Tabelle selbst** für ein literales "?"
+  benutzt (statt immer starr Byte `0x3F`) — eine Tabelle, die `0x3F` z. B.
+  auf "█" umlegt, hätte sonst genau dieses Byte als "kann ich nicht
+  darstellen"-Platzhalter gesendet, obwohl es unter dieser Tabelle etwas
+  ganz anderes bedeutet.
 - Der angezeigte Name (`# Name: ...`) wird gegen Kollisionen mit
   eingebauten Namen und bereits geladenen anderen Custom-Zeichensätzen
   geprüft (Groß-/Kleinschreibung egal) — bei Kollision wird er um
