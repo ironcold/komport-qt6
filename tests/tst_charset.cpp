@@ -94,6 +94,9 @@ private slots:
   void customCharsetCapCountsExaminedFilesNotJustSuccessful();
   void customCharsetLineExactlyAtLengthLimitIsAccepted();
   void newWindowConstructionReconcilesOtherOpenWindows();
+  void customCharsetAmbiguousReverseMappingIsWarnedAndLowerByteWins();
+  void customCharsetLineCountCapStopsProcessingWithoutCrashing();
+  void customCharsetLineLengthMeasuredInCharactersNotUtf8BytesOrCrlf();
 
 private:
   QString mTestConfigFile;
@@ -1354,6 +1357,141 @@ void TstCharset::newWindowConstructionReconcilesOtherOpenWindows()
   QTRY_VERIFY( guardA.isNull() );
   QTRY_VERIFY( guardB.isNull() );
   KomportCharset::reloadCustomCharsets(); // leave the registry clean for later tests
+}
+
+void TstCharset::customCharsetAmbiguousReverseMappingIsWarnedAndLowerByteWins()
+{
+  // Codex review round-5 finding (High - CNC-transfer-relevant, see
+  // reloadCustomCharsets()'s comment on why this matters beyond display):
+  // a custom table mapping two different bytes to the same displayed
+  // character used to silently pick "whichever byte the tie-break happens
+  // to favor" for the TX direction, with nothing telling the file's
+  // author their table was ambiguous. Now warns. The reverse table is
+  // built by scanning bytes 0..255 in *numeric* order regardless of which
+  // order the two mapping lines appear in the file, so the numerically
+  // lower byte (0x01 here) always wins the tie-break, deterministically.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstambiguous.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "41=2588\n"; // 'A' (0x41) -> full block
+    out << "01=2588\n"; // SOH (0x01) -> the SAME full block - ambiguous
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  QTest::ignoreMessage( QtWarningMsg, QRegularExpression(QStringLiteral("ambiguous table")) );
+  KomportCharset::reloadCustomCharsets();
+
+  // both bytes still display as the same glyph...
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstambiguous")), QChar(0x2588) );
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x01, QStringLiteral("tstambiguous")), QChar(0x2588) );
+  // ...but sending that glyph back is deterministic: the numerically lower byte wins, not whichever line came first in the file.
+  QCOMPARE( KomportCharset::toWire(KomportCharset::Custom, QChar(0x2588), QStringLiteral("tstambiguous")), static_cast<char>(0x01) );
+}
+
+void TstCharset::customCharsetLineCountCapStopsProcessingWithoutCrashing()
+{
+  // Codex review round-4/round-5 findings: MaxCustomCharsetLinesRead
+  // (100000) must actually stop parsing at that many physical lines -
+  // and, after the round-5 fix replacing raw.split('\n') with a manual
+  // indexOf('\n', ...) scan, must do so without ever materializing every
+  // line up front. A real mapping line placed well past the cap must NOT
+  // take effect; this only demonstrates correctness (not the internal
+  // materialization behavior itself, which isn't observable from the
+  // test's outside view), but a real hang/crash here would still fail
+  // the test via QTest's own timeout.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstlinecap.charset");
+  constexpr int kBlankLines = 100010; // safely past the 100000-line cap
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray blankLines;
+    blankLines.reserve(kBlankLines);
+    for ( int i = 0; i < kBlankLines; ++i ) blankLines += '\n';
+    QVERIFY( f.write(blankLines) == blankLines.size() );
+    const QByteArray mapping = "41=2588\n"; // past the cap - must be ignored
+    QVERIFY( f.write(mapping) == mapping.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstlinecap")), QChar('A') ); // identity - the mapping line past the cap never took effect
+}
+
+void TstCharset::customCharsetLineLengthMeasuredInCharactersNotUtf8BytesOrCrlf()
+{
+  // Codex review round-5 finding: measuring a physical line's raw UTF-8
+  // *byte* length against MaxCustomCharsetLineLength (4096) instead of its
+  // actual *character* length wrongly rejected two entirely legitimate
+  // cases:
+  const QString dir = KomportCharset::customCharsetsDirectory();
+
+  // (1) a line well under 4096 *characters* that contains multi-byte
+  // UTF-8 characters, so its *byte* length exceeds 4096 - 1400 repeats of
+  // a 3-byte-in-UTF-8 CJK character is 1400 characters but 4200 bytes.
+  {
+    const QString multibytePath = dir + QStringLiteral("/tstmultibyte.charset");
+    const QString name = QString(1400, QChar(0x6F22)); // U+6F22, 3 bytes in UTF-8 -> 4200 bytes, 1400 chars
+    QVERIFY( name.size() < 4096 ); // MaxCustomCharsetLineLength in komportcharset.cpp
+    QVERIFY( name.toUtf8().size() > 4096 );
+    {
+      QFile f(multibytePath);
+      QVERIFY( f.open(QIODevice::WriteOnly) );
+      const QByteArray line1 = (QStringLiteral("# Name: ") + name + QStringLiteral("\n")).toUtf8();
+      QVERIFY( f.write(line1) == line1.size() );
+      const QByteArray line2 = "41=2588\n";
+      QVERIFY( f.write(line2) == line2.size() );
+    }
+    auto cleanup = qScopeGuard( [&multibytePath]() {
+      QFile::remove(multibytePath);
+      KomportCharset::reloadCustomCharsets();
+    } );
+    KomportCharset::reloadCustomCharsets();
+
+    const auto customs = KomportCharset::customCharsetEntries();
+    auto it = std::find_if( customs.begin(), customs.end(),
+        []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstmultibyte"); } );
+    QVERIFY2( it != customs.end(), "the file must still load" );
+    QCOMPARE( it->second, name ); // the "# Name: ..." line must have been parsed, not skipped as over-length
+  }
+
+  // (2) a line of exactly 4096 *characters* saved with CRLF line endings -
+  // splitting only on '\n' leaves a trailing '\r', which must not be
+  // counted against the length limit (trimmed() removes it, same as any
+  // other trailing whitespace).
+  {
+    const QString crlfPath = dir + QStringLiteral("/tstcrlf.charset");
+    const QString namePrefix = QStringLiteral("# Name: ");
+    const QString filler( 4096 - namePrefix.size(), QLatin1Char('X') );
+    {
+      QFile f(crlfPath);
+      QVERIFY( f.open(QIODevice::WriteOnly) );
+      const QByteArray line1 = (namePrefix + filler).toUtf8() + "\r\n"; // CRLF
+      QVERIFY( f.write(line1) == line1.size() );
+      const QByteArray line2 = "41=2588\r\n";
+      QVERIFY( f.write(line2) == line2.size() );
+    }
+    auto cleanup = qScopeGuard( [&crlfPath]() {
+      QFile::remove(crlfPath);
+      KomportCharset::reloadCustomCharsets();
+    } );
+    KomportCharset::reloadCustomCharsets();
+
+    const auto customs = KomportCharset::customCharsetEntries();
+    auto it = std::find_if( customs.begin(), customs.end(),
+        []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstcrlf"); } );
+    QVERIFY2( it != customs.end(), "the file must still load" );
+    QCOMPARE( it->second, filler );
+    QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x41, QStringLiteral("tstcrlf")), QChar(0x2588) );
+  }
 }
 
 QTEST_MAIN(TstCharset)

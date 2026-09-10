@@ -122,12 +122,18 @@ DB=2588
   Settings-Dialog geöffnet wird — kein Neustart nötig, um eine gerade
   abgelegte Datei nutzen zu können.
 
-**Absicherung gegen fehlerhafte/pathologische Eingaben** (Codex-Review, drei
-Runden, alle 16 Funde behoben — s. `TODO-ARCHIVE.md`; **wichtig für den
-CNC-Übertragungs-Anwendungsfall**: die Übersetzungstabellen laufen im
-tatsächlichen RX/TX-Datenpfad, sobald ein Custom-Zeichensatz auf einem für
-die Übertragung genutzten Profil aktiv ist — ein Parsing-Bug hier landet
-dann als falsches Byte auf der Leitung, nicht nur als Anzeigefehler):
+**Absicherung gegen fehlerhafte/pathologische Eingaben** (Codex-Review, vier
+Runden, alle 21 Funde behoben — s. `TODO-ARCHIVE.md`; **Reichweite für den
+CNC-Übertragungs-Anwendungsfall, per Codex-Review präzisiert**: die
+Zeichensatz-Übersetzung läuft ausschließlich im *interaktiven* Pfad
+(Tippen, Einfügen, Makro-Text, RX-Anzeige) — ein Datei-Upload/-Download
+(`KomportTransfer`) ist bewusst *roh*, byte-exakt, ohne jede
+Zeichensatz-Übersetzung, genau damit ein per Upload gesendetes CNC-Programm
+nicht durch eine (ggf. fehlerhafte) Übersetzungstabelle verändert werden
+kann. Ein Parsing-Bug in einer Custom-Zeichensatz-Datei kann trotzdem
+relevant werden, wenn während einer Sitzung interaktiv getippt/eingefügt
+oder ein Makro gesendet wird, während dieser Zeichensatz aktiv ist — dann
+landet ein falsches Byte auf der Leitung, nicht nur ein Anzeigefehler):
 - Datei-Format ist bewusst **nur UTF-8** (inkl. reinem ASCII) — nicht
   UTF-16/UTF-32. Eine Datei mit eingebettetem NUL-Byte gilt als binär/
   falsch kodiert und wird komplett abgelehnt (der praktikable Ansatz, da
@@ -153,6 +159,13 @@ dann als falsches Byte auf der Leitung, nicht nur als Anzeigefehler):
   jeder andere ungültige Wert — kein gültiger eigenständiger Unicode-
   Skalarwert. Die direkt angrenzenden gültigen Werte (`D7FF`/`E000`)
   bleiben erlaubt.
+- Mapped eine Datei mehrere verschiedene Bytes auf denselben angezeigten
+  Buchstaben (z. B. sowohl `01=0041` als auch `41=0041`), wird das jetzt
+  geloggt (`qWarning()`): welches der beiden Bytes beim Tippen/Einfügen/
+  per Makro tatsächlich gesendet wird (das zahlenmäßig niedrigere), war
+  vorher stillschweigend mehrdeutig — direkt relevant für den
+  Anwendungsfall oben, da genau das den falschen Steuercode auf die
+  Leitung legen könnte.
 - Der angezeigte Name (`# Name: ...`) wird gegen Kollisionen mit
   eingebauten Namen und bereits geladenen anderen Custom-Zeichensätzen
   geprüft (Groß-/Kleinschreibung egal) — bei Kollision wird er um

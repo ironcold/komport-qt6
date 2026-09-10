@@ -183,7 +183,10 @@ public:
    *  already running becomes selectable without a restart.
    *
    *  File format (see loadCustomCharsetFile() for the actual parser):
-   *  plain text, one override per line as "<hex byte 00-FF>=<hex Unicode
+   *  plain UTF-8 text (Codex review round-4 finding: NOT UTF-16/UTF-32 -
+   *  a file containing a NUL byte, which a real UTF-8/ASCII text file
+   *  never does, is rejected outright as looking binary rather than
+   *  being one), one override per line as "<hex byte 00-FF>=<hex Unicode
    *  code point>" (e.g. "DB=2588"). Any byte NOT listed keeps its default
    *  identity mapping (byte value == code point) - this is what makes
    *  control codes (0x00-0x1F, 0x7F) safe by default without the file

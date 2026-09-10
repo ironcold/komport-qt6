@@ -265,13 +265,21 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   // function's own declaration in komportcharset.h) turns the NUL-byte
   // check from an incomplete binary-content heuristic into a correct
   // encoding-scope check instead.
-  const QByteArray raw = file.readAll();
   // Codex review round-4 finding: the QFileInfo::size() check above happens
   // *before* file.open()/readAll() - a file that grows past the limit in
   // between (replaced/appended to concurrently) wasn't re-checked, and a
   // partial read caused by a genuine I/O error midway through readAll()
   // wasn't detected either, so either case would have silently been parsed
-  // as if it were the complete, valid file. Both are cheap to catch here.
+  // as if it were the complete, valid file.
+  //
+  // Codex review round-5 finding: reading via readAll() and checking the
+  // *result's* size afterward still let the read itself consume an
+  // unbounded amount if the file kept growing while being read - the
+  // TOCTOU acceptance gap was closed, but not the actual resource bound.
+  // read(MaxCustomCharsetFileSize + 1) caps what's ever pulled into memory
+  // at once, regardless of how large the underlying file grows meanwhile;
+  // a result longer than the limit is still rejected exactly as before.
+  const QByteArray raw = file.read( MaxCustomCharsetFileSize + 1 );
   if ( raw.size() > MaxCustomCharsetFileSize ) {
     qWarning() << "KomportCharset:" << _path << "grew past the" << MaxCustomCharsetFileSize
                << "byte limit for a *.charset file while being read - skipping";
@@ -300,31 +308,54 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   // exactly maxlen characters long" - Qt's own scanner stops at exactly
   // maxlen either way (confirmed against Qt's readLine() implementation),
   // so the round-3 fix's "treat exactly-maxlen as split, discard" rule
-  // necessarily also rejected the second, entirely legitimate case. Since
-  // the whole file is already in memory as `raw` (see the NUL-byte check
-  // above), splitting on '\n' directly gives the real, unambiguous length
-  // of every physical line - no chunking behavior to work around at all.
-  // (A lone '\r'-only line ending, classic-Mac style, won't be split this
-  // way - real enough for a plain UTF-8 *.charset file that this format
-  // has never claimed to support, and the resulting single giant "line"
-  // is still caught by the length/line-count limits below rather than
-  // silently misparsed.)
-  const QList<QByteArray> physicalLines = raw.split('\n');
+  // necessarily also rejected the second, entirely legitimate case.
+  //
+  // Codex review round-5 finding: the round-4 fix's raw.split('\n') looked
+  // like the natural way to get each physical line's real length, but
+  // QByteArray::split() materializes *every* physical line up front,
+  // before the MaxCustomCharsetLinesRead cap below ever gets a chance to
+  // apply - a permitted (<=1 MiB) file consisting mostly of blank lines
+  // could still balloon into well over a million QByteArray elements. A
+  // manual indexOf('\n', ...) scan below advances one physical line at a
+  // time and stops as soon as the line-count cap is hit, exactly like the
+  // original streaming readLine() loop did, while still measuring each
+  // line's real length up front rather than through readLine(maxlen)'s
+  // chunking. (A lone '\r'-only line ending, classic-Mac style, isn't
+  // recognized as a break here either way - real enough for a plain UTF-8
+  // *.charset file that this format has never claimed to support, and the
+  // resulting single giant "line" is still caught by the length/line-count
+  // limits below rather than silently misparsed.)
+  //
+  // Also a round-5 finding: measuring lineBytes.size() (raw UTF-8 *byte*
+  // count) against MaxCustomCharsetLineLength silently rejected a fully
+  // legitimate line well under 4096 real characters if it contained any
+  // multi-byte UTF-8 (e.g. a "# Name: ..." with umlauts), and separately
+  // over-counted a line by one for every CRLF-terminated file (the
+  // trailing '\r' left behind by splitting only on '\n'). Decoding first
+  // and measuring the trimmed QString's actual character length fixes
+  // both - '\r' is whitespace, trimmed() already removes it.
   int lineNo = 0;
-  for ( const QByteArray &lineBytes : physicalLines ) {
+  qsizetype searchFrom = 0;
+  while ( searchFrom <= raw.size() ) {
     if ( lineNo >= MaxCustomCharsetLinesRead ) {
       qWarning() << "KomportCharset:" << _path << "has more than" << MaxCustomCharsetLinesRead
                  << "lines - ignoring the rest";
       break;
     }
     ++lineNo;
-    if ( lineBytes.size() > MaxCustomCharsetLineLength ) {
+    const qsizetype newlineAt = raw.indexOf( '\n', searchFrom );
+    const QByteArray lineBytes = ( newlineAt < 0 )
+        ? raw.mid( searchFrom )                        // last line, no trailing newline
+        : raw.mid( searchFrom, newlineAt - searchFrom );
+    searchFrom = ( newlineAt < 0 ) ? raw.size() + 1 : newlineAt + 1; // +1 past raw.size() ends the while loop after this line
+
+    const QString line = QString::fromUtf8(lineBytes).trimmed();
+    if ( line.size() > MaxCustomCharsetLineLength ) {
       qWarning() << "KomportCharset:" << _path << "line" << lineNo
                  << "- exceeds the" << MaxCustomCharsetLineLength
                  << "character line-length limit, skipping";
       continue;
     }
-    const QString line = QString::fromUtf8(lineBytes).trimmed();
     if ( line.isEmpty() ) continue;
     if ( line.startsWith(QLatin1Char('#')) ) {
       const QRegularExpressionMatch m = nameDirective.match(line);
@@ -357,9 +388,32 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
     _out.forward[byteVal] = static_cast<char16_t>(codeVal);
   }
 
+  // Codex review round-5 finding (High - CNC-transfer-relevant, see
+  // reloadCustomCharsets()'s own header comment on why this file being
+  // wrong matters beyond just display): nothing previously warned when
+  // two *different* bytes mapped to the same displayed Unicode character
+  // (e.g. a file with both "01=0041" and "41=0041" explicitly, or one
+  // explicit override that happens to collide with the identity default
+  // of some other byte) - the "first insert wins" reverse-table tie-break
+  // (same idiom as cp437Reverse(), see its own comment) then silently
+  // decided which of the two bytes actually gets sent when the user
+  // types/pastes/macros that displayed character, with nothing telling
+  // the file's author their table was ambiguous. Warn once per collision
+  // so a genuinely ambiguous custom table is at least visible, rather
+  // than only a live TX difference from what was displayed.
   for ( int b = 0; b < 256; ++b ) {
     const char16_t u = _out.forward[static_cast<std::size_t>(b)];
-    if ( !_out.reverse.contains(u) ) _out.reverse.insert( u, static_cast<unsigned char>(b) );
+    const auto existing = _out.reverse.constFind(u);
+    if ( existing == _out.reverse.constEnd() ) {
+      _out.reverse.insert( u, static_cast<unsigned char>(b) );
+    } else {
+      // cast the byte values to int explicitly - QDebug's uchar overload
+      // would otherwise print them as character literals, not hex numbers.
+      qWarning() << "KomportCharset:" << _path << "- both byte" << Qt::hex << static_cast<int>(existing.value())
+                 << "and byte" << Qt::hex << b << "map to the same character U+" << Qt::hex << static_cast<int>(u) << Qt::dec
+                 << "- ambiguous table, typing/pasting/sending that character will transmit byte"
+                 << Qt::hex << static_cast<int>(existing.value()) << Qt::dec << "(the numerically lower one), not byte" << b;
+    }
   }
   return true;
 }
