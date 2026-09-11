@@ -906,8 +906,7 @@ rakstzīmes platuma. 100% ir normāls starpums.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Shēma:
-EXIT:0</translation>
+        <translation>Shēma:</translation>
     </message>
 </context>
 </TS>

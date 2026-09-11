@@ -906,8 +906,7 @@ des caractères de la police. 100 % est l&apos;espacement normal.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schéma :
-EXIT:0</translation>
+        <translation>Schéma :</translation>
     </message>
 </context>
 </TS>

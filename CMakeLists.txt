@@ -106,32 +106,73 @@ target_link_libraries(komport_core PUBLIC
 # Qt Resource System (like komport.qrc's icons already are) rather than
 # relying on an install-time search path, so translations work identically
 # from the build directory and from an installed prefix.
+#
+# Codex review finding (EU-languages addendum): QTranslator::load()'s
+# locale-based filename fallback strips trailing "_COUNTRY"/"_Script"
+# components one at a time (e.g. for fr_BE it tries "komport_fr_BE" then
+# "komport_fr"), so a catalog named only "komport_<lang>_<COUNTRY>.ts"
+# (e.g. komport_fr_FR.ts) is invisible to same-language users outside
+# that one country (fr_BE, nl_BE, sv_FI, de_AT, ...) even though the
+# translation is otherwise complete for their language. Each such
+# country-specific catalog therefore also ships a bare-language-code
+# alias .ts (komport_fr.ts, komport_nl.ts, ...) - a straight copy of the
+# single existing country variant with just the <TS language="..."> header
+# attribute adjusted, not an independently maintained translation. Where a
+# language has two genuinely distinct variants in this project
+# (Portuguese: pt_PT vs. pt_BR), the bare "pt" alias follows the Linux/KDE
+# locale convention and mirrors pt_PT (European Portuguese); pt_BR is not
+# aliased since it is already a distinct, intentional catalog, not a
+# fallback gap. Irish (ga_IE) has no alias: it is an intentional
+# all-"unfinished" skeleton (see below), so a "ga" copy would carry no
+# translated content either.
 set(KOMPORT_TS_FILES
   komport/translations/komport_de.ts
   komport/translations/komport_fr_FR.ts
+  komport/translations/komport_fr.ts
   komport/translations/komport_es_ES.ts
+  komport/translations/komport_es.ts
   komport/translations/komport_it_IT.ts
+  komport/translations/komport_it.ts
   komport/translations/komport_pt_PT.ts
+  komport/translations/komport_pt.ts
   komport/translations/komport_pt_BR.ts
   komport/translations/komport_hu_HU.ts
+  komport/translations/komport_hu.ts
   komport/translations/komport_pl_PL.ts
+  komport/translations/komport_pl.ts
   komport/translations/komport_cs_CZ.ts
+  komport/translations/komport_cs.ts
   komport/translations/komport_ru_RU.ts
+  komport/translations/komport_ru.ts
   komport/translations/komport_bg_BG.ts
+  komport/translations/komport_bg.ts
   komport/translations/komport_hr_HR.ts
+  komport/translations/komport_hr.ts
   komport/translations/komport_da_DK.ts
+  komport/translations/komport_da.ts
   komport/translations/komport_nl_NL.ts
+  komport/translations/komport_nl.ts
   komport/translations/komport_et_EE.ts
+  komport/translations/komport_et.ts
   komport/translations/komport_fi_FI.ts
+  komport/translations/komport_fi.ts
   komport/translations/komport_el_GR.ts
+  komport/translations/komport_el.ts
   komport/translations/komport_ga_IE.ts
   komport/translations/komport_lv_LV.ts
+  komport/translations/komport_lv.ts
   komport/translations/komport_lt_LT.ts
+  komport/translations/komport_lt.ts
   komport/translations/komport_mt_MT.ts
+  komport/translations/komport_mt.ts
   komport/translations/komport_ro_RO.ts
+  komport/translations/komport_ro.ts
   komport/translations/komport_sk_SK.ts
+  komport/translations/komport_sk.ts
   komport/translations/komport_sl_SI.ts
+  komport/translations/komport_sl.ts
   komport/translations/komport_sv_SE.ts
+  komport/translations/komport_sv.ts
 )
 qt6_add_translation(KOMPORT_QM_FILES ${KOMPORT_TS_FILES} OPTIONS -nounfinished)
 qt6_add_resources(komport_core "translations"

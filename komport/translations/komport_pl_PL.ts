@@ -906,8 +906,7 @@ szerokości znaku czcionki. 100% to standardowe odstępy.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schemat:
-EXIT:0</translation>
+        <translation>Schemat:</translation>
     </message>
 </context>
 </TS>

@@ -904,8 +904,7 @@ laiusest. 100% on tavaline vahe.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Skeem:
-EXIT:0</translation>
+        <translation>Skeem:</translation>
     </message>
 </context>
 </TS>

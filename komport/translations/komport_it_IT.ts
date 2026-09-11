@@ -906,8 +906,7 @@ normale del carattere. 100% è la spaziatura normale.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schema:
-EXIT:0</translation>
+        <translation>Schema:</translation>
     </message>
 </context>
 </TS>

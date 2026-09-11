@@ -904,10 +904,7 @@ character width. 100% is normal spacing.</source>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Схема:
-session_id: 20260911_173758_c72ca6
-
-EXIT:0</translation>
+        <translation>Схема:</translation>
     </message>
 </context>
 </TS>

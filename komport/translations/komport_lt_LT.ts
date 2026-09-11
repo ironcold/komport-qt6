@@ -906,8 +906,7 @@ simbolio pločio. 100% yra standartinis tarpas.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schema:
-EXIT:0</translation>
+        <translation>Schema:</translation>
     </message>
 </context>
 </TS>

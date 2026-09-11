@@ -1,128 +1,128 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE TS>
-<TS version="2.1" language="cs_CZ" sourcelanguage="en_US">
+<TS version="2.1" language="hr" sourcelanguage="en_US">
 <context>
     <name>KomportApp</name>
     <message>
         <location filename="../komport.cpp" line="130"/>
         <source>New &amp;Window</source>
-        <translation>Nové &amp;okno</translation>
+        <translation>Novi p&amp;rozor</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="132"/>
         <source>Open a new window</source>
-        <translation>Otevřít nové okno</translation>
+        <translation>Otvori novi prozor</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="134"/>
         <source>&amp;Upload...</source>
-        <translation>&amp;Nahrát...</translation>
+        <translation>Poša&amp;lji...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="137"/>
         <source>Upload a file</source>
-        <translation>Nahrát soubor</translation>
+        <translation>Pošalji datoteku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="139"/>
         <source>&amp;Download...</source>
-        <translation>&amp;Stáhnout...</translation>
+        <translation>Preu&amp;zmi...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="142"/>
         <source>Download a file</source>
-        <translation>Stáhnout soubor</translation>
+        <translation>Preuzmi datoteku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="144"/>
         <source>&amp;Close</source>
-        <translation>&amp;Zavřít</translation>
+        <translation>Za&amp;tvori</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="147"/>
         <source>Close the window</source>
-        <translation>Zavřít okno</translation>
+        <translation>Zatvori prozor</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="149"/>
         <source>&amp;Print...</source>
-        <translation>&amp;Tiskovat...</translation>
+        <translation>Ispi&amp;ši...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="152"/>
         <source>Print the screen</source>
-        <translation>Vytisknout obrazovku</translation>
+        <translation>Ispiši zaslon</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="154"/>
         <source>&amp;Quit</source>
-        <translation>&amp;Ukončit</translation>
+        <translation>Iza&amp;đi</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="157"/>
         <location filename="../komport.cpp" line="467"/>
         <source>Quit</source>
-        <translation>Ukončit</translation>
+        <translation>Izađi</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="159"/>
         <source>Cu&amp;t</source>
-        <translation>Vy&amp;střihnout</translation>
+        <translation>&amp;Izreži</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="162"/>
         <source>Cut selection</source>
-        <translation>Výstřihnout výběr</translation>
+        <translation>Izreži označeno</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="165"/>
         <source>&amp;Copy</source>
-        <translation>&amp;Kopírovat</translation>
+        <translation>&amp;Kopiraj</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="168"/>
         <source>Copy selection</source>
-        <translation>Kopírovat výběr</translation>
+        <translation>Kopiraj označeno</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="171"/>
         <source>&amp;Paste</source>
-        <translation>&amp;Vložit</translation>
+        <translation>&amp;Zalijepi</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="174"/>
         <source>Paste</source>
-        <translation>Vložit</translation>
+        <translation>Zalijepi</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="177"/>
         <source>Show &amp;Toolbar</source>
-        <translation>Zobrazit &amp;panel nástrojů</translation>
+        <translation>Prikaži alatnu t&amp;raku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="181"/>
         <source>Show/hide the toolbar</source>
-        <translation>Zobrazit/skrýt panel nástrojů</translation>
+        <translation>Prikaži/sakrij alatnu traku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="183"/>
         <source>Show &amp;Statusbar</source>
-        <translation>Zobrazit &amp;stavový řádek</translation>
+        <translation>Prikaži statusnu &amp;sravu</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="187"/>
         <source>Show/hide the status bar</source>
-        <translation>Zobrazit/skrýt stavový řádek</translation>
+        <translation>Prikaži/sakrij statusnu traku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="193"/>
         <source>&amp;Settings...</source>
-        <translation>&amp;Nastavení...</translation>
+        <translation>&amp;Postavke...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="196"/>
         <source>Connection, terminal and appearance settings</source>
-        <translation>Nastavení připojení, terminálu a vzhledu</translation>
+        <translation>Postavke veze, terminala i izgleda</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="198"/>
@@ -132,76 +132,76 @@
     <message>
         <location filename="../komport.cpp" line="206"/>
         <source>Show raw RX/TX bytes as hex</source>
-        <translation>Zobrazit hrubé bajty RX/TX jako hex</translation>
+        <translation>Prikaži sirove RX/TX bajtove kao hex</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="208"/>
         <source>&amp;Record Session...</source>
-        <translation>&amp;Zaznamenat relaci...</translation>
+        <translation>&amp;Snimi sesiju...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="211"/>
         <source>Log the session to a file</source>
-        <translation>Uložit relaci do souboru</translation>
+        <translation>Zapisuj sesiju u datoteku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="213"/>
         <location filename="../komport.cpp" line="796"/>
         <location filename="../komport.cpp" line="804"/>
         <source>Save Profile</source>
-        <translation>Uložit profil</translation>
+        <translation>Spremi profil</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="215"/>
         <source>Save as this profile</source>
-        <translation>Uložit jako tento profil</translation>
+        <translation>Spremi kao ovaj profil</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="217"/>
         <location filename="../komport.cpp" line="816"/>
         <location filename="../komport.cpp" line="819"/>
         <source>Delete Profile</source>
-        <translation>Smazat profil</translation>
+        <translation>Obriši profil</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="219"/>
         <source>Delete this profile</source>
-        <translation>Smazat tento profil</translation>
+        <translation>Obriši ovaj profil</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="224"/>
         <source>&amp;File</source>
-        <translation>&amp;Soubor</translation>
+        <translation>&amp;Datoteka</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="228"/>
         <source>Upload &amp;recent file</source>
-        <translation>Nahrát nedávno &amp;použitý soubor</translation>
+        <translation>Pošalji &amp;nedavno datoteku</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="236"/>
         <source>&amp;Edit</source>
-        <translation>&amp;Úpravy</translation>
+        <translation>&amp;Uredi</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="241"/>
         <source>&amp;View</source>
-        <translation>&amp;Zobrazení</translation>
+        <translation>&amp;Prikaz</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="247"/>
         <source>&amp;Session</source>
-        <translation>&amp;Relace</translation>
+        <translation>&amp;Sesija</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="250"/>
         <source>&amp;Settings</source>
-        <translation>&amp;Nastavení</translation>
+        <translation>Posta&amp;vke</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="258"/>
         <source>Main Toolbar</source>
-        <translation>Hlavní panel nástrojů</translation>
+        <translation>Glavna alatna traka</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="278"/>
@@ -212,18 +212,18 @@
         <location filename="../komport.cpp" line="283"/>
         <source>Device profile: pick one to load it, or type a new
 name and click Save to create it.</source>
-        <translation>Profil zařízení: vyberte jeden pro načtení, nebo zadejte nové
-jméno a klikněte na Uložit pro jeho vytvoření.</translation>
+        <translation>Profil uređaja: odaberite jedan za učitavanje ili upišite novo
+ime i kliknite Spremi kako biste ga kreirali.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="297"/>
         <source> Enter sends: </source>
-        <translation>Enter posílá:</translation>
+        <translation>Enter šalje:</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="300"/>
         <source>What the Return key (and quick-command buttons) send at end of line - some gear only understands a bare CR, Unix hosts usually expect LF.</source>
-        <translation>To, co klávesa Return (a tlačítka rychlých příkazů) posílají na konci řádku - některý hardware rozumí pouze CR, Unix hostitele obvykle očekávají LF.</translation>
+        <translation>Što tipka Return (i gumbi za brze naredbe) šalju na kraju retka - neki uređaji razumiju samo CR, Unix domaćini obično očekuju LF.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="354"/>
@@ -244,48 +244,48 @@ jméno a klikněte na Uložit pro jeho vytvoření.</translation>
         <location filename="../komport.cpp" line="1295"/>
         <location filename="../komport.cpp" line="1407"/>
         <source>Ready.</source>
-        <translation>Připraveno.</translation>
+        <translation>Spreman.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="405"/>
         <source>Quick Commands</source>
-        <translation>Rychlé příkazy</translation>
+        <translation>Brze naredbe</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="443"/>
         <location filename="../komport.cpp" line="464"/>
         <location filename="../komport.cpp" line="479"/>
         <source>Show Config</source>
-        <translation>Zobrazit konfiguraci</translation>
+        <translation>Prikaži konfiguraciju</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="444"/>
         <location filename="../komport.cpp" line="465"/>
         <location filename="../komport.cpp" line="480"/>
         <source>Show Version</source>
-        <translation>Zobrazit verzi</translation>
+        <translation>Prikaži verziju</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="445"/>
         <location filename="../komport.cpp" line="481"/>
         <source>Save (wr mem)</source>
-        <translation>Uložit (wr mem)</translation>
+        <translation>Spremi (wr mem)</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="446"/>
         <location filename="../komport.cpp" line="482"/>
         <source>Exit</source>
-        <translation>Konec</translation>
+        <translation>Izlaz</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="466"/>
         <source>Save</source>
-        <translation>Uložit</translation>
+        <translation>Spremi</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="665"/>
         <source>(no device)</source>
-        <translation>(bez zařízení)</translation>
+        <translation>(bez uređaja)</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="667"/>
@@ -296,162 +296,162 @@ Framing: %4 (data bits/parity/stop bits)
 Flow control: %5
 Enter sends: %6</source>
         <translation>Profil: %1
-Zařízení: %2
-Baud rate: %3
-Framing: %4 (datové bity/parita/stop bity)
-Řízení toku: %5
-Enter posílá: %6</translation>
+Uređaj: %2
+Brzina: %3
+Format: %4 (bitovi podataka/paritet/stopni bitovi)
+Kontrola protoka: %5
+Enter šalje: %6</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="668"/>
         <source>(none)</source>
-        <translation>(žádný)</translation>
+        <translation>(none)</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="788"/>
         <source>Loaded profile &quot;%1&quot;</source>
-        <translation>Načten profil &quot;%1&quot;</translation>
+        <translation>Učitan profil &quot;%1&quot;</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="796"/>
         <source>Please enter a profile name first.</source>
-        <translation>Nejprve zadejte název profilu.</translation>
+        <translation>Molimo prvo unesite naziv profila.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="804"/>
         <source>Profile names can&apos;t contain &quot;/&quot; - please remove it.</source>
-        <translation>Názvy profilů nesmí obsahovat &quot;/&quot; - prosím, odstraňte jej.</translation>
+        <translation>Nazivi profila ne smiju sadržavati znak &quot;/&quot; - molimo uklonite ga.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="809"/>
         <source>Saved profile &quot;%1&quot;</source>
-        <translation>Profil &quot;%1&quot; byl uložen</translation>
+        <translation>Spremljen profil &quot;%1&quot;</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="816"/>
         <source>&quot;%1&quot; is not a saved profile.</source>
-        <translation>&quot;%1&quot; není uložený profil.</translation>
+        <translation>&quot;%1&quot; nije spremljen profil.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="819"/>
         <source>Delete profile &quot;%1&quot;? This cannot be undone.</source>
-        <translation>Smazat profil &quot;%1&quot;? Tento krok nelze vrátit.</translation>
+        <translation>Obrisati profil &quot;%1&quot;? Ova radnja se ne može poništiti.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="831"/>
         <source>Deleted profile &quot;%1&quot;</source>
-        <translation>Profil &quot;%1&quot; byl smazán</translation>
+        <translation>Obrisan profil &quot;%1&quot;</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="836"/>
         <source>Opening file...</source>
-        <translation>Otevírání souboru...</translation>
+        <translation>Otvaranje datoteke...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="973"/>
         <source>Opening a new application window...</source>
-        <translation>Otevírání nového okna aplikace...</translation>
+        <translation>Otvaranje novog prozora aplikacije...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="983"/>
         <source>Creating new document...</source>
-        <translation>Vytváření nového dokumentu...</translation>
+        <translation>Kreiranje novog dokumenta...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1001"/>
         <location filename="../komport.cpp" line="1021"/>
         <source>Uploading file...</source>
-        <translation>Nahrávání souboru...</translation>
+        <translation>Slanje datoteke...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1002"/>
         <source>Upload File...</source>
-        <translation>Nahrát soubor...</translation>
+        <translation>Pošalji datoteku...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1040"/>
         <source>Downloading a file...</source>
-        <translation>Stahování souboru...</translation>
+        <translation>Preuzimanje datoteke...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1041"/>
         <source>Save as...</source>
-        <translation>Uložit jako...</translation>
+        <translation>Spremi kao...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1059"/>
         <source>Closing file...</source>
-        <translation>Zavírání souboru...</translation>
+        <translation>Zatvaranje datoteke...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1075"/>
         <source>Printing...</source>
-        <translation>Tiskování...</translation>
+        <translation>Ispisivanje...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1089"/>
         <source>Exiting...</source>
-        <translation>Ukončování...</translation>
+        <translation>Izlazak...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1106"/>
         <source>Cutting selection...</source>
-        <translation>Výstřihnutí výběru...</translation>
+        <translation>Izrezivanje označenog...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1113"/>
         <source>Copying selection to clipboard...</source>
-        <translation>Kopírování výběru do schránky...</translation>
+        <translation>Kopiranje označenog u međuspremnik...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1131"/>
         <source>Inserting clipboard contents...</source>
-        <translation>Vkládání obsahu schránky...</translation>
+        <translation>Umetanje sadržaja iz međuspremnika...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1142"/>
         <source>Toggling toolbar...</source>
-        <translation>Přepínání panelu nástrojů...</translation>
+        <translation>Promjena vidljivosti alatne trake...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1149"/>
         <source>Toggle the statusbar...</source>
-        <translation>Přepínání stavového řádku...</translation>
+        <translation>Promjena vidljivosti statusne trake...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1157"/>
         <source>Open settings form...</source>
-        <translation>Otevírání formuláře nastavení...</translation>
+        <translation>Otvaranje forme s postavkama...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1336"/>
         <source>Serial port error: %1</source>
-        <translation>Chyba sériového portu: %1</translation>
+        <translation>Pogreška serijskog porta: %1</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1393"/>
         <source>Start Session Log...</source>
-        <translation>Zahájit záznam relace...</translation>
+        <translation>Pokreni zapis sesije...</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1394"/>
         <source>Text files (*.log *.txt);;All files (*)</source>
-        <translation>Textové soubory (*.log *.txt);;Všechny soubory (*)</translation>
+        <translation>Tekstualne datoteke (*.log *.txt);;Sve datoteke (*)</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1400"/>
         <source>Session Log</source>
-        <translation>Log relace</translation>
+        <translation>Zapis sesije</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1400"/>
         <source>Could not open &quot;%1&quot; for writing.</source>
-        <translation>Soubor &quot;%1&quot; nelze otevřít pro zápis.</translation>
+        <translation>Nije moguće otvoriti &quot;%1&quot; za pisanje.</translation>
     </message>
     <message>
         <location filename="../komport.cpp" line="1404"/>
         <source>Recording session to %1</source>
-        <translation>Záznam relace do %1</translation>
+        <translation>Sesija se snima u %1</translation>
     </message>
 </context>
 <context>
@@ -459,14 +459,14 @@ Enter posílá: %6</translation>
     <message>
         <location filename="../komportdoc.cpp" line="97"/>
         <source>Warning</source>
-        <translation>Varování</translation>
+        <translation>Upozorenje</translation>
     </message>
     <message>
         <location filename="../komportdoc.cpp" line="98"/>
         <source>The current file has been modified.
 Do you want to save it?</source>
-        <translation>Aktuální soubor byl změněn.
-Chcete jej uložit?</translation>
+        <translation>Trenutna datoteka je izmijenjena.
+Želite li je spremiti?</translation>
     </message>
 </context>
 <context>
@@ -474,7 +474,7 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../komporthexview.cpp" line="41"/>
         <source>Clear</source>
-        <translation>Vymazat</translation>
+        <translation>Obriši</translation>
     </message>
     <message>
         <location filename="../komporthexview.cpp" line="44"/>
@@ -484,7 +484,7 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../komporthexview.cpp" line="46"/>
         <source>Show received bytes</source>
-        <translation>Zobrazit přijaté bajty</translation>
+        <translation>Prikaži primljene bajtove</translation>
     </message>
     <message>
         <location filename="../komporthexview.cpp" line="47"/>
@@ -494,12 +494,12 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../komporthexview.cpp" line="49"/>
         <source>Show sent bytes</source>
-        <translation>Zobrazit odeslané bajty</translation>
+        <translation>Prikaži poslane bajtove</translation>
     </message>
     <message>
         <location filename="../komporthexview.cpp" line="52"/>
         <source>Hex Monitor</source>
-        <translation>Hex monitor</translation>
+        <translation>Hex Monitor</translation>
     </message>
 </context>
 <context>
@@ -507,43 +507,43 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../komportmacrobar.cpp" line="33"/>
         <source>Show Config</source>
-        <translation>Zobrazit konfiguraci</translation>
+        <translation>Prikaži konfiguraciju</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="34"/>
         <source>Save (wr mem)</source>
-        <translation>Uložit (wr mem)</translation>
+        <translation>Spremi (wr mem)</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="35"/>
         <source>Exit</source>
-        <translation>Konec</translation>
+        <translation>Izlaz</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="61"/>
         <source>(unused)</source>
-        <translation>(nepoužito)</translation>
+        <translation>(neiskorišteno)</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="62"/>
         <source>Left-click to configure a quick command; right-click to edit at any time.</source>
-        <translation>Klikněte levým tlačítkem pro konfiguraci rychlého příkazu; pravým tlačítkem pro úpravu v libovolnou chvíli.</translation>
+        <translation>Kliknite lijevim klikom za konfiguraciju brze naredbe; desnim klikom za uređivanje u bilo kojem trenutku.</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="88"/>
         <location filename="../komportmacrobar.cpp" line="91"/>
         <source>Edit Quick Command</source>
-        <translation>Upravit rychlý příkaz</translation>
+        <translation>Uredi brzu naredbu</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="89"/>
         <source>Button label (shown on the button):</source>
-        <translation>Popisek tlačítka (zobrazováno na tlačítku):</translation>
+        <translation>Naziv gumba (prikazan na gumbu):</translation>
     </message>
     <message>
         <location filename="../komportmacrobar.cpp" line="92"/>
         <source>Command to send (the configured line ending is appended automatically):</source>
-        <translation>Příkaz k odeslání (konfigurace konce řádku se přidá automaticky):</translation>
+        <translation>Naredba za slanje (konfigurirani završetak retka dodaje se automatski):</translation>
     </message>
 </context>
 <context>
@@ -551,7 +551,7 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../komportserial.cpp" line="165"/>
         <source>Could not apply the requested port settings (baud rate/data bits/parity/flow control) - the device may not support this combination.</source>
-        <translation>Nepodařilo se aplikovat požadovaná nastavení portu (baud rate/datové bity/parita/řízení toku) - zařízení nemusí tuto kombinaci podporovat.</translation>
+        <translation>Nije moguće primijeniti tražene postavke porta (brzina/bitovi podataka/paritet/kontrola protoka) - uređaj možda ne podržava ovu kombinaciju.</translation>
     </message>
 </context>
 <context>
@@ -560,55 +560,55 @@ Chcete jej uložit?</translation>
         <location filename="../komporttransfer.cpp" line="42"/>
         <location filename="../komporttransfer.cpp" line="78"/>
         <source>Upload</source>
-        <translation>Nahrát</translation>
+        <translation>Pošalji</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="43"/>
         <source>Could not open &quot;%1&quot; for reading:
 %2</source>
-        <translation>Soubor &quot;%1&quot; nelze otevřít pro čtení:
+        <translation>Nije moguće otvoriti &quot;%1&quot; za čitanje:
 %2</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="48"/>
         <location filename="../komporttransfer.cpp" line="49"/>
         <source>Upload Progress</source>
-        <translation>Průběh nahrávání</translation>
+        <translation>Napredak slanja</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="48"/>
         <location filename="../komporttransfer.cpp" line="98"/>
         <source>Cancel</source>
-        <translation>Zrušit</translation>
+        <translation>Odustani</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="79"/>
         <source>Lost the connection to the serial port after sending %1 of %2 bytes.</source>
-        <translation>Přerušeno připojení k sériovému portu po odeslání %1 z %2 bajtů.</translation>
+        <translation>Prekinuta veza sa serijskim portom nakon slanja %1 od %2 bajtova.</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="91"/>
         <location filename="../komporttransfer.cpp" line="125"/>
         <source>Download</source>
-        <translation>Stáhnout</translation>
+        <translation>Preuzmi</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="92"/>
         <source>Could not open &quot;%1&quot; for writing:
 %2</source>
-        <translation>Soubor &quot;%1&quot; nelze otevřít pro zápis:
+        <translation>Nije moguće otvoriti &quot;%1&quot; za pisanje:
 %2</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="98"/>
         <location filename="../komporttransfer.cpp" line="99"/>
         <source>Download Progress</source>
-        <translation>Průběh stahování</translation>
+        <translation>Napredak preuzimanja</translation>
     </message>
     <message>
         <location filename="../komporttransfer.cpp" line="126"/>
         <source>Could not write to &quot;%1&quot;: %2</source>
-        <translation>Do souboru &quot;%1&quot; nebylo možné zapisovat: %2</translation>
+        <translation>Nije moguće pisati u &quot;%1&quot;: %2</translation>
     </message>
 </context>
 <context>
@@ -616,12 +616,12 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../main.cpp" line="62"/>
         <source>Komport-Qt6 - Serial port communication and terminal emulator.</source>
-        <translation>Komport-Qt6 - Komunikace přes sériový port a emulátor terminálu.</translation>
+        <translation>Komport-Qt6 - komunikacija serijskim portom i emulator terminala.</translation>
     </message>
     <message>
         <location filename="../main.cpp" line="65"/>
         <source>file to open</source>
-        <translation>soubor k otevření</translation>
+        <translation>datoteka za otvaranje</translation>
     </message>
 </context>
 <context>
@@ -639,156 +639,156 @@ Chcete jej uložit?</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="77"/>
         <source>Green on Black</source>
-        <translation>Zelená na černém</translation>
+        <translation>Zelena na crnoj</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="79"/>
         <source>Black on Light Yellow</source>
-        <translation>Černá na světle žluté</translation>
+        <translation>Crna na svijetložutoj</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="90"/>
         <source>Settings</source>
-        <translation>Nastavení</translation>
+        <translation>Postavke</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="94"/>
         <source>Device</source>
-        <translation>Zařízení</translation>
+        <translation>Uređaj</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="95"/>
         <source>Terminal</source>
-        <translation>Terminál</translation>
+        <translation>Terminal</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="96"/>
         <source>Appearance</source>
-        <translation>Vzhled</translation>
+        <translation>Izgled</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="119"/>
         <source>Device special file name</source>
-        <translation>Název speciálního souboru zařízení</translation>
+        <translation>Naziv specijalne datoteke uređaja</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="134"/>
         <source>Baud Rate (bps)</source>
-        <translation>Baud Rate (bps)</translation>
+        <translation>Brzina prijenosa (bps)</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="140"/>
         <source>RX Queue</source>
-        <translation>RX fronta</translation>
+        <translation>RX Red</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="154"/>
         <location filename="../settingsdialog.cpp" line="355"/>
         <source>Size:</source>
-        <translation>Velikost:</translation>
+        <translation>Veličina:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="155"/>
         <source>bytes</source>
-        <translation>bajtů</translation>
+        <translation>bajtovi</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="156"/>
         <source>Flush Interval:</source>
-        <translation>Interval vyprázdnění:</translation>
+        <translation>Interval pražnjenja:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="157"/>
         <source>milliseconds</source>
-        <translation>milisekund</translation>
+        <translation>milisekunde</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="159"/>
         <source>Framing</source>
-        <translation>Framing</translation>
+        <translation>Okvir</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="182"/>
         <source>None</source>
         <comment>parity</comment>
-        <translation>Žádná</translation>
+        <translation>Bez</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="183"/>
         <source>Even</source>
         <comment>parity</comment>
-        <translation>Sudá</translation>
+        <translation>Paran</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="184"/>
         <source>Odd</source>
         <comment>parity</comment>
-        <translation>Lichá</translation>
+        <translation>Neparan</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="186"/>
         <source>Start bits:</source>
-        <translation>Startové bity:</translation>
+        <translation>Startni bitovi:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="187"/>
         <source>Data bits:</source>
-        <translation>Datové bity:</translation>
+        <translation>Bitovi podataka:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="188"/>
         <source>Stop bits:</source>
-        <translation>Stop bity:</translation>
+        <translation>Stopni bitovi:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="189"/>
         <source>Parity:</source>
-        <translation>Parita:</translation>
+        <translation>Paritet:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="197"/>
         <source>None</source>
         <comment>flow control</comment>
-        <translation>Žádné</translation>
+        <translation>Bez</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="201"/>
         <source>Device:</source>
-        <translation>Zařízení:</translation>
+        <translation>Uređaj:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="202"/>
         <source>Baud Rate:</source>
-        <translation>Baud Rate:</translation>
+        <translation>Brzina prijenosa:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="203"/>
         <source>Flow Control:</source>
-        <translation>Řízení toku:</translation>
+        <translation>Kontrola protoka:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="221"/>
         <source>Emulation</source>
-        <translation>Emulace</translation>
+        <translation>Emulacija</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="234"/>
         <source>Character Set:</source>
-        <translation>Zeicová sada:</translation>
+        <translation>Set znakova:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="252"/>
         <source>Translate the raw byte stream between the serial
 device and the terminal display - for retro/industrial
 gear that doesn&apos;t speak plain ASCII/Latin-1.</source>
-        <translation>Překládá hrubý bytestrom mezi sériovým
-zařízením a zobrazením terminálu - pro retro/industriální
- zařízení, která nepoužívají běžný ASCII/Latin-1.</translation>
+        <translation>Prevedi sirovi potok bajtova između serijskog
+uređaja i zaslona terminala - za retro/industrijski
+ouruk koji ne koristi običan ASCII/Latin-1.</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="256"/>
         <source>Custom Charsets Folder...</source>
-        <translation>Složka vlastních zeicových sad...</translation>
+        <translation>Mapa prilagođenih setova znakova...</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="258"/>
@@ -796,117 +796,117 @@ zařízením a zobrazením terminálu - pro retro/industriální
 see TODO.md for the file format. New files show up in the
 dropdown above the next time this dialog is opened, no restart
 or code change needed.</source>
-        <translation>Otevře složku, kam můžete vložit vlastní soubory *.charset -
-viz TODO.md pro formát souboru. Nové soubory se zobrazí v
-rozevíracím seznamu výše při příštím otevření tohoto dialogu,
-restart ani změna kódu nejsou nutné.</translation>
+        <translation>Otvori mapu u koju možete staviti vlastite *.charset datoteke -
+pogledajte TODO.md za format datoteke. Nove datoteke pojavit će se u
+izborniku iznad sljedeći put kada se ovaj dijalog otvori, bez potrebe
+za ponovnim pokretanjem ili promjenom koda.</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="274"/>
         <source>Could Not Open Folder</source>
-        <translation>Nepodařilo se otevřít složku</translation>
+        <translation>Nije moguće otvoriti mapu</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="275"/>
         <source>Could not open a file manager for:
 %1</source>
-        <translation>Pro cestu nelze otevřít správce souborů:
+        <translation>Nije moguće otvoriti upravitelj datoteka za:
 %1</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="279"/>
         <source>Visual Bell</source>
-        <translation>Vizuální zvonek</translation>
+        <translation>Vizualni signal (Bell)</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="280"/>
         <source>Local Echo</source>
-        <translation>Lokální echo</translation>
+        <translation>Lokalno odjekivanje</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="290"/>
         <source>History Buffer</source>
-        <translation>Buffer historie</translation>
+        <translation>Buffer povijesti</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="291"/>
         <source>Memory buffer</source>
-        <translation>Paměťový buffer</translation>
+        <translation>Memorijski buffer</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="297"/>
         <location filename="../settingsdialog.cpp" line="309"/>
         <source>lines max.</source>
-        <translation>max. řádků</translation>
+        <translation>max. redaka</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="303"/>
         <source>File buffer</source>
-        <translation>Souborový buffer</translation>
+        <translation>Buffer datoteke</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="336"/>
         <source>Font</source>
-        <translation>Písmo</translation>
+        <translation>Font</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="343"/>
         <source>Monospace fonts only - every character cell in the
 terminal grid must be the same width.</source>
-        <translation>Pouze neproporcionální písma (monospace) - každá buňka znaků v
-mřížce terminálu musí mít stejnou šířku.</translation>
+        <translation>Samo proporcionalni fontovi - svaka ćelija znakova u
+matrici terminala mora biti iste širine.</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="352"/>
         <source>Letter spacing, as a percentage of the font&apos;s normal
 character width. 100% is normal spacing.</source>
-        <translation>Rozestup písmen jako procento normální
-šířky znaku daného písma. 100 % je normální rozestup.</translation>
+        <translation>Razmak između slova, kao postotak normalne
+širine znakova fonta. 100% je normalan razmak.</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="354"/>
         <source>Family:</source>
-        <translation>Rodina:</translation>
+        <translation>Obitelj:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="356"/>
         <source>Spacing:</source>
-        <translation>Rozestup:</translation>
+        <translation>Razmak:</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="358"/>
         <source>Colors</source>
-        <translation>Barvy</translation>
+        <translation>Boje</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="365"/>
         <source>Custom</source>
-        <translation>Vlastní</translation>
+        <translation>Prilagođeno</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="369"/>
         <source>Text Color…</source>
-        <translation>Barva textu…</translation>
+        <translation>Boja teksta…</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="370"/>
         <source>Background Color…</source>
-        <translation>Barva pozadí…</translation>
+        <translation>Boja pozadine…</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="383"/>
         <source>Text Color</source>
-        <translation>Barva textu</translation>
+        <translation>Boja teksta</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="393"/>
         <source>Background Color</source>
-        <translation>Barva pozadí</translation>
+        <translation>Boja pozadine</translation>
     </message>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schéma:</translation>
+        <translation>Shema:</translation>
     </message>
 </context>
 </TS>

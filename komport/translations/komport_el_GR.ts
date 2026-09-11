@@ -906,10 +906,7 @@ character width. 100% is normal spacing.</source>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Σχέδιο Χρωμάτων:
-session_id: 20260911_195611_b77060
-
-EXIT:0</translation>
+        <translation>Σχέδιο Χρωμάτων:</translation>
     </message>
 </context>
 </TS>

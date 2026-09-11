@@ -906,8 +906,7 @@ tegnbredde. 100% er normal afstand.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Farveskema:
-EXIT:0</translation>
+        <translation>Farveskema:</translation>
     </message>
 </context>
 </TS>

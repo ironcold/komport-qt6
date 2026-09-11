@@ -634,6 +634,42 @@ Maltesisch als am stärksten manuell korrigierte Sprache, Irisch als
 unvollständige Sprache — überall sauberer Fallback, kein Absturz),
 echte `~/.config/Komport-Qt6/Komport-Qt6.conf` per md5sum unverändert.
 
+**Codex-Review-Funde (2 von 2, beide gefixt):**
+- **Tooling-Artefakte in 26 Übersetzungen:** der letzte Eintrag
+  ("Scheme:"/"Schema:"/... je nach Sprache) jeder betroffenen `.ts`-Datei
+  enthielt sichtbaren Text aus dem eigenen Übersetzungs-Tooling
+  (`EXIT:0` in 23 Dateien, `session_id: ...` in 3 weiteren) — ein
+  Regex-Parsing-Fehler im (nicht versionierten) `/tmp`-Hilfsskript, das
+  beim letzten Eintrag einer Gemma4-Antwort alles bis Dateiende statt
+  nur bis zum nächsten nummerierten Marker erfasste. Vor dem Review
+  unentdeckt, da die automatisierten Checks (Tastenkürzel, Fremdschrift-
+  Scan) genau diesen Fall nicht abdeckten. Direkt als eindeutiger,
+  ermessensfreier Datenfehler behoben (kein Übersetzungs-Ermessen
+  beteiligt, reine Artefakt-Entfernung) — abweichend vom sonst üblichen
+  "erst vorlegen, dann fixen"; dem Nutzer transparent gemeldet und auf
+  Bestätigung hin beibehalten.
+- **Locale-Fallback-Lücke:** `QTranslator::load()`s Dateinamen-Fallback
+  streicht bei einer Locale wie `fr_BE` schrittweise Endungen ab
+  (`komport_fr_BE` → `komport_fr`) — ein nur länderspezifisch benanntes
+  Katalog wie `komport_fr_FR.ts` ist für gleichsprachige Nutzer außerhalb
+  dieses einen Landes (fr_BE, nl_BE, sv_FI, de_AT, ...) unsichtbar,
+  obwohl die Übersetzung für ihre Sprache vollständig vorliegt. Gefixt
+  durch 22 zusätzliche sprachweite Alias-`.ts`-Dateien (`komport_fr.ts`,
+  `komport_nl.ts`, ...) — reine Kopien der jeweils einzigen
+  Länder-Variante mit angepasstem `<TS language="...">`-Attribut, keine
+  eigenständig gepflegte Übersetzung. Portugiesisch (zwei echte
+  Varianten: `pt_PT`/`pt_BR`) bekommt den Alias `komport_pt.ts` nach
+  Linux/KDE-Konvention von `pt_PT` (europäisches Portugiesisch) kopiert;
+  `pt_BR` bleibt eigenständig, da bewusst angelegt, keine Fallback-Lücke.
+  Irisch bekommt keinen Alias (Skeleton ohne Inhalt). Verifiziert per
+  Offscreen-Smoketest mit `fr_BE`/`nl_BE`/`sv_FI`/`pt_AO` — alle laden
+  jetzt die jeweilige Sprachübersetzung statt auf Englisch
+  zurückzufallen.
+
+Nach beiden Fixes erneut: Build (`-Wall -Wextra`, keine neuen
+Warnungen), alle 9 `ctest`-Ziele grün, echte
+`~/.config/Komport-Qt6/Komport-Qt6.conf` per md5sum unverändert.
+
 ### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09)
 
 > Option zur Zeichensatz-Übersetzung zwischen `QSerialPort` und der

@@ -907,8 +907,7 @@ caracterului fontului. 100% este spațierea normală.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schemă:
-EXIT:0</translation>
+        <translation>Schemă:</translation>
     </message>
 </context>
 </TS>

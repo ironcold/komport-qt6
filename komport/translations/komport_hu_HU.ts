@@ -905,8 +905,7 @@ karakter szélességének százaléka. A 100% a normál távolság.</translation
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Színrend:
-EXIT:0</translation>
+        <translation>Színrend:</translation>
     </message>
 </context>
 </TS>

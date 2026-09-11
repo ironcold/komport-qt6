@@ -906,8 +906,7 @@ van het lettertype. 100% is de normale afstand.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Schema:
-EXIT:0</translation>
+        <translation>Schema:</translation>
     </message>
 </context>
 </TS>

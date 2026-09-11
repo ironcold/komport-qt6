@@ -906,8 +906,7 @@ merkkileveydestä. 100 % on normaali väli.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Teema:
-EXIT:0</translation>
+        <translation>Teema:</translation>
     </message>
 </context>
 </TS>

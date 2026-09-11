@@ -906,8 +906,7 @@ normali tal-font. 100% hija spazjazzjoni normali.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Skema:
-EXIT:0</translation>
+        <translation>Skema:</translation>
     </message>
 </context>
 </TS>

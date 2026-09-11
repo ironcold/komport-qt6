@@ -906,8 +906,7 @@ del carácter de la fuente. 100% es el espaciado normal.</translation>
     <message>
         <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
-        <translation>Esquema:
-EXIT:0</translation>
+        <translation>Esquema:</translation>
     </message>
 </context>
 </TS>
