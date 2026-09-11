@@ -108,6 +108,30 @@ target_link_libraries(komport_core PUBLIC
 # from the build directory and from an installed prefix.
 set(KOMPORT_TS_FILES
   komport/translations/komport_de.ts
+  komport/translations/komport_fr_FR.ts
+  komport/translations/komport_es_ES.ts
+  komport/translations/komport_it_IT.ts
+  komport/translations/komport_pt_PT.ts
+  komport/translations/komport_pt_BR.ts
+  komport/translations/komport_hu_HU.ts
+  komport/translations/komport_pl_PL.ts
+  komport/translations/komport_cs_CZ.ts
+  komport/translations/komport_ru_RU.ts
+  komport/translations/komport_bg_BG.ts
+  komport/translations/komport_hr_HR.ts
+  komport/translations/komport_da_DK.ts
+  komport/translations/komport_nl_NL.ts
+  komport/translations/komport_et_EE.ts
+  komport/translations/komport_fi_FI.ts
+  komport/translations/komport_el_GR.ts
+  komport/translations/komport_ga_IE.ts
+  komport/translations/komport_lv_LV.ts
+  komport/translations/komport_lt_LT.ts
+  komport/translations/komport_mt_MT.ts
+  komport/translations/komport_ro_RO.ts
+  komport/translations/komport_sk_SK.ts
+  komport/translations/komport_sl_SI.ts
+  komport/translations/komport_sv_SE.ts
 )
 qt6_add_translation(KOMPORT_QM_FILES ${KOMPORT_TS_FILES} OPTIONS -nounfinished)
 qt6_add_resources(komport_core "translations"
