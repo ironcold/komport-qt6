@@ -102,6 +102,9 @@ private slots:
   void customCharsetLineLengthCountsCodePointsNotUtf16Units();
   void customCharsetMalformedUtf8IsRejected();
   void customCharsetExactly100000LinesWithTrailingNewlineDoesNotWarn();
+  void customCharsetQuestionMarkFallbackWarnsWhenTableHasNoQuestionMarkByteEither();
+  void customCharsetTruncatedUtf8AtEndOfFileIsRejected();
+  void customCharsetAstralLineLengthExactBoundaryIsPrecise();
 
 private:
   QString mTestConfigFile;
@@ -1681,6 +1684,136 @@ void TstCharset::customCharsetExactly100000LinesWithTrailingNewlineDoesNotWarn()
   qInstallMessageHandler(previousHandler);
 
   QVERIFY2( !sSawLineCountWarning, "a file with exactly 100000 lines and one ordinary trailing newline must not warn about exceeding the line-count cap" );
+}
+
+void TstCharset::customCharsetQuestionMarkFallbackWarnsWhenTableHasNoQuestionMarkByteEither()
+{
+  // Codex review round-7 finding (High - the remaining gap in round-6's
+  // '?'-fallback fix): a table that redefines byte 0x3F to something
+  // else (removing its identity mapping to '?') AND provides no OTHER
+  // byte for '?' either leaves toWire()'s lookup of U+003F itself
+  // missing - the fallback then has no genuinely correct byte to offer
+  // (every one of the table's 256 outgoing bytes is already claimed by
+  // something), so literal 0x3F remains the last resort, but now with a
+  // warning making the situation diagnosable instead of silent.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tstnoqmark.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly | QIODevice::Text) );
+    QTextStream out(&f);
+    out << "3F=2588\n"; // 0x3F no longer means '?' under this table - and nothing else is assigned to '?' either
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  // sanity check: '?' (U+003F) really is unrepresentable under this table now.
+  QCOMPARE( KomportCharset::toDisplay(KomportCharset::Custom, 0x3F, QStringLiteral("tstnoqmark")), QChar(0x2588) );
+
+  const QChar farOutside(0x0100); // unrepresentable
+  QTest::ignoreMessage( QtWarningMsg, QRegularExpression(QStringLiteral("no byte in this table represents '\\?'")) );
+  QCOMPARE( KomportCharset::toWire(KomportCharset::Custom, farOutside, QStringLiteral("tstnoqmark")), static_cast<char>(0x3F) ); // last resort, now warned
+}
+
+void TstCharset::customCharsetTruncatedUtf8AtEndOfFileIsRejected()
+{
+  // Codex review round-7 finding (Low): QStringDecoder defaults to
+  // stateful, streaming-oriented behavior - an incomplete multi-byte
+  // sequence right at the very end of the (whole, one-shot) input was
+  // held as "might be completed by a later chunk" rather than flagged as
+  // an error, so a file truncated mid-character still loaded. A lone
+  // UTF-8 lead byte (0xC3, which promises exactly one continuation byte)
+  // with nothing after it is exactly that case.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString filePath = dir + QStringLiteral("/tsttruncated.charset");
+  {
+    QFile f(filePath);
+    QVERIFY( f.open(QIODevice::WriteOnly) );
+    QByteArray content = "41=2588\n";
+    content += static_cast<char>(0xC3); // valid UTF-8 lead byte, but the file ends right here - no continuation byte
+    QVERIFY( f.write(content) == content.size() );
+  }
+  auto cleanup = qScopeGuard( [&filePath]() {
+    QFile::remove(filePath);
+    KomportCharset::reloadCustomCharsets();
+  } );
+  KomportCharset::reloadCustomCharsets();
+
+  const auto customs = KomportCharset::customCharsetEntries();
+  auto it = std::find_if( customs.begin(), customs.end(),
+      []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tsttruncated"); } );
+  QVERIFY2( it == customs.end(), "a file truncated mid-character at EOF must be rejected as invalid UTF-8, not silently accepted" );
+}
+
+void TstCharset::customCharsetAstralLineLengthExactBoundaryIsPrecise()
+{
+  // Codex review round-7 finding (Low, test quality): the round-6 astral
+  // line-length test used 2100 emoji (2100 code points), comfortably
+  // under the 4096 limit - it proved UTF-16 units were no longer counted
+  // directly, but not that the toUcs4() fallback is itself correct AT
+  // its own boundary. Pins that exactly 4096 astral code points are
+  // accepted and 4097 are rejected, mirroring
+  // customCharsetLineExactlyAtLengthLimitIsAccepted()'s BMP boundary test.
+  const QString dir = KomportCharset::customCharsetsDirectory();
+  const QString namePrefix = QStringLiteral("# Name: ");
+  const int prefixCodePoints = 8; // "# Name: " is 8 plain ASCII characters/code points
+
+  auto makeAstralName = [&]( int _codePointCount ) {
+    const QVector<char32_t> codepoints( _codePointCount, static_cast<char32_t>(0x1F600) );
+    return QString::fromUcs4( codepoints.constData(), codepoints.size() );
+  };
+
+  {
+    const QString atLimitPath = dir + QStringLiteral("/tstastrallimit.charset");
+    const QString name = makeAstralName( 4096 - prefixCodePoints ); // whole line == exactly 4096 code points
+    QCOMPARE( (namePrefix + name).toUcs4().size(), 4096 );
+    {
+      QFile f(atLimitPath);
+      QVERIFY( f.open(QIODevice::WriteOnly) );
+      const QByteArray line1 = (namePrefix + name + QStringLiteral("\n")).toUtf8();
+      QVERIFY( f.write(line1) == line1.size() );
+      const QByteArray line2 = "41=2588\n";
+      QVERIFY( f.write(line2) == line2.size() );
+    }
+    auto cleanup = qScopeGuard( [&atLimitPath]() {
+      QFile::remove(atLimitPath);
+      KomportCharset::reloadCustomCharsets();
+    } );
+    KomportCharset::reloadCustomCharsets();
+
+    const auto customs = KomportCharset::customCharsetEntries();
+    auto it = std::find_if( customs.begin(), customs.end(),
+        []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstastrallimit"); } );
+    QVERIFY2( it != customs.end(), "the file must still load" );
+    QCOMPARE( it->second, name ); // exactly 4096 code points must have been accepted, not rejected
+  }
+  {
+    const QString overLimitPath = dir + QStringLiteral("/tstastralover.charset");
+    const QString name = makeAstralName( 4097 - prefixCodePoints ); // whole line == exactly 4097 code points
+    QCOMPARE( (namePrefix + name).toUcs4().size(), 4097 );
+    {
+      QFile f(overLimitPath);
+      QVERIFY( f.open(QIODevice::WriteOnly) );
+      const QByteArray line1 = (namePrefix + name + QStringLiteral("\n")).toUtf8();
+      QVERIFY( f.write(line1) == line1.size() );
+      const QByteArray line2 = "41=2588\n";
+      QVERIFY( f.write(line2) == line2.size() );
+    }
+    auto cleanup = qScopeGuard( [&overLimitPath]() {
+      QFile::remove(overLimitPath);
+      KomportCharset::reloadCustomCharsets();
+    } );
+    KomportCharset::reloadCustomCharsets();
+
+    const auto customs = KomportCharset::customCharsetEntries();
+    auto it = std::find_if( customs.begin(), customs.end(),
+        []( const QPair<QString,QString> &e ) { return e.first == QStringLiteral("tstastralover"); } );
+    QVERIFY2( it != customs.end(), "the file itself must still load (only the # Name: line is skipped)" );
+    QCOMPARE( it->second, QStringLiteral("tstastralover") ); // 4097 code points rejected -> falls back to the filename-derived default display name
+  }
 }
 
 QTEST_MAIN(TstCharset)

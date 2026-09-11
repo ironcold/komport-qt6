@@ -306,7 +306,18 @@ bool loadCustomCharsetFile(const QString &_path, CustomEntry &_out)
   // once here and reject the file outright if any invalid sequence was
   // found, rather than only *some* of its lines silently losing content.
   {
-    QStringDecoder utf8Decoder( QStringConverter::Utf8 );
+    // Codex review round-7 finding (Low): QStringDecoder is stateful by
+    // default - built for a multi-chunk streaming caller, so an
+    // incomplete multi-byte sequence right at the end of THIS call's
+    // input is held as "might be completed by a later chunk" rather than
+    // flagged as an error, since there's no way for it to know no more
+    // chunks are coming. There aren't - this is the whole file in one
+    // call - so Flag::Stateless (which treats an incomplete trailing
+    // sequence as invalid, exactly the behavior wanted here) is the
+    // correct flag, verified directly against Qt's own QStringDecoder
+    // (a lone truncated lead byte at EOF now sets hasError(), a fully
+    // valid file and a BOM-prefixed one both still do not).
+    QStringDecoder utf8Decoder( QStringConverter::Utf8, QStringConverter::Flag::Stateless );
     const QString strictlyDecoded = utf8Decoder.decode( raw );
     Q_UNUSED( strictlyDecoded );
     if ( utf8Decoder.hasError() ) {
@@ -638,7 +649,23 @@ char KomportCharset::toWire(Id _charset, QChar _ch, const QString &_customId)
       // it). Falls back to the literal byte only in that last, genuinely
       // pathological case, where there is no better answer available.
       const auto qMarkIt = entryIt->reverse.constFind( QChar(u'?').unicode() );
-      return ( qMarkIt != entryIt->reverse.constEnd() ) ? static_cast<char>( qMarkIt.value() ) : '?';
+      if ( qMarkIt != entryIt->reverse.constEnd() ) return static_cast<char>( qMarkIt.value() );
+      // Codex review round-7 finding (High): the pathological case this
+      // comment already called out for a genuinely reachable one - a
+      // table with e.g. only "3F=2588" and nothing else overridden
+      // removes byte 0x3F's identity mapping (which used to cover '?')
+      // without assigning any OTHER byte to '?' either, so this reverse
+      // lookup also misses. There is no way to invent a better byte here
+      // - the table's 256 entries already cover the entire outgoing byte
+      // space, none of them "free" - so literal 0x3F remains the actual
+      // last resort. What changes is that this is no longer silent: warn
+      // once per occurrence so a table with this gap is at least
+      // diagnosable instead of quietly sending a byte this exact table
+      // itself defines as something else.
+      qWarning() << "KomportCharset:" << _customId << "- no byte in this table represents '?' (U+003F) either,"
+                    " sending literal byte 0x3F as a last resort - it may not display as a generic placeholder"
+                    " under this table's own mapping";
+      return '?';
     }
     // unknown/no-longer-loaded custom id - Standard's own fallback policy.
     return ( _ch.unicode() <= 0xFF ) ? _ch.toLatin1() : '?';

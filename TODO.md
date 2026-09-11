@@ -175,7 +175,18 @@ landet ein falsches Byte auf der Leitung, nicht nur ein Anzeigefehler):
   benutzt (statt immer starr Byte `0x3F`) — eine Tabelle, die `0x3F` z. B.
   auf "█" umlegt, hätte sonst genau dieses Byte als "kann ich nicht
   darstellen"-Platzhalter gesendet, obwohl es unter dieser Tabelle etwas
-  ganz anderes bedeutet.
+  ganz anderes bedeutet. Hat eine Tabelle *gar kein* Byte für "?" (auch
+  nicht mehr über die Identitäts-Vorgabe von `0x3F` selbst, weil die
+  Tabelle genau das umdefiniert), bleibt Byte `0x3F` als letzter Ausweg
+  bestehen — es gibt dann buchstäblich kein "freies" Byte mehr, jedes der
+  256 ist bereits belegt —, aber jetzt mit einer Laufzeit-Warnung
+  (`qWarning()`), damit das zumindest sichtbar/diagnostizierbar ist statt
+  still falsch.
+- Die "nur UTF-8"-Prüfung erkennt jetzt auch eine mitten im letzten
+  Zeichen abgeschnittene Datei (z. B. ein einzelnes UTF-8-Einleitungsbyte
+  ganz am Dateiende ohne Folgebyte) als ungültig — vorher hätte
+  `QStringDecoder`s Standardverhalten (auf eine evtl. noch folgende
+  weitere Chunk-Übergabe ausgelegt) diesen Fall nicht als Fehler erkannt.
 - Der angezeigte Name (`# Name: ...`) wird gegen Kollisionen mit
   eingebauten Namen und bereits geladenen anderen Custom-Zeichensätzen
   geprüft (Groß-/Kleinschreibung egal) — bei Kollision wird er um
@@ -314,6 +325,39 @@ Optionen bewusst nicht in Meilenstein 7 umgesetzt (Aufwand/Risiko vs.
 Nutzen für den seriellen Werkstatt-Terminal-Anwendungsfall dieses
 Projekts), aber hier als möglicher künftiger Auftrag festgehalten statt
 stillschweigend verworfen.
+
+## 6.4 Restpunkt: astrale Zeichen (z. B. Emoji) verdoppeln sich beim Einfügen/Makro-Senden
+
+Aus einer Codex-Review-Runde zum Custom-Charset-Mechanismus (Meilenstein
+7 Nachtrag), aber **kein durch diesen Mechanismus verursachtes Problem**
+— eine vorbestehende, architektonische Eigenschaft der Tasteneingabe-
+Verarbeitung, die schon lange vor Meilenstein 7 so war: `KomportApp::
+slotEditPaste()` (Einfügen aus der Zwischenablage) und `KomportApp::
+slotMacroTriggered()` (Makro-Text senden) iterieren den zu sendenden
+`QString` je Element as UTF-16-Einheit (`QChar`), nicht als echten
+Unicode-Codepoint. Ein astrales Zeichen außerhalb der Basic Multilingual
+Plane (z. B. die meisten Emoji, `U+1F600` "😀" u. ä.) wird intern als
+Ersatzzeichenpaar (zwei `QChar`, ein "Surrogate Pair") dargestellt — jede
+Hälfte für sich ist kein gültiger, eigenständiger Unicode-Codepoint und
+kann von keiner Zeichensatz-Tabelle (eingebaut oder Custom) sinnvoll
+abgebildet werden. Ergebnis: ein einzelnes eingefügtes/per Makro
+gesendetes astrales Zeichen erzeugt zwei aufeinanderfolgende
+"?"-Platzhalter-Bytes auf der Leitung statt (bestenfalls) eines.
+
+**Bewusst nicht in dieser Runde behoben** (Nutzer-Entscheidung): eine
+echte Lösung bräuchte entweder eine codepoint-bewusste Iteration in
+beiden Aufrufstellen (inkl. Erkennung/Zusammenfügen von Ersatzzeichen-
+Paaren vor dem Aufruf) oder eine Erweiterung von `KomportView::
+slotSimKeyPressed(QChar)`, das aktuell nur einzelne `QChar` entgegennimmt
+— beides größere Eingriffe in die Kern-Tasteneingabe-Architektur, nicht
+nur den Custom-Charset-Lademechanismus. Betrifft *alle* Zeichensätze
+gleichermaßen (Standard/CP437/PETSCII/Custom), nicht nur Custom-Tabellen,
+und nur den interaktiven Einfüge-/Makro-Pfad (direktes Tippen einzelner
+Tasten kann ohnehin nur ein `QChar` pro Tastendruck liefern, echte
+Tastaturen erzeugen keine astralen Zeichen einzeln). Für den
+CNC-Übertragungs-Anwendungsfall ein schmaler Randfall (Emoji in
+G-Code-Sitzungen), aber hier festgehalten statt stillschweigend
+übergangen.
 
 ## 7. Wunschliste / mögliche nächste Schritte
 
