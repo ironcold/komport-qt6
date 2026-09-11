@@ -1,3 +1,37 @@
+Version 1.0.0 - Sep 12 2026
+* Complete migration from KDE 2/3 + Qt3 to native Qt6 (QApplication,
+  QMainWindow, QSerialPort/QSerialPortInfo replace all KDE Frameworks
+  and the raw POSIX/termios serial backend); CMake build system
+  replaces the old Autotools/KDevelop-1.2 setup. Renamed to
+  Komport-Qt6 as an independent continuation - the original "Komport"
+  (Mike Sharkey, last active 2003) is no longer maintained upstream.
+* Terminal emulation: broader VT100/VT102 coverage (cursor counters,
+  insert/delete line/char, DECCKM/DECTCEM, device status reports),
+  VT220/xterm extensions (256-color SGR, scroll regions/DECSTBM,
+  insert mode).
+* Admin/diagnosis tooling: toggleable RX/TX hex monitor, programmable
+  macro bar, one-click session logging, line-ending selection
+  (CR/LF/CRLF), device profiles (serial parameters + line ending +
+  macro bar bundled per profile, with ready-made Cisco/HP/Aruba
+  presets).
+* Appearance tab: font family/spacing, custom or preset color schemes
+  (Breeze Light/Dark, Green-on-Black, Amber).
+* Retro/industrial character-set translation (CP437, PETSCII built
+  in) between the raw serial byte stream and the terminal display,
+  plus user-defined *.charset files (no code/rebuild needed).
+* Internationalization: full Qt6 Linguist infrastructure, all visible
+  UI strings translatable. Ships with all 24 EU official languages
+  (23 fully translated, Irish intentionally left untranslated pending
+  further review) plus Russian; falls back cleanly to English for any
+  unfinished string or unsupported locale.
+* Extensive regression test suite (Qt6::Test, run via ctest) covering
+  crash classes found across multiple rounds of adversarial code
+  review (profile/array-size validation, unbounded escape-sequence
+  buffers, window/serial-port lifetime, cell-array bounds, i18n data
+  integrity).
+* Full history of the migration, every review round and its findings:
+  see TODO-ARCHIVE.md. Known, deliberately accepted gaps: see TODO.md.
+
 version 0.4.3 Oct 9th 2003
 * scroll buffer
 version 0.4.2 Oct 7th 2003

@@ -7,17 +7,17 @@ erledigter Arbeit (Basis-Portierung, Admin-Tool-Features, sieben
 Review-Gate-Runden, Meilenstein 4, Meilenstein 5: Archiv-Abschnitte 1–21).
 Architektur/Ziele stehen in `CLAUDE.md`.
 
-Stand (2026-09-11): Meilenstein 4 (VT220/xterm), Meilenstein 5
-(Appearance-Tab) und Meilenstein 7 (Retro-/Industrie-Zeichensatz-
-Übersetzung, inkl. Custom-Charset-Nachtrag) sind abgeschlossen, gemergt
-und auf beiden Remotes (Codeberg/GitHub) synchron. Meilenstein 6
-(Internationalisierung) ist implementiert (Branch `milestone-6-i18n`,
-noch nicht gemergt). Damit sind alle bisher geplanten funktionalen
-Meilensteine umgesetzt — die verbleibenden offenen Punkte (Abschnitt 6)
-sind bewusst akzeptierte, dokumentierte Trade-offs, keine Lücken; ein
-erstes `1.0.0`-Release ist damit absehbar. Unten stehen nur die bewusst
-offen gelassenen Punkte (Abschnitt 6), die Wunschliste (Abschnitt 7) und
-die Roadmap.
+Stand (2026-09-12): Meilenstein 4 (VT220/xterm), Meilenstein 5
+(Appearance-Tab), Meilenstein 6 (Internationalisierung, inkl. Nachtrag
+alle 24 EU-Amtssprachen) und Meilenstein 7 (Retro-/Industrie-
+Zeichensatz-Übersetzung, inkl. Custom-Charset-Nachtrag) sind
+abgeschlossen, gemergt und auf beiden Remotes (Codeberg/GitHub)
+synchron. Damit sind alle bisher geplanten funktionalen Meilensteine
+umgesetzt — die verbleibenden offenen Punkte (Abschnitt 6) sind bewusst
+akzeptierte, dokumentierte Trade-offs, keine Lücken; das erste
+`1.0.0`-Release steht jetzt unmittelbar bevor. Unten stehen nur die
+bewusst offen gelassenen Punkte (Abschnitt 6), die Wunschliste
+(Abschnitt 7) und die Roadmap.
 
 ## 0. Review- und Meilenstein-Historie (archiviert)
 
