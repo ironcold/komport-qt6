@@ -18,7 +18,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets PrintSupport SerialPort LinguistTools)
+# Codex review finding (Milestone 6): the declared 6.2 minimum was already
+# inaccurate before this commit - qt_standard_project_setup() right below
+# was only introduced in Qt 6.3, so the project has never actually built
+# against a genuine Qt 6.2. Corrected to reflect the real floor. Unrelated
+# to the round's own qt6_add_translation()-vs-qt_add_translations() choice
+# below - qt_add_translations() itself has existed since 6.2 too (as a
+# CMake technology preview whose interface changed at its 6.7
+# stabilization/rename), so the lower-level, stable-since-6.2
+# qt6_add_translation()/qt6_add_resources() primitives used below were
+# chosen to avoid depending on a pre-6.7 tech-preview API surface, not
+# because of any hard version-floor requirement.
+find_package(Qt6 6.3 REQUIRED COMPONENTS Widgets PrintSupport SerialPort LinguistTools)
 
 qt_standard_project_setup()
 

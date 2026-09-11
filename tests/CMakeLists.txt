@@ -3,7 +3,9 @@
 # already part of any Qt installation that can build this project, and
 # QTEST_MAIN gives each test its own QApplication for free, which the
 # window-lifetime test in particular needs.
-find_package(Qt6 6.2 REQUIRED COMPONENTS Test)
+# Kept consistent with the top-level CMakeLists.txt's own Qt6 version floor
+# (6.3 - see its comment on why 6.2 was never actually reachable).
+find_package(Qt6 6.3 REQUIRED COMPONENTS Test)
 
 function(komport_add_test name)
   add_executable(${name} ${name}.cpp)
@@ -28,3 +30,4 @@ komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
 komport_add_test(tst_appearance)
 komport_add_test(tst_charset)
+komport_add_test(tst_i18n)

@@ -241,8 +241,8 @@ Namen eingeben und auf Speichern klicken, um es zu erstellen.</translation>
         <location filename="../komport.cpp" line="1137"/>
         <location filename="../komport.cpp" line="1144"/>
         <location filename="../komport.cpp" line="1151"/>
-        <location filename="../komport.cpp" line="1280"/>
-        <location filename="../komport.cpp" line="1392"/>
+        <location filename="../komport.cpp" line="1295"/>
+        <location filename="../komport.cpp" line="1407"/>
         <source>Ready.</source>
         <translation>Bereit.</translation>
     </message>
@@ -424,32 +424,32 @@ Enter sendet: %6</translation>
         <translation>Einstellungsdialog wird geöffnet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1321"/>
+        <location filename="../komport.cpp" line="1336"/>
         <source>Serial port error: %1</source>
         <translation>Fehler am seriellen Port: %1</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1378"/>
+        <location filename="../komport.cpp" line="1393"/>
         <source>Start Session Log...</source>
         <translation>Sitzungsprotokoll starten...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1379"/>
+        <location filename="../komport.cpp" line="1394"/>
         <source>Text files (*.log *.txt);;All files (*)</source>
         <translation>Textdateien (*.log *.txt);;Alle Dateien (*)</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1385"/>
+        <location filename="../komport.cpp" line="1400"/>
         <source>Session Log</source>
         <translation>Sitzungsprotokoll</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1385"/>
+        <location filename="../komport.cpp" line="1400"/>
         <source>Could not open &quot;%1&quot; for writing.</source>
         <translation>„%1“ konnte nicht zum Schreiben geöffnet werden.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1389"/>
+        <location filename="../komport.cpp" line="1404"/>
         <source>Recording session to %1</source>
         <translation>Sitzung wird nach %1 aufgezeichnet</translation>
     </message>
@@ -614,12 +614,12 @@ Möchten Sie sie speichern?</translation>
 <context>
     <name>QObject</name>
     <message>
-        <location filename="../main.cpp" line="36"/>
+        <location filename="../main.cpp" line="62"/>
         <source>Komport-Qt6 - Serial port communication and terminal emulator.</source>
         <translation>Komport-Qt6 - Serielle Kommunikation und Terminal-Emulator.</translation>
     </message>
     <message>
-        <location filename="../main.cpp" line="39"/>
+        <location filename="../main.cpp" line="65"/>
         <source>file to open</source>
         <translation>zu öffnende Datei</translation>
     </message>
@@ -627,113 +627,157 @@ Möchten Sie sie speichern?</translation>
 <context>
     <name>SettingsDialog</name>
     <message>
-        <location filename="../settingsdialog.cpp" line="72"/>
+        <location filename="../settingsdialog.cpp" line="74"/>
+        <source>Breeze Light</source>
+        <translation>Breeze Hell</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="75"/>
+        <source>Breeze Dark</source>
+        <translation>Breeze Dunkel</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="77"/>
+        <source>Green on Black</source>
+        <translation>Grün auf Schwarz</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="79"/>
+        <source>Black on Light Yellow</source>
+        <translation>Schwarz auf Hellgelb</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="90"/>
         <source>Settings</source>
         <translation>Einstellungen</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="76"/>
+        <location filename="../settingsdialog.cpp" line="94"/>
         <source>Device</source>
         <translation>Gerät</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="77"/>
+        <location filename="../settingsdialog.cpp" line="95"/>
         <source>Terminal</source>
         <translation>Terminal</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="78"/>
+        <location filename="../settingsdialog.cpp" line="96"/>
         <source>Appearance</source>
         <translation>Erscheinungsbild</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="101"/>
+        <location filename="../settingsdialog.cpp" line="119"/>
         <source>Device special file name</source>
-        <translation>Geräte-Spezialdatei</translation>
+        <translation>Name/Pfad der Gerätedatei</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="116"/>
+        <location filename="../settingsdialog.cpp" line="134"/>
         <source>Baud Rate (bps)</source>
         <translation>Baudrate (bps)</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="122"/>
+        <location filename="../settingsdialog.cpp" line="140"/>
         <source>RX Queue</source>
         <translation>RX-Puffer</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="136"/>
-        <location filename="../settingsdialog.cpp" line="316"/>
+        <location filename="../settingsdialog.cpp" line="154"/>
+        <location filename="../settingsdialog.cpp" line="355"/>
         <source>Size:</source>
         <translation>Größe:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="137"/>
+        <location filename="../settingsdialog.cpp" line="155"/>
         <source>bytes</source>
         <translation>Bytes</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="138"/>
+        <location filename="../settingsdialog.cpp" line="156"/>
         <source>Flush Interval:</source>
         <translation>Flush-Intervall:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="139"/>
+        <location filename="../settingsdialog.cpp" line="157"/>
         <source>milliseconds</source>
         <translation>Millisekunden</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="141"/>
+        <location filename="../settingsdialog.cpp" line="159"/>
         <source>Framing</source>
-        <translation type="unfinished"></translation>
+        <translation>Zeichenrahmen</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="152"/>
+        <location filename="../settingsdialog.cpp" line="182"/>
+        <source>None</source>
+        <comment>parity</comment>
+        <translation>Keine</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="183"/>
+        <source>Even</source>
+        <comment>parity</comment>
+        <translation>Gerade</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="184"/>
+        <source>Odd</source>
+        <comment>parity</comment>
+        <translation>Ungerade</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="186"/>
         <source>Start bits:</source>
         <translation>Startbits:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="153"/>
+        <location filename="../settingsdialog.cpp" line="187"/>
         <source>Data bits:</source>
         <translation>Datenbits:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="154"/>
+        <location filename="../settingsdialog.cpp" line="188"/>
         <source>Stop bits:</source>
         <translation>Stopbits:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="155"/>
+        <location filename="../settingsdialog.cpp" line="189"/>
         <source>Parity:</source>
         <translation>Parität:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="162"/>
+        <location filename="../settingsdialog.cpp" line="197"/>
+        <source>None</source>
+        <comment>flow control</comment>
+        <translation>Keine</translation>
+    </message>
+    <message>
+        <location filename="../settingsdialog.cpp" line="201"/>
         <source>Device:</source>
         <translation>Gerät:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="163"/>
+        <location filename="../settingsdialog.cpp" line="202"/>
         <source>Baud Rate:</source>
         <translation>Baudrate:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="164"/>
+        <location filename="../settingsdialog.cpp" line="203"/>
         <source>Flow Control:</source>
         <translation>Flusskontrolle:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="182"/>
+        <location filename="../settingsdialog.cpp" line="221"/>
         <source>Emulation</source>
         <translation>Emulation</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="195"/>
+        <location filename="../settingsdialog.cpp" line="234"/>
         <source>Character Set:</source>
         <translation>Zeichensatz:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="213"/>
+        <location filename="../settingsdialog.cpp" line="252"/>
         <source>Translate the raw byte stream between the serial
 device and the terminal display - for retro/industrial
 gear that doesn&apos;t speak plain ASCII/Latin-1.</source>
@@ -742,12 +786,12 @@ Gerät und der Terminal-Anzeige - für Retro-/Industriegeräte,
 die kein reines ASCII/Latin-1 sprechen.</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="217"/>
+        <location filename="../settingsdialog.cpp" line="256"/>
         <source>Custom Charsets Folder...</source>
         <translation>Ordner für benutzerdefinierte Zeichensätze...</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="219"/>
+        <location filename="../settingsdialog.cpp" line="258"/>
         <source>Open the folder where you can drop your own *.charset files -
 see TODO.md for the file format. New files show up in the
 dropdown above the next time this dialog is opened, no restart
@@ -758,109 +802,109 @@ erscheinen im Dropdown oben, sobald dieser Dialog das nächste
 Mal geöffnet wird - kein Neustart oder Code-Änderung nötig.</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="235"/>
+        <location filename="../settingsdialog.cpp" line="274"/>
         <source>Could Not Open Folder</source>
         <translation>Ordner konnte nicht geöffnet werden</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="236"/>
+        <location filename="../settingsdialog.cpp" line="275"/>
         <source>Could not open a file manager for:
 %1</source>
         <translation>Für folgenden Pfad konnte kein Dateimanager geöffnet werden:
 %1</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="240"/>
+        <location filename="../settingsdialog.cpp" line="279"/>
         <source>Visual Bell</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="241"/>
+        <location filename="../settingsdialog.cpp" line="280"/>
         <source>Local Echo</source>
         <translation>Lokales Echo</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="251"/>
+        <location filename="../settingsdialog.cpp" line="290"/>
         <source>History Buffer</source>
         <translation>Verlaufspuffer</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="252"/>
+        <location filename="../settingsdialog.cpp" line="291"/>
         <source>Memory buffer</source>
         <translation>Speicherpuffer</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="258"/>
-        <location filename="../settingsdialog.cpp" line="270"/>
+        <location filename="../settingsdialog.cpp" line="297"/>
+        <location filename="../settingsdialog.cpp" line="309"/>
         <source>lines max.</source>
         <translation>Zeilen max.</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="264"/>
+        <location filename="../settingsdialog.cpp" line="303"/>
         <source>File buffer</source>
         <translation>Datei-Puffer</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="297"/>
+        <location filename="../settingsdialog.cpp" line="336"/>
         <source>Font</source>
         <translation>Schriftart</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="304"/>
+        <location filename="../settingsdialog.cpp" line="343"/>
         <source>Monospace fonts only - every character cell in the
 terminal grid must be the same width.</source>
         <translation>Nur dicktengleiche (Monospace-)Schriftarten - jede Zeichenzelle
 im Terminal-Raster muss gleich breit sein.</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="313"/>
+        <location filename="../settingsdialog.cpp" line="352"/>
         <source>Letter spacing, as a percentage of the font&apos;s normal
 character width. 100% is normal spacing.</source>
         <translation>Zeichenabstand, in Prozent der normalen Zeichenbreite
 der Schriftart. 100% ist der normale Abstand.</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="315"/>
+        <location filename="../settingsdialog.cpp" line="354"/>
         <source>Family:</source>
         <translation>Familie:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="317"/>
+        <location filename="../settingsdialog.cpp" line="356"/>
         <source>Spacing:</source>
         <translation>Abstand:</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="319"/>
+        <location filename="../settingsdialog.cpp" line="358"/>
         <source>Colors</source>
         <translation>Farben</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="326"/>
+        <location filename="../settingsdialog.cpp" line="365"/>
         <source>Custom</source>
         <translation>Benutzerdefiniert</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="330"/>
+        <location filename="../settingsdialog.cpp" line="369"/>
         <source>Text Color…</source>
         <translation>Textfarbe…</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="331"/>
+        <location filename="../settingsdialog.cpp" line="370"/>
         <source>Background Color…</source>
         <translation>Hintergrundfarbe…</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="344"/>
+        <location filename="../settingsdialog.cpp" line="383"/>
         <source>Text Color</source>
         <translation>Textfarbe</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="354"/>
+        <location filename="../settingsdialog.cpp" line="393"/>
         <source>Background Color</source>
         <translation>Hintergrundfarbe</translation>
     </message>
     <message>
-        <location filename="../settingsdialog.cpp" line="362"/>
+        <location filename="../settingsdialog.cpp" line="401"/>
         <source>Scheme:</source>
         <translation>Schema:</translation>
     </message>

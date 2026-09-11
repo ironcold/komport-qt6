@@ -1183,13 +1183,28 @@ void KomportApp::slotShowPreferences()
 
   settingsDialog.DeviceComboBox->setCurrentText( strDevice );
   settingsDialog.BaudRateComboBox->setCurrentText( strBaudRate );
-  settingsDialog.FlowControlComboBox->setCurrentText( strFlowControl );
+  // Codex review finding (Milestone 6): ParityComboBox/FlowControlComboBox
+  // now carry a translatable display label separate from their stored
+  // Qt::UserRole value (see settingsdialog.cpp's own comment on why) -
+  // findData()/currentData() instead of setCurrentText()/currentText().
+  // setCurrentText() on a non-editable combo silently did nothing for an
+  // unmatched string (leaving whatever was already selected); findData()
+  // returning -1 for an unmatched/corrupted stored value gets the same
+  // "leave it alone" treatment here, same idx>=0 guard already used for
+  // CharsetComboBox just below, rather than blanking the combo outright.
+  {
+    const int idx = settingsDialog.FlowControlComboBox->findData(strFlowControl);
+    if ( idx >= 0 ) settingsDialog.FlowControlComboBox->setCurrentIndex( idx );
+  }
   settingsDialog.RxQueueSpinBox->setValue( strRxQueue.toInt() );
   settingsDialog.FlushRateSpinBox->setValue( strFlushRate.toInt() );
   settingsDialog.StartBitsComboBox->setCurrentText( strStartBits );
   settingsDialog.DataBitsComboBox->setCurrentText( strDataBits );
   settingsDialog.StopBitsComboBox->setCurrentText( strStopBits );
-  settingsDialog.ParityComboBox->setCurrentText( strParity );
+  {
+    const int idx = settingsDialog.ParityComboBox->findData(strParity);
+    if ( idx >= 0 ) settingsDialog.ParityComboBox->setCurrentIndex( idx );
+  }
   settingsDialog.EmulationComboBox->setCurrentText( strEmulation );
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
   // Codex review finding: read/write via the combo's own Qt::UserRole data
@@ -1211,13 +1226,13 @@ void KomportApp::slotShowPreferences()
   if ( settingsDialog.exec() == QDialog::Accepted ) {
       strDevice =  settingsDialog.DeviceComboBox->currentText();
       strBaudRate =  settingsDialog.BaudRateComboBox->currentText() ;
-      strFlowControl = settingsDialog.FlowControlComboBox->currentText();
+      strFlowControl = settingsDialog.FlowControlComboBox->currentData().toString();
       strRxQueue = QString::number( settingsDialog.RxQueueSpinBox->value() );
       strFlushRate = QString::number( settingsDialog.FlushRateSpinBox->value() );
       strStartBits =  settingsDialog.StartBitsComboBox->currentText() ;
       strDataBits =  settingsDialog.DataBitsComboBox->currentText() ;
       strStopBits =  settingsDialog.StopBitsComboBox->currentText() ;
-      strParity =  settingsDialog.ParityComboBox->currentText() ;
+      strParity = settingsDialog.ParityComboBox->currentData().toString();
       strEmulation = settingsDialog.EmulationComboBox->currentText();
       strScrollBuffer = QString::number( settingsDialog.ScrollBufferSpinBox->value() );
       // Milestone 7: font/colors below already apply live and independent

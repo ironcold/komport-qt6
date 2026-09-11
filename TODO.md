@@ -472,21 +472,59 @@ Review-Runden verifiziert — Details, Findings und Fixes in
 >   `QLocale` die Systemsprache abfragt und bei Bedarf die deutsche
 >   Übersetzung lädt.
 
-Alle sichtbaren String-Literale waren bei näherer Prüfung bereits fast
-vollständig mit `tr()` umschlossen (frühere Entwicklung hatte das schon
-weitgehend mitgemacht) — ein systematischer Grep-Abgleich (Konstruktions-
-aufrufe von `QLabel`/`QCheckBox`/`QMessageBox`/etc. gegen `tr(`) fand keine
-verbleibenden unübersetzten UI-Strings. Der eigentliche Aufwand lag daher
-im Tooling und der Übersetzung selbst:
+Die meisten sichtbaren String-Literale waren bei näherer Prüfung bereits
+mit `tr()` umschlossen (frühere Entwicklung hatte das schon weitgehend
+mitgemacht) — ein erster Grep-Abgleich (Konstruktionsaufrufe von
+`QLabel`/`QCheckBox`/`QMessageBox`/etc. gegen `tr(`) übersah aber zwei
+echte Lücken, die eine anschließende Codex-Review fand: die Paritäts-
+(NONE/EVEN/ODD) und Flusskontroll-Werte (XON/XOFF/RTS/CTS/NONE) im
+Settings-Dialog waren als reine `QComboBox::addItems({...})`-Aufrufe gar
+nicht erst mit `tr()` versehen — und die vier Farbschema-Namen
+("Breeze Light" usw.) wurden zwar mit `tr(scheme.name)` übersetzt, aber
+`lupdate` kann ein `tr()` mit einem *Laufzeit*-Argument (statt einem
+Literal) nicht extrahieren, sodass keiner dieser vier Namen je in der
+`.ts`-Datei gelandet wäre. Beide gefixt, siehe unten.
+
+**Wichtiger Fallstrick bei der Paritäts-/Flusskontroll-Fix:**
+`KomportSerial::applyPortSettings()` vergleicht `strParity`/
+`strFlowControl` gegen feste englische Bezeichner (`"EVEN"`/`"ODD"`/
+`"XON/XOFF"`/`"RTS/CTS"`, `"NONE"` als Standard für beide), und
+`KomportApp` persistiert genau das, was die ComboBox zurückgibt, direkt in
+`QSettings`. Ein naives `tr()`-Umschließen der Item-*Texte* hätte
+`currentText()` die *übersetzte* deutsche Zeichenkette zurückgeben lassen
+— stillschweigend als `strParity` gespeichert, gegen die englischen
+Literale verglichen, und damit die falsche Parität angewendet (oder ein
+Profil erzeugt, das bei Sprachwechsel nicht mehr korrekt geparst wird) —
+ein Funktions-/Datenintegritätsbug, keine bloße Übersetzungslücke.
+Behoben mit demselben `Qt::UserRole`-Entkopplungsmuster, das schon für
+`CharsetComboBox` existierte: die Anzeige ist übersetzbar, der
+gespeicherte/verglichene Wert (`UserRole`-Daten) bleibt unabhängig von der
+Sprache der feste englische Bezeichner. `komport.cpp`s
+`FlowControlComboBox`/`ParityComboBox`-Zugriffe entsprechend auf
+`findData()`/`currentData()` umgestellt (statt `setCurrentText()`/
+`currentText()`), inklusive derselben "unbekannter Wert lässt die
+aktuelle Auswahl unangetastet"-Absicherung wie bei `CharsetComboBox`.
+Die vier Farbschema-Namen brauchten keine solche Entkopplung (Auswahl ist
+dort index-basiert, kein String-Vergleich) — nur `QT_TR_NOOP(...)` direkt
+in der Tabellen-Definition, damit `lupdate` sie überhaupt findet.
+
+Der eigentliche Aufwand lag daher im Tooling und der Übersetzung selbst:
 
 - `CMakeLists.txt`: `Qt6::LinguistTools`-Komponente ergänzt;
   `qt6_add_translation(... OPTIONS -nounfinished)` kompiliert
   `komport/translations/*.ts` zur Build-Zeit zu `.qm` (niedrigere-Level-
-  API statt `qt_add_translations()`, da letztere Qt 6.7+ voraussetzt, das
-  Projekt aber nur Qt 6.2+ verlangt); `qt6_add_resources()` bettet die
-  `.qm`-Datei über das Qt-Resource-System ein (wie schon `komport.qrc`
-  für die Icons) — funktioniert identisch aus dem Build-Verzeichnis wie
-  aus einer Installation, kein Such-/Install-Pfad nötig.
+  API statt `qt_add_translations()` — letztere existiert entgegen einer
+  ersten, von Codex korrigierten Annahme bereits seit Qt 6.2, allerdings
+  als CMake-Technology-Preview mit Schnittstellen-Überarbeitung erst mit
+  Qt 6.7 stabilisiert; die niedrigere API ist seit 6.2 stabil und deshalb
+  die robustere Wahl, nicht wegen einer harten Versionsgrenze);
+  `qt6_add_resources()` bettet die `.qm`-Datei über das Qt-Resource-System
+  ein (wie schon `komport.qrc` für die Icons) — funktioniert identisch aus
+  dem Build-Verzeichnis wie aus einer Installation, kein Such-/Install-Pfad
+  nötig. **Nebenbefund (vorbestehend, nicht durch diesen Meilenstein
+  verursacht):** die deklarierte Mindestversion `find_package(Qt6 6.2 ...)`
+  war schon vorher unerreichbar, da `qt_standard_project_setup()`
+  tatsächlich Qt 6.3 voraussetzt — jetzt auf `6.3` korrigiert.
 - `komport/translations/komport_de.ts`: per `lupdate` aus dem Quellcode
   extrahiert (154 Strings), 152 davon übersetzt. **2 bewusst
   unübersetzt gelassen** (Nutzervorgabe: "im Zweifel unübersetzt lassen,
