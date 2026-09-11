@@ -209,9 +209,18 @@ Default an). Siehe `TODO.md` Abschnitt 0.1 für den Anlass.
   kein sonstiger xterm-Funktionsumfang.
 - Keine funktionale Erweiterung des Datei-Transfers (Upload/Download/Script) über das
   bisherige rudimentäre Grundgerüst hinaus.
-- Keine Internationalisierung/`.po`-Pflege über das Nötigste hinaus (die alte
-  `I18N_NOOP`/KDE-i18n-Kette entfällt, `po/` kann ggf. auf Qt-`.ts`/`lupdate` umgestellt
-  werden, ist aber nicht Kernziel).
+- **Überholt seit Meilenstein 6 (Internationalisierung):** diese Zeile
+  schätzte i18n ursprünglich als "nicht Kernziel" ein — inzwischen ist es
+  ein vollwertiger, umgesetzter Meilenstein (siehe `TODO.md` Abschnitt 0,
+  "Meilensteine (Roadmap)"): alle sichtbaren String-Literale nutzen `tr()`,
+  Qt6-`LinguistTools` sind eingebunden (`CMakeLists.txt`), eine deutsche
+  Übersetzung (`komport/translations/komport_de.ts`) wird zur Build-Zeit
+  zu `.qm` kompiliert und per Qt-Resource-System eingebettet, `main.cpp`
+  lädt sie automatisch anhand der Systemsprache (`QLocale::system()`),
+  inklusive Qt's eigener Basis-Übersetzungen (Standard-Dialogtexte wie
+  OK/Abbrechen). Die alte KDE-`I18N_NOOP`/`.po`-Kette (aus der
+  KDE3-Portierung geerbt) ist komplett durch die moderne Qt6-`.ts`/`.qm`-
+  Kette ersetzt.
 
 ## Sonstiges
 

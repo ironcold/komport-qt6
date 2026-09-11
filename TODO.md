@@ -7,11 +7,15 @@ erledigter Arbeit (Basis-Portierung, Admin-Tool-Features, sieben
 Review-Gate-Runden, Meilenstein 4, Meilenstein 5: Archiv-Abschnitte 1–21).
 Architektur/Ziele stehen in `CLAUDE.md`.
 
-Stand (2026-09-09): Meilenstein 4 (VT220/xterm) und Meilenstein 5
-(Appearance-Tab) sind abgeschlossen, gemergt und auf beiden Remotes
-(Codeberg/GitHub) synchron. Meilenstein 7 (Retro-/Industrie-Zeichensatz-
-Übersetzung) ist implementiert und review-verifiziert, aber noch nicht
-gemergt (Branch `milestone-7-charset`). Unten stehen nur die bewusst
+Stand (2026-09-11): Meilenstein 4 (VT220/xterm), Meilenstein 5
+(Appearance-Tab) und Meilenstein 7 (Retro-/Industrie-Zeichensatz-
+Übersetzung, inkl. Custom-Charset-Nachtrag) sind abgeschlossen, gemergt
+und auf beiden Remotes (Codeberg/GitHub) synchron. Meilenstein 6
+(Internationalisierung) ist implementiert (Branch `milestone-6-i18n`,
+noch nicht gemergt). Damit sind alle bisher geplanten funktionalen
+Meilensteine umgesetzt — die verbleibenden offenen Punkte (Abschnitt 6)
+sind bewusst akzeptierte, dokumentierte Trade-offs, keine Lücken; ein
+erstes `1.0.0`-Release ist damit absehbar. Unten stehen nur die bewusst
 offen gelassenen Punkte (Abschnitt 6), die Wunschliste (Abschnitt 7) und
 die Roadmap.
 
@@ -72,7 +76,23 @@ Verifikationsprotokolle in `TODO-ARCHIVE.md`:
   `*.charset`-Dateien aus `customCharsetsDirectory()`
   (`~/.config/Komport-Qt6/charsets/` — der "Custom Charsets Folder..."-
   Button im Settings-Dialog öffnet ihn direkt), ohne Neubau nötig — siehe
-  Abschnitt 1 unten für Format und Details.
+  Abschnitt 1 unten für Format und Details. Acht Codex-Review-Runden
+  (`gpt-5.6-sol`) auf diesen Nachtrag, ~30 Findings insgesamt (u.a. zwei
+  echte High-Bugs auf dem interaktiven RX/TX-Pfad: mehrdeutige
+  Byte-zu-Zeichen-Zuordnungen in Custom-Tabellen, ein "?"-Platzhalter-
+  Fallback, der bei manchen Tabellen selbst ein falsches Byte gesendet
+  hätte), Runde 8 ohne neue Funde (Konvergenz bestätigt). PR #7 auf
+  Codeberg, gemergt.
+- **Meilenstein 6 — Internationalisierung (i18n)** (2026-09-11): alle
+  sichtbaren String-Literale nutzen `tr()` (war bei näherer Prüfung schon
+  fast vollständig der Fall), Qt6-`LinguistTools` eingebunden
+  (`CMakeLists.txt`), `komport/translations/komport_de.ts` (154 Strings
+  per `lupdate` extrahiert, 152 übersetzt, 2 bewusst offen gelassen -
+  "Visual Bell"/"Framing", keine belastbare Übersetzungskonvention
+  gefunden), zur Build-Zeit zu `.qm` kompiliert und per Qt-Resource-System
+  eingebettet. `main.cpp` lädt automatisch per `QLocale::system()`, inkl.
+  Qt's eigener Basis-Übersetzungen. Details siehe Abschnitt "Meilensteine
+  (Roadmap)" unten.
 
 ## 1. Referenz: Benutzerdefinierte Zeichensätze (`*.charset`-Dateien)
 
@@ -438,7 +458,7 @@ Profil-Integration, vier Farbschema-Presets) und über vier Codex/Gemma4-
 Review-Runden verifiziert — Details, Findings und Fixes in
 `TODO-ARCHIVE.md` Abschnitt 21. PR #3 + #4 auf Codeberg, beide gemergt.
 
-### Meilenstein 6 — Internationalisierung (i18n) mit Qt6 Linguist — offen
+### Meilenstein 6 — Internationalisierung (i18n) mit Qt6 Linguist — ✅ erledigt (2026-09-11)
 
 > Mehrsprachigkeit (mind. Englisch/Deutsch) für Menüs, Tooltips, Buttons,
 > Dialoge:
@@ -452,10 +472,90 @@ Review-Runden verifiziert — Details, Findings und Fixes in
 >   `QLocale` die Systemsprache abfragt und bei Bedarf die deutsche
 >   Übersetzung lädt.
 
-Größerer, mechanischer Umbau über sehr viele Dateien (praktisch jede `.cpp`
-mit sichtbarem Text) — eigener, in sich abgeschlossener Auftrag, am besten
-NACH den funktionalen Meilensteinen 4/5, damit nicht doppelt an neu
-hinzukommenden Strings gearbeitet werden muss.
+Die meisten sichtbaren String-Literale waren bei näherer Prüfung bereits
+mit `tr()` umschlossen (frühere Entwicklung hatte das schon weitgehend
+mitgemacht) — ein erster Grep-Abgleich (Konstruktionsaufrufe von
+`QLabel`/`QCheckBox`/`QMessageBox`/etc. gegen `tr(`) übersah aber zwei
+echte Lücken, die eine anschließende Codex-Review fand: die Paritäts-
+(NONE/EVEN/ODD) und Flusskontroll-Werte (XON/XOFF/RTS/CTS/NONE) im
+Settings-Dialog waren als reine `QComboBox::addItems({...})`-Aufrufe gar
+nicht erst mit `tr()` versehen — und die vier Farbschema-Namen
+("Breeze Light" usw.) wurden zwar mit `tr(scheme.name)` übersetzt, aber
+`lupdate` kann ein `tr()` mit einem *Laufzeit*-Argument (statt einem
+Literal) nicht extrahieren, sodass keiner dieser vier Namen je in der
+`.ts`-Datei gelandet wäre. Beide gefixt, siehe unten.
+
+**Wichtiger Fallstrick bei der Paritäts-/Flusskontroll-Fix:**
+`KomportSerial::applyPortSettings()` vergleicht `strParity`/
+`strFlowControl` gegen feste englische Bezeichner (`"EVEN"`/`"ODD"`/
+`"XON/XOFF"`/`"RTS/CTS"`, `"NONE"` als Standard für beide), und
+`KomportApp` persistiert genau das, was die ComboBox zurückgibt, direkt in
+`QSettings`. Ein naives `tr()`-Umschließen der Item-*Texte* hätte
+`currentText()` die *übersetzte* deutsche Zeichenkette zurückgeben lassen
+— stillschweigend als `strParity` gespeichert, gegen die englischen
+Literale verglichen, und damit die falsche Parität angewendet (oder ein
+Profil erzeugt, das bei Sprachwechsel nicht mehr korrekt geparst wird) —
+ein Funktions-/Datenintegritätsbug, keine bloße Übersetzungslücke.
+Behoben mit demselben `Qt::UserRole`-Entkopplungsmuster, das schon für
+`CharsetComboBox` existierte: die Anzeige ist übersetzbar, der
+gespeicherte/verglichene Wert (`UserRole`-Daten) bleibt unabhängig von der
+Sprache der feste englische Bezeichner. `komport.cpp`s
+`FlowControlComboBox`/`ParityComboBox`-Zugriffe entsprechend auf
+`findData()`/`currentData()` umgestellt (statt `setCurrentText()`/
+`currentText()`), inklusive derselben "unbekannter Wert lässt die
+aktuelle Auswahl unangetastet"-Absicherung wie bei `CharsetComboBox`.
+Die vier Farbschema-Namen brauchten keine solche Entkopplung (Auswahl ist
+dort index-basiert, kein String-Vergleich) — nur `QT_TR_NOOP(...)` direkt
+in der Tabellen-Definition, damit `lupdate` sie überhaupt findet.
+
+Der eigentliche Aufwand lag daher im Tooling und der Übersetzung selbst:
+
+- `CMakeLists.txt`: `Qt6::LinguistTools`-Komponente ergänzt;
+  `qt6_add_translation(... OPTIONS -nounfinished)` kompiliert
+  `komport/translations/*.ts` zur Build-Zeit zu `.qm` (niedrigere-Level-
+  API statt `qt_add_translations()` — letztere existiert entgegen einer
+  ersten, von Codex korrigierten Annahme bereits seit Qt 6.2, allerdings
+  als CMake-Technology-Preview mit Schnittstellen-Überarbeitung erst mit
+  Qt 6.7 stabilisiert; die niedrigere API ist seit 6.2 stabil und deshalb
+  die robustere Wahl, nicht wegen einer harten Versionsgrenze);
+  `qt6_add_resources()` bettet die `.qm`-Datei über das Qt-Resource-System
+  ein (wie schon `komport.qrc` für die Icons) — funktioniert identisch aus
+  dem Build-Verzeichnis wie aus einer Installation, kein Such-/Install-Pfad
+  nötig. **Nebenbefund (vorbestehend, nicht durch diesen Meilenstein
+  verursacht):** die deklarierte Mindestversion `find_package(Qt6 6.2 ...)`
+  war schon vorher unerreichbar, da `qt_standard_project_setup()`
+  tatsächlich Qt 6.3 voraussetzt — jetzt auf `6.3` korrigiert.
+- `komport/translations/komport_de.ts`: per `lupdate` aus dem Quellcode
+  extrahiert (154 Strings), 152 davon übersetzt. **2 bewusst
+  unübersetzt gelassen** (Nutzervorgabe: "im Zweifel unübersetzt lassen,
+  damit klar ist, da ist was offen") — "Visual Bell" und "Framing": für
+  beide ließ sich keine belastbare, eindeutige deutsche Konvention
+  verifizieren (Web-Recherche zu "Visual Bell" ergebnislos), `-nounfinished`
+  sorgt dafür, dass diese beim Kompilieren zu `.qm` ausgelassen werden und
+  zur Laufzeit sauber auf den englischen Quelltext zurückfallen, statt
+  eine leere/geratene Übersetzung auszuliefern — bleiben in der `.ts`
+  selbst als `unfinished` sichtbar für eine spätere Vervollständigung.
+- `main.cpp`: zwei `QTranslator`-Instanzen — die eigene
+  (`:/translations/komport_de.qm`, eingebettet) und Qt's eigene
+  Basis-Übersetzung (`qtbase_de.qm`, aus der System-Qt-Installation über
+  `QLibraryInfo::path(QLibraryInfo::TranslationsPath)`, deckt
+  Standard-Dialogtexte wie OK/Abbrechen/Dateiauswahl ab) — beide über
+  `QLocale::system()` geladen, *bevor* der erste `tr()`-Aufruf (die
+  `--help`-Beschreibung) läuft. Beide sind optional: schlägt das Laden
+  fehl (z.B. englisches System, oder eine Sprache ohne eigene `.ts`-Datei),
+  bleibt es beim englischen Quelltext — kein Fehler, kein Absturz.
+- Verifiziert per Offscreen-Smoketest mit `LANG=de_DE.UTF-8`/`LANG=en_US.UTF-8`:
+  `--help`-Ausgabe korrekt lokalisiert (inkl. Qt's eigener Basis-Strings
+  wie "Aufruf:"/"Optionen:"), englischer Fallback funktioniert
+  unverändert, kein Absturz, echte `~/.config/Komport-Qt6/Komport-Qt6.conf`
+  per md5sum unverändert.
+
+Weitere Sprachen (über Deutsch hinaus) sind mit demselben Mechanismus
+jederzeit ergänzbar (weitere `komport/translations/komport_<sprache>.ts`
++ ein Eintrag in `KOMPORT_TS_FILES` in `CMakeLists.txt`) — bei Bedarf
+später, ggf. mit Gemma/Qwen auf lokaler Hardware für die
+Rohübersetzung vorbereitet (spart Cloud-Tokens), nach demselben engen
+Zuschnitt (bei Unsicherheit unübersetzt lassen).
 
 ### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09)
 

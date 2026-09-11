@@ -18,7 +18,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets PrintSupport SerialPort)
+# Codex review finding (Milestone 6): the declared 6.2 minimum was already
+# inaccurate before this commit - qt_standard_project_setup() right below
+# was only introduced in Qt 6.3, so the project has never actually built
+# against a genuine Qt 6.2. Corrected to reflect the real floor. Unrelated
+# to the round's own qt6_add_translation()-vs-qt_add_translations() choice
+# below - qt_add_translations() itself has existed since 6.2 too (as a
+# CMake technology preview whose interface changed at its 6.7
+# stabilization/rename), so the lower-level, stable-since-6.2
+# qt6_add_translation()/qt6_add_resources() primitives used below were
+# chosen to avoid depending on a pre-6.7 tech-preview API surface, not
+# because of any hard version-floor requirement.
+find_package(Qt6 6.3 REQUIRED COMPONENTS Widgets PrintSupport SerialPort LinguistTools)
 
 qt_standard_project_setup()
 
@@ -79,6 +90,30 @@ target_link_libraries(komport_core PUBLIC
   Qt6::Widgets
   Qt6::PrintSupport
   Qt6::SerialPort
+)
+
+# Milestone 6: internationalization. Source strings are wrapped in tr()
+# throughout (see TODO.md section 0/CLAUDE.md); komport/translations/*.ts
+# holds the actual translations, maintained by hand/lupdate, not
+# regenerated as part of every build. qt6_add_translation() only compiles
+# each .ts into a .qm at build time (lrelease) - -nounfinished drops any
+# translation Qt Linguist still marks "unfinished" (a string lupdate added
+# but nobody has translated/confirmed yet) from the compiled .qm entirely,
+# so KomportApp falls back to the English source text for exactly those
+# strings at runtime instead of shipping a blank/wrong translation - see
+# main.cpp's QTranslator loading comment for the runtime side of this.
+# The resulting .qm files are embedded directly into the binary via the
+# Qt Resource System (like komport.qrc's icons already are) rather than
+# relying on an install-time search path, so translations work identically
+# from the build directory and from an installed prefix.
+set(KOMPORT_TS_FILES
+  komport/translations/komport_de.ts
+)
+qt6_add_translation(KOMPORT_QM_FILES ${KOMPORT_TS_FILES} OPTIONS -nounfinished)
+qt6_add_resources(komport_core "translations"
+  PREFIX "/translations"
+  BASE "${CMAKE_CURRENT_BINARY_DIR}"
+  FILES ${KOMPORT_QM_FILES}
 )
 
 add_executable(komport-qt6 komport/main.cpp)

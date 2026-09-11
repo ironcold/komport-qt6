@@ -51,14 +51,32 @@ namespace {
 // the current fg/bg don't exactly match one of these, so it's never
 // something the user directly "picks" to get colors from.
 struct ColorScheme { const char *name; QColor fg; QColor bg; };
+// Codex review finding (Milestone 6): createAppearanceTab() below calls
+// tr(scheme.name) with a *runtime* const char* (this array element), not a
+// string literal - lupdate only extracts tr() calls whose argument is a
+// literal it can see statically, so without marking these names as
+// translatable source text right here, none of the four names below would
+// ever make it into komport_de.ts (or any future translation) at all -
+// not even as "unfinished". QT_TRANSLATE_NOOP(context, ...), not the
+// plain QT_TR_NOOP(...), is required here specifically: this array sits
+// at namespace scope, outside any class body, so lupdate has no
+// surrounding class to infer a context from (confirmed - a first attempt
+// with plain QT_TR_NOOP produced a "tr() cannot be called without
+// context" lupdate warning and silently extracted nothing at all).
+// QT_TRANSLATE_NOOP's explicit "SettingsDialog" context matches where
+// tr(scheme.name) is actually called from below, which is what the
+// runtime translation lookup searches by; both macros are no-ops at
+// runtime either way (still just yield the plain const char*), they only
+// exist to give lupdate a literal to find - the actual translation still
+// happens at the tr(scheme.name) call site once the name reaches there.
 const ColorScheme kColorSchemes[] = {
   // KDE Breeze's light/dark palette text/window colors.
-  { "Breeze Light",           QColor(0x23,0x26,0x29), QColor(0xfc,0xfc,0xfc) },
-  { "Breeze Dark",            QColor(0xfc,0xfc,0xfc), QColor(0x23,0x26,0x29) },
+  { QT_TRANSLATE_NOOP("SettingsDialog", "Breeze Light"),           QColor(0x23,0x26,0x29), QColor(0xfc,0xfc,0xfc) },
+  { QT_TRANSLATE_NOOP("SettingsDialog", "Breeze Dark"),            QColor(0xfc,0xfc,0xfc), QColor(0x23,0x26,0x29) },
   // Classic phosphor-green retro terminal.
-  { "Green on Black",         QColor(0x33,0xff,0x33), QColor(0x00,0x00,0x00) },
+  { QT_TRANSLATE_NOOP("SettingsDialog", "Green on Black"),         QColor(0x33,0xff,0x33), QColor(0x00,0x00,0x00) },
   // Low-glare, easy-on-the-eyes light scheme.
-  { "Black on Light Yellow",  QColor(0x00,0x00,0x00), QColor(0xff,0xff,0xdc) },
+  { QT_TRANSLATE_NOOP("SettingsDialog", "Black on Light Yellow"),  QColor(0x00,0x00,0x00), QColor(0xff,0xff,0xdc) },
 };
 
 } // namespace
@@ -146,17 +164,38 @@ QWidget* SettingsDialog::createDeviceTab()
     DataBitsComboBox->setCurrentText( QStringLiteral("8") );
     StopBitsComboBox = new QComboBox( framingGroup );
     StopBitsComboBox->addItems( { "1", "1.5", "2" } );
+    // Codex review finding (Milestone 6): KomportSerial::applyPortSettings()
+    // compares strParity/strFlowControl against fixed English identifiers
+    // ("EVEN"/"ODD"/"XON/XOFF"/"RTS/CTS", "NONE" is the default for both -
+    // see komportserial.cpp), and KomportApp persists whatever these combo
+    // boxes report directly into QSettings. Naively wrapping the item text
+    // itself in tr() would have made currentText() return the *translated*
+    // label - silently storing a German string as strParity, comparing it
+    // against those English literals, and applying the wrong parity (or a
+    // profile that stops parsing correctly if the locale ever changes) -
+    // a functional/data-integrity bug, not just a cosmetic translation
+    // gap. Same Qt::UserRole-based decouple already used for
+    // CharsetComboBox below: the displayed label is translatable, the
+    // stored/compared value (UserRole data) stays the fixed English
+    // identifier regardless of locale.
     ParityComboBox = new QComboBox( framingGroup );
-    ParityComboBox->addItems( { "NONE", "EVEN", "ODD" } );
+    ParityComboBox->addItem( tr("None", "parity"), QStringLiteral("NONE") );
+    ParityComboBox->addItem( tr("Even", "parity"), QStringLiteral("EVEN") );
+    ParityComboBox->addItem( tr("Odd", "parity"), QStringLiteral("ODD") );
     auto *framingLayout = new QFormLayout( framingGroup );
     framingLayout->addRow( tr("Start bits:"), StartBitsComboBox );
     framingLayout->addRow( tr("Data bits:"), DataBitsComboBox );
     framingLayout->addRow( tr("Stop bits:"), StopBitsComboBox );
     framingLayout->addRow( tr("Parity:"), ParityComboBox );
 
+    // "XON/XOFF"/"RTS/CTS" are universal protocol/signal-line abbreviations,
+    // never translated in any language (same convention as "RX"/"TX" in
+    // KomportHexView) - only "None" needs an actual translatable label.
     FlowControlComboBox = new QComboBox( page );
-    FlowControlComboBox->addItems( { "XON/XOFF", "RTS/CTS", "NONE" } );
-    FlowControlComboBox->setCurrentText( QStringLiteral("NONE") );
+    FlowControlComboBox->addItem( QStringLiteral("XON/XOFF"), QStringLiteral("XON/XOFF") );
+    FlowControlComboBox->addItem( QStringLiteral("RTS/CTS"), QStringLiteral("RTS/CTS") );
+    FlowControlComboBox->addItem( tr("None", "flow control"), QStringLiteral("NONE") );
+    FlowControlComboBox->setCurrentIndex( FlowControlComboBox->findData(QStringLiteral("NONE")) );
 
     auto *topForm = new QFormLayout();
     topForm->addRow( tr("Device:"), DeviceComboBox );
