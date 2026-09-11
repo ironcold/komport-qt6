@@ -92,6 +92,18 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   connect( view->getSerial(), &KomportSerial::settingsFailed, this, &KomportApp::slotSerialSettingsFailed );
 
   readOptions();
+  // Milestone 7 addendum: populate the custom-charset registry before any
+  // profile gets loaded below - a profile whose Charset value names a
+  // custom charset needs it to already be resolvable.
+  KomportCharset::reloadCustomCharsets();
+  // Codex review round-4 finding (Medium): this reload is just as capable
+  // of invalidating an *already open* window's live Custom selection as
+  // the one in slotShowPreferences() is (e.g. "New Window" while another
+  // window has a since-deleted custom charset selected) - the registry is
+  // the same process-wide shared object either way. initView() above
+  // already ran, so `this` window's own view->mEmulation exists and is
+  // safe to reconcile here too, alongside every other already-open window.
+  reconcileCharsetSelectionAfterReloadForAllWindows();
   seedBuiltinProfiles();
   initProfiles();
 }
@@ -656,6 +668,44 @@ void KomportApp::updateConnectionStatusLabel()
           .arg( mCurrentProfile.isEmpty() ? tr("(none)") : mCurrentProfile, strDevice, strBaudRate, framing, strFlowControl, strLineEnding ) );
 }
 
+void KomportApp::reconcileCharsetSelectionAfterReload()
+{
+  // Codex review finding: a custom charset the *live* session already has
+  // selected can have its file deleted or renamed since - already handled
+  // safely for actual RX/TX (KomportCharset::toDisplay()/toWire() degrade
+  // to Standard's identity behavior for an unknown id), but that alone
+  // left the *stored* selection itself dangling: view->mEmulation stayed
+  // reporting charset()==Custom with a now-nonexistent customCharsetId(),
+  // slotShowPreferences()'s combo-box pre-fill would then also fail to
+  // find it (a plain "leave the combo at its own default" rather than an
+  // honest reset), and saving the profile as-is would re-persist the same
+  // broken reference - worse, a future file that happened to reuse that
+  // exact id would silently reactivate without the user ever re-selecting
+  // anything. Call this right after every KomportCharset::reloadCustomCharsets()
+  // to close all of that at the source.
+  if ( view->mEmulation->charset() != KomportCharset::Custom ) return;
+  bool stillLoaded = false;
+  for ( const auto &entry : KomportCharset::customCharsetEntries() ) {
+    if ( entry.first == view->mEmulation->customCharsetId() ) { stillLoaded = true; break; }
+  }
+  if ( !stillLoaded ) {
+    view->mEmulation->setCharset( KomportCharset::Standard );
+    strCharset = KomportCharset::settingsKey( KomportCharset::Standard );
+  }
+}
+
+void KomportApp::reconcileCharsetSelectionAfterReloadForAllWindows()
+{
+  // Same QApplication::topLevelWidgets() + qobject_cast<KomportApp*> walk
+  // already used by slotFileQuit() to reach every open top-level window.
+  const QWidgetList windows = QApplication::topLevelWidgets();
+  for ( QWidget *w : windows ) {
+    if ( auto *win = qobject_cast<KomportApp*>(w) ) {
+      win->reconcileCharsetSelectionAfterReload();
+    }
+  }
+}
+
 void KomportApp::loadProfile(const QString &_name)
 {
   if ( _name.isEmpty() ) return;
@@ -704,8 +754,26 @@ void KomportApp::loadProfile(const QString &_name)
   // Milestone 7: applied directly (not through a signal-driven toolbar
   // widget like lineEndingCombo above) so it's unconditional - no risk of
   // silently no-op'ing just because the new profile happens to already
-  // match whatever the previous one had selected.
-  view->mEmulation->setCharset( KomportCharset::fromSettingsKey(strCharset) );
+  // match whatever the previous one had selected. resolveSettingsKey()
+  // covers both the three built-ins and any loaded custom charset (see
+  // KomportCharset::Selection) - a profile referencing a custom charset
+  // whose file has since been deleted/renamed gracefully falls back to
+  // Standard rather than crashing or guessing.
+  {
+    const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( strCharset );
+    view->mEmulation->setCharset( sel.id, sel.customId );
+    // Codex review round-3 finding: resolveSettingsKey() already falls
+    // back the *live emulation* to Standard for an unrecognized/dangling
+    // Charset value (a stale custom-charset id whose file is gone), but
+    // strCharset itself - the string that gets *re-persisted* if this
+    // profile is saved again - was left holding the original, still-
+    // dangling raw value. Normalizing it here too closes that: a Custom
+    // selection keeps its own customId as strCharset (matching how it's
+    // stored/read everywhere else), anything else collapses to its fixed
+    // settingsKey() - which is a no-op for an already-valid built-in
+    // value, and only actually changes anything for the dangling case.
+    strCharset = ( sel.id == KomportCharset::Custom ) ? sel.customId : KomportCharset::settingsKey( sel.id );
+  }
 
   refreshProfileCombo( _name );
   // Don't stomp on a serial error applyConnectionSettings() may have just
@@ -1094,6 +1162,21 @@ void KomportApp::slotShowPreferences()
   // getting silently cleared by a stale flag from some earlier, unrelated
   // failure or overwritten by this method's own trailing "Ready.".
   mSerialErrorPending = false;
+  // Milestone 7 addendum: re-scan for custom *.charset files every time
+  // this dialog opens (cheap - typically a handful of small files), so a
+  // file the user just dropped into customCharsetsDirectory() shows up
+  // in the dropdown below without needing to restart the app.
+  KomportCharset::reloadCustomCharsets();
+  // Codex review round-3 finding: KomportCharset's custom-charset registry
+  // is a single process-wide, function-local static (see its own comment)
+  // shared by *every* open KomportApp window (slotFileNewWindow() can
+  // create more than one) - reconciling only the window that happens to be
+  // opening Settings left any *other* open window's live Custom selection
+  // dangling against the now-reloaded (and possibly no-longer-matching)
+  // registry until *it* also happened to open Settings. Reconciling every
+  // open window right after the one shared reload keeps them all
+  // consistent with each other, not just with whichever window triggered it.
+  reconcileCharsetSelectionAfterReloadForAllWindows();
   ///////////////////////////////////////////////////////////////////
   // open the settings dialog...
   SettingsDialog settingsDialog(this);
@@ -1111,9 +1194,16 @@ void KomportApp::slotShowPreferences()
   settingsDialog.ScrollBufferSpinBox->setValue( strScrollBuffer.toInt() );
   // Codex review finding: read/write via the combo's own Qt::UserRole data
   // (findData()/currentData()) rather than row-index<->enum-value
-  // coupling - see KomportCharset::displayEntries()'s comment.
+  // coupling - see KomportCharset::displayEntries()'s comment. The
+  // payload is the settingsKey()-style string (not the bare Id) since
+  // Milestone 7's custom-charset addendum: every loaded custom charset
+  // shares Id::Custom, so only the string (built-in name, or a custom
+  // charset's own id) actually identifies a unique dropdown row.
   {
-    const int idx = settingsDialog.CharsetComboBox->findData( static_cast<int>( view->mEmulation->charset() ) );
+    const QString currentKey = ( view->mEmulation->charset() == KomportCharset::Custom )
+        ? view->mEmulation->customCharsetId()
+        : KomportCharset::settingsKey( view->mEmulation->charset() );
+    const int idx = settingsDialog.CharsetComboBox->findData( currentKey );
     if ( idx >= 0 ) settingsDialog.CharsetComboBox->setCurrentIndex( idx );
   }
   settingsDialog.setSelectedFont( view->font() ); // Milestone 5
@@ -1133,9 +1223,12 @@ void KomportApp::slotShowPreferences()
       // Milestone 7: font/colors below already apply live and independent
       // of the serial settings, same reasoning applies here - no port
       // re-open, no mSerialErrorPending interplay.
-      const KomportCharset::Id charset = static_cast<KomportCharset::Id>( settingsDialog.CharsetComboBox->currentData().toInt() );
-      strCharset = KomportCharset::settingsKey( charset );
-      view->mEmulation->setCharset( charset );
+      {
+        const QString key = settingsDialog.CharsetComboBox->currentData().toString();
+        const KomportCharset::Selection sel = KomportCharset::resolveSettingsKey( key );
+        strCharset = key;
+        view->mEmulation->setCharset( sel.id, sel.customId );
+      }
 
       view->setScrollBuffer( strScrollBuffer.toInt() );
       KomportSerial* serial = view->getSerial();
@@ -1257,9 +1350,10 @@ void KomportApp::slotMacroTriggered(const QString &command)
   // text sent as a macro vs. typed by hand could reach the wire
   // differently.
   const KomportCharset::Id charset = view->mEmulation->charset();
+  const QString customCharsetId = view->mEmulation->customCharsetId();
   QByteArray wireBytes;
   wireBytes.reserve( command.size() );
-  for ( const QChar &c : command ) wireBytes.append( KomportCharset::toWire(charset, c) );
+  for ( const QChar &c : command ) wireBytes.append( KomportCharset::toWire(charset, c, customCharsetId) );
   // Codex review finding (round 2, corrected in round 3): putStr()'s
   // null-terminated const char* overload would silently truncate at a
   // genuine embedded NUL (CP437's byte 0x00 is real Unicode NUL since the

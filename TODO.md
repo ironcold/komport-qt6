@@ -49,21 +49,176 @@ Verifikationsprotokolle in `TODO-ARCHIVE.md`:
   sonst unauffindbar war). PR #3 + #4 auf Codeberg, beide gemergt,
   `master` auf Codeberg und GitHub synchron.
 - **Meilenstein 7 — Retro-/Industrie-Zeichensatz-Übersetzung** (2026-09-09,
-  Branch `milestone-7-charset`, noch nicht gemergt): neue
-  `KomportCharset`-Klasse, byte-basierte Übersetzung zwischen rohem
-  seriellem Bytestrom und Terminal-Emulation (RX in
-  `KomportEmulation::slotReceivedChar()`s `default:`-Zweig, TX in
-  `slotKeyPressed()`/`slotSimKeyPressed()`), vollständig in die
-  Profilverwaltung integriert. Umgesetzt: CP437 (0x80-0xFF-Bereich) und
-  PETSCII (ASCII-kompatibler Bereich + £/↑/←). Bewusst nicht umgesetzt:
-  "Amiga" (keine belastbare Quelle für die früher eigenständige
-  Amiga-1.x-Zeichenbelegung) und CP437s ikonischer 0x00-0x1F-Grafikbereich
-  (echter Konflikt mit VT100-Steuercodes, siehe Abschnitt 6.3). Gemma4 +
-  Codex (`gpt-5.6-sol`) Review: 3 Hoch-, 2 Mittel-, 1 Niedrig-Finding,
-  alle gefixt und verifiziert (u.a. eine Leerzeichen/NUL-Byte-Kollision im
-  CP437-Rückwärts-Mapping, ein Profil-Leck-Bug derselben Klasse wie bei
-  Meilenstein 5, ein stillschweigend falscher Fallback für nicht
-  darstellbare Zeichen). tests/tst_charset.cpp neu, 19 Testfunktionen.
+  PR #6, gemergt): neue `KomportCharset`-Klasse, byte-basierte
+  Übersetzung zwischen rohem seriellem Bytestrom und Terminal-Emulation
+  (RX in `KomportEmulation::slotReceivedChar()`s `default:`-Zweig, TX in
+  `slotKeyPressed()`/`slotSimKeyPressed()`/Makro-Text), vollständig in
+  die Profilverwaltung integriert. Umgesetzt: CP437 (0x80-0xFF-Bereich)
+  und PETSCII (ASCII-kompatibler Bereich + £/↑/← + C0-Steuerbereich als
+  Identität). Bewusst nicht umgesetzt: "Amiga" (keine belastbare Quelle
+  für die früher eigenständige Amiga-1.x-Zeichenbelegung) und CP437s
+  ikonischer 0x00-0x1F-Grafikbereich (echter Konflikt mit
+  VT100-Steuercodes, siehe Abschnitt 6.3). Vier Codex-Review-Runden
+  (`gpt-5.6-sol`, erste zusätzlich mit Gemma4-Gate) bis zur bestätigten
+  Konvergenz ("no Medium or High issues found"), 14 Findings insgesamt,
+  alle gefixt und verifiziert — u.a. eine Leerzeichen/NUL-Byte-Kollision
+  im CP437-Rückwärts-Mapping, ein Profil-Leck-Bug derselben Klasse wie
+  bei Meilenstein 5, mehrere stillschweigend-falsche-Byte-Fallbacks bei
+  CP437/PETSCII, eine neue längenbasierte `KomportSerial::putStr()`-
+  Überladung für korrekt übertragene eingebettete NUL-Bytes (echter
+  Pty-Paar-Regressionstest via `openpty()`). `tests/tst_charset.cpp` neu.
+  **Nachtrag — benutzerdefinierte Zeichensätze ohne Code (2026-09-09,
+  Nutzerwunsch):** `KomportCharset` lädt zusätzlich beliebig viele
+  `*.charset`-Dateien aus `customCharsetsDirectory()`
+  (`~/.config/Komport-Qt6/charsets/` — der "Custom Charsets Folder..."-
+  Button im Settings-Dialog öffnet ihn direkt), ohne Neubau nötig — siehe
+  Abschnitt 1 unten für Format und Details.
+
+## 1. Referenz: Benutzerdefinierte Zeichensätze (`*.charset`-Dateien)
+
+Seit Meilenstein 7 (siehe Abschnitt 0 oben) unterstützt der Zeichensatz-
+Dropdown im Settings-Dialog (Terminal-Tab) neben "Standard"/"IBM CP437"/
+"PETSCII" beliebig viele selbst hinzugefügte Zeichensätze — **ohne Code
+zu ändern oder neu zu bauen.** Eine Datei ablegen, Settings-Dialog neu
+öffnen, fertig.
+
+**Verzeichnis:** `KomportCharset::customCharsetsDirectory()` — praktisch
+immer `~/.config/Komport-Qt6/charsets/` (direkt neben der eigentlichen
+`Komport-Qt6.conf`), wird beim ersten Programmstart automatisch
+angelegt. Der Button "Custom Charsets Folder..." im Settings-Dialog
+(Terminal-Tab, unter dem Zeichensatz-Dropdown) öffnet ihn direkt im
+Dateimanager.
+
+**Dateiformat** (Klartext, eine `.charset`-Datei = ein Zeichensatz,
+Dateiname ohne Endung = interner Name = Wert in `Profiles/<Name>/
+Charset`):
+
+```
+# Name: Mein Zeichensatz
+#
+# Eine Zeile pro Abweichung: <Byte hex, 00-FF>=<Unicode-Codepoint hex, 0000-FFFF>
+# Nicht aufgeführte Bytes bleiben automatisch Identität (Byte == Codepoint) -
+# das macht Steuercodes (0x00-0x1F, 0x7F) sicher, ohne dass man beim
+# Schreiben der Datei an VT100-Semantik denken muss.
+DB=2588
+41=03B1
+```
+
+- `# Name: ...` (optional) setzt den im Dropdown angezeigten Namen —
+  fehlt die Zeile, wird der Dateiname selbst verwendet.
+- Andere `#`-Zeilen sind reine Kommentare.
+- Fehlerhafte einzelne Zeilen (kein `=`, ungültiges Hex, Codepoint über
+  `FFFF`) werden übersprungen und geloggt (`qWarning()`), nicht die ganze
+  Datei verworfen.
+- Die Rückrichtung (Tastatur/Einfügen/Makro → Draht) wird automatisch aus
+  derselben Tabelle abgeleitet — keine zweite Tabelle nötig. Ein Zeichen,
+  das der Zeichensatz nicht abbilden kann, wird beim Senden als `?`
+  markiert statt stillschweigend falsch/als NUL gesendet.
+- Ein Dateiname, der (Groß-/Kleinschreibung egal) mit einem eingebauten
+  Namen kollidiert ("Standard"/"CP437"/"PETSCII"), wird übersprungen und
+  geloggt — kein stilles Überschatten der eingebauten, bereits mehrfach
+  review-verifizierten Implementierungen.
+- Neu eingeladen wird beim Programmstart und jedes Mal, wenn der
+  Settings-Dialog geöffnet wird — kein Neustart nötig, um eine gerade
+  abgelegte Datei nutzen zu können.
+
+**Absicherung gegen fehlerhafte/pathologische Eingaben** (Codex-Review, vier
+Runden, alle 21 Funde behoben — s. `TODO-ARCHIVE.md`; **Reichweite für den
+CNC-Übertragungs-Anwendungsfall, per Codex-Review präzisiert**: die
+Zeichensatz-Übersetzung läuft ausschließlich im *interaktiven* Pfad
+(Tippen, Einfügen, Makro-Text, RX-Anzeige) — ein Datei-Upload/-Download
+(`KomportTransfer`) ist bewusst *roh*, byte-exakt, ohne jede
+Zeichensatz-Übersetzung, genau damit ein per Upload gesendetes CNC-Programm
+nicht durch eine (ggf. fehlerhafte) Übersetzungstabelle verändert werden
+kann. Ein Parsing-Bug in einer Custom-Zeichensatz-Datei kann trotzdem
+relevant werden, wenn während einer Sitzung interaktiv getippt/eingefügt
+oder ein Makro gesendet wird, während dieser Zeichensatz aktiv ist — dann
+landet ein falsches Byte auf der Leitung, nicht nur ein Anzeigefehler):
+- Datei-Format ist bewusst **nur UTF-8** (inkl. reinem ASCII) — nicht
+  UTF-16/UTF-32, und das wird jetzt auch strikt geprüft (`QStringDecoder`
+  mit Fehlererkennung, einmal über die ganze Datei), nicht nur per
+  NUL-Byte-Heuristik: eine Datei mit *irgendeiner* ungültigen UTF-8-Sequenz
+  wird komplett abgelehnt, statt dass `QString::fromUtf8()` sie
+  stillschweigend mit U+FFFD "repariert".
+- Einzelne Datei max. 1 MiB (erneut nach dem Einlesen geprüft, nicht nur
+  vorher — eine zwischen Größenprüfung und Lesevorgang gewachsene Datei
+  wird nicht mehr übersehen, und der Lesevorgang selbst liest nie mehr als
+  das Limit+1 Byte ein; ein Lesefehler mittendrin wird ebenfalls erkannt
+  statt eine unvollständige Datei als vollständig zu behandeln), Zeilen
+  max. 4096 **Unicode-Zeichen** (nicht UTF-16-Einheiten — ein Emoji
+  o. ä. zählt als ein Zeichen, nicht zwei; exakt 4096 sind noch erlaubt),
+  max. 100000 Zeilen pro Datei (eine gewöhnliche Datei mit genau 100000
+  Zeilen und einem einzelnen abschließenden Zeilenumbruch löst dabei
+  *nicht* fälschlich die "mehr als 100000 Zeilen"-Warnung aus). Das
+  Zeilen-Einlesen selbst verarbeitet dabei eine Zeile nach der anderen und
+  hält nie mehr als eine Zeile gleichzeitig im Speicher, unabhängig davon,
+  wie viele Leerzeilen eine erlaubte 1-MiB-Datei enthält.
+- Max. 256 `*.charset`-Dateien pro Verzeichnis (alphabetisch), sowohl was
+  tatsächlich geladen wird als auch was überhaupt erst geöffnet/untersucht
+  wird — die Verzeichnisauflistung selbst nutzt einen unsortierten,
+  speicherbegrenzten Scan (nie mehr als 256 Dateinamen gleichzeitig im
+  Speicher) statt das komplette Verzeichnis erst vollständig aufzulisten
+  und zu sortieren, bevor die Grenze greift.
+- Unicode-Surrogate (`D800`-`DFFF`) werden als Codepoint abgelehnt wie
+  jeder andere ungültige Wert — kein gültiger eigenständiger Unicode-
+  Skalarwert. Die direkt angrenzenden gültigen Werte (`D7FF`/`E000`)
+  bleiben erlaubt.
+- Mapped eine Datei mehrere verschiedene Bytes auf denselben angezeigten
+  Buchstaben (z. B. sowohl `01=0041` als auch `41=0041`), wird das jetzt
+  geloggt (`qWarning()`): welches der beiden Bytes beim Tippen/Einfügen/
+  per Makro tatsächlich gesendet wird (das zahlenmäßig niedrigere), war
+  vorher stillschweigend mehrdeutig — direkt relevant für den
+  Anwendungsfall oben, da genau das den falschen Steuercode auf die
+  Leitung legen könnte.
+- Ein Zeichen, das ein Custom-Zeichensatz nicht darstellen kann, sendet
+  jetzt das Byte, das **diese Tabelle selbst** für ein literales "?"
+  benutzt (statt immer starr Byte `0x3F`) — eine Tabelle, die `0x3F` z. B.
+  auf "█" umlegt, hätte sonst genau dieses Byte als "kann ich nicht
+  darstellen"-Platzhalter gesendet, obwohl es unter dieser Tabelle etwas
+  ganz anderes bedeutet. Hat eine Tabelle *gar kein* Byte für "?" (auch
+  nicht mehr über die Identitäts-Vorgabe von `0x3F` selbst, weil die
+  Tabelle genau das umdefiniert), bleibt Byte `0x3F` als letzter Ausweg
+  bestehen — es gibt dann buchstäblich kein "freies" Byte mehr, jedes der
+  256 ist bereits belegt —, aber jetzt mit einer Laufzeit-Warnung
+  (`qWarning()`), damit das zumindest sichtbar/diagnostizierbar ist statt
+  still falsch.
+- Die "nur UTF-8"-Prüfung erkennt jetzt auch eine mitten im letzten
+  Zeichen abgeschnittene Datei (z. B. ein einzelnes UTF-8-Einleitungsbyte
+  ganz am Dateiende ohne Folgebyte) als ungültig — vorher hätte
+  `QStringDecoder`s Standardverhalten (auf eine evtl. noch folgende
+  weitere Chunk-Übergabe ausgelegt) diesen Fall nicht als Fehler erkannt.
+- Der angezeigte Name (`# Name: ...`) wird gegen Kollisionen mit
+  eingebauten Namen und bereits geladenen anderen Custom-Zeichensätzen
+  geprüft (Groß-/Kleinschreibung egal) — bei Kollision wird er um
+  " (<Datei-ID>)" ergänzt, die Datei bleibt aber ganz normal nutzbar
+  (anders als die reine ID-Kollision oben, die eine Datei komplett
+  ablehnt — hier geht es nur um die Anzeige, nicht um die Funktion). Der
+  erzeugte, disambiguierte Name wird dabei erneut auf Kollision geprüft
+  (nicht nur der ursprüngliche) und bei Bedarf weiter durchnummeriert, da
+  zwei Dateien rein zufällig denselben disambiguierten String erzeugen
+  könnten.
+- Verschwindet die Datei eines *aktuell ausgewählten* Custom-Zeichensatzes
+  (gelöscht/umbenannt), wird die aktive Auswahl automatisch auf "Standard"
+  zurückgesetzt — und zwar in **jedem** offenen Fenster
+  (`KomportApp::reconcileCharsetSelectionAfterReloadForAllWindows()`),
+  ausgelöst sowohl durch das Öffnen des Settings-Dialogs als auch durch das
+  Erzeugen eines neuen Fensters ("Neues Fenster"), da beide die geteilte,
+  prozessweite Registry neu laden. Ein Profil, das direkt (ohne vorheriges
+  Live-Auswählen) auf eine bereits fehlende Custom-Zeichensatz-ID
+  verweist, wird ebenfalls vollständig normalisiert — nicht nur die aktive
+  Emulation, sondern auch der intern gemerkte Wert, der beim erneuten
+  Speichern des Profils sonst die hängende Referenz weitergeschrieben
+  hätte.
+- Kann das `charsets`-Verzeichnis nicht angelegt werden (z. B. Dateisystem
+  read-only, oder es liegt bereits eine reguläre Datei an dieser Stelle),
+  wird das jetzt geloggt (`qWarning()`) statt stillschweigend einen
+  unbrauchbaren Pfad zurückzugeben.
+
+Vollständige technische Details/Rationale im Code-Kommentar von
+`KomportCharset::reloadCustomCharsets()`/`loadCustomCharsetFile()`
+(`komport/komportcharset.h`/`.cpp`) sowie
+`KomportApp::reconcileCharsetSelectionAfterReload()`/
+`reconcileCharsetSelectionAfterReloadForAllWindows()` (`komport/komport.h`).
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 
@@ -171,6 +326,39 @@ Nutzen für den seriellen Werkstatt-Terminal-Anwendungsfall dieses
 Projekts), aber hier als möglicher künftiger Auftrag festgehalten statt
 stillschweigend verworfen.
 
+## 6.4 Restpunkt: astrale Zeichen (z. B. Emoji) verdoppeln sich beim Einfügen/Makro-Senden
+
+Aus einer Codex-Review-Runde zum Custom-Charset-Mechanismus (Meilenstein
+7 Nachtrag), aber **kein durch diesen Mechanismus verursachtes Problem**
+— eine vorbestehende, architektonische Eigenschaft der Tasteneingabe-
+Verarbeitung, die schon lange vor Meilenstein 7 so war: `KomportApp::
+slotEditPaste()` (Einfügen aus der Zwischenablage) und `KomportApp::
+slotMacroTriggered()` (Makro-Text senden) iterieren den zu sendenden
+`QString` je Element as UTF-16-Einheit (`QChar`), nicht als echten
+Unicode-Codepoint. Ein astrales Zeichen außerhalb der Basic Multilingual
+Plane (z. B. die meisten Emoji, `U+1F600` "😀" u. ä.) wird intern als
+Ersatzzeichenpaar (zwei `QChar`, ein "Surrogate Pair") dargestellt — jede
+Hälfte für sich ist kein gültiger, eigenständiger Unicode-Codepoint und
+kann von keiner Zeichensatz-Tabelle (eingebaut oder Custom) sinnvoll
+abgebildet werden. Ergebnis: ein einzelnes eingefügtes/per Makro
+gesendetes astrales Zeichen erzeugt zwei aufeinanderfolgende
+"?"-Platzhalter-Bytes auf der Leitung statt (bestenfalls) eines.
+
+**Bewusst nicht in dieser Runde behoben** (Nutzer-Entscheidung): eine
+echte Lösung bräuchte entweder eine codepoint-bewusste Iteration in
+beiden Aufrufstellen (inkl. Erkennung/Zusammenfügen von Ersatzzeichen-
+Paaren vor dem Aufruf) oder eine Erweiterung von `KomportView::
+slotSimKeyPressed(QChar)`, das aktuell nur einzelne `QChar` entgegennimmt
+— beides größere Eingriffe in die Kern-Tasteneingabe-Architektur, nicht
+nur den Custom-Charset-Lademechanismus. Betrifft *alle* Zeichensätze
+gleichermaßen (Standard/CP437/PETSCII/Custom), nicht nur Custom-Tabellen,
+und nur den interaktiven Einfüge-/Makro-Pfad (direktes Tippen einzelner
+Tasten kann ohnehin nur ein `QChar` pro Tastendruck liefern, echte
+Tastaturen erzeugen keine astralen Zeichen einzeln). Für den
+CNC-Übertragungs-Anwendungsfall ein schmaler Randfall (Emoji in
+G-Code-Sitzungen), aber hier festgehalten statt stillschweigend
+übergangen.
+
 ## 7. Wunschliste / mögliche nächste Schritte
 
 Ursprünglich aus der alten `TODO`-Datei des Original-Autors (2003) übernommen,
@@ -269,7 +457,7 @@ mit sichtbarem Text) — eigener, in sich abgeschlossener Auftrag, am besten
 NACH den funktionalen Meilensteinen 4/5, damit nicht doppelt an neu
 hinzukommenden Strings gearbeitet werden muss.
 
-### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09, noch nicht gemergt)
+### Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung — ✅ erledigt (2026-09-09)
 
 > Option zur Zeichensatz-Übersetzung zwischen `QSerialPort` und der
 > Emulation, um die Kommunikation mit historischen Systemen zu
@@ -294,7 +482,9 @@ nicht umgesetzt (keine belastbare Quelle für die eigenständige
 Amiga-1.x-Zeichenbelegung, per Web-Recherche verifiziert statt geraten),
 CP437s 0x00-0x1F-Grafikbereich bewusst zurückgestellt (Abschnitt 6.3) —
 beide Abweichungen vom ursprünglichen Spec-Umfang sind bewusste,
-dokumentierte Entscheidungen, keine übersehenen Lücken.
+dokumentierte Entscheidungen, keine übersehenen Lücken. Nachtrag
+(Nutzerwunsch): benutzerdefinierte `*.charset`-Dateien ohne Code/Neubau
+möglich, siehe Abschnitt 1.
 
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 

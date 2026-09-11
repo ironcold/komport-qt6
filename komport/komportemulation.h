@@ -582,9 +582,17 @@ public:
   /** Milestone 7: retro/industrial byte-level character-set translation -
    *  see KomportCharset for the actual mapping tables and exactly which
    *  call sites apply it (control codes/escape sequences are unaffected
-   *  regardless of the selected charset). */
+   *  regardless of the selected charset). _customId is only meaningful
+   *  (and only ever non-empty) when _cs == KomportCharset::Custom - see
+   *  KomportCharset::customCharsetEntries(). The default empty _customId
+   *  keeps every existing single-argument call site (setCharset(CP437)
+   *  etc.) compiling unchanged. */
   KomportCharset::Id charset() const { return mCharset; }
-  void setCharset(KomportCharset::Id _cs) { mCharset = _cs; }
+  QString customCharsetId() const { return mCustomCharsetId; }
+  void setCharset(KomportCharset::Id _cs, const QString &_customId = QString()) {
+    mCharset = _cs;
+    mCustomCharsetId = _customId;
+  }
 protected:
   /** cursor to absolute x,y (CSI H/f) */
   virtual void  doCursorTo();
@@ -670,6 +678,8 @@ private:
   LineEnding mLineEnding;
   /** current retro/industrial charset translation, see setCharset() above */
   KomportCharset::Id mCharset = KomportCharset::Standard;
+  /** meaningful only when mCharset == KomportCharset::Custom */
+  QString mCustomCharsetId;
   /** parse mCtlSequence (optionally "?"-prefixed for private modes) as a
    *  single decimal parameter, defaulting to _def when absent/empty */
   int ctlParam(int _def = 1) const;

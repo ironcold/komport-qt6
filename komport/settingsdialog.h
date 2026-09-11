@@ -73,8 +73,13 @@ public:
     QCheckBox* VisualBellCheckBox;
     QCheckBox* LocalEchoCheckBox;
     /** Milestone 7: retro/industrial byte-level character-set translation
-     *  - see KomportCharset. Index matches KomportCharset::toIndex(). */
+     *  - see KomportCharset. Each item's Qt::UserRole data is its
+     *  settingsKey()-style string (see createTerminalTab()'s comment for
+     *  why that's a string and not KomportCharset::toIndex()). */
     QComboBox* CharsetComboBox;
+    /** opens KomportCharset::customCharsetsDirectory() in the system file
+     *  manager - see createTerminalTab() */
+    QPushButton* OpenCustomCharsetsFolderButton;
 
     // Appearance tab (Milestone 5: font family/size/spacing, color-scheme
     // presets, fg/bg color pickers)

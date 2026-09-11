@@ -145,10 +145,18 @@ ursprünglichen Zustand und zur Umstellung in `TODO-ARCHIVE.md` Abschnitt 2.
   **Größtes und wichtigstes Modul.** Inzwischen recht vollständig (Cursor-Bewegung mit
   Zähler, Insert/Delete Line/Char, DECCKM/DECTCEM, Device-Status-Reports, erweiterte
   SGR-Farben inkl. 256-Farben, Scroll-Regionen/DECSTBM, Tab, non-CSI-Escapes) —
-  Details in `TODO-ARCHIVE.md` Abschnitt 8.2 und `TODO.md` Abschnitt 0.8, bekannte
-  Lücken (DECOM/Origin-Mode, VT52, Zeichensatz-Umschaltung) in `TODO.md`
+  Details in `TODO-ARCHIVE.md` Abschnitt 8.2 und `TODO-ARCHIVE.md` Abschnitt 20
+  (Meilenstein 4), bekannte Lücken (DECOM/Origin-Mode, VT52) in `TODO.md`
   Abschnitt 6. Trägt auch die
   `LineEnding`-Einstellung (CR/LF/CRLF) für die Enter-Taste und die Makro-Bar.
+- `KomportCharset` (`komportcharset.h/.cpp`, **neu**, Meilenstein 7) — byte-basierte
+  Zeichensatz-Übersetzung zwischen rohem seriellem Bytestrom und `KomportEmulation`
+  (RX/TX, s. `CLAUDE.md`s Datenfluss-Vorgabe oben). Eingebaut: Standard (Identität),
+  IBM CP437 (0x80-0xFF), PETSCII (ASCII-kompatibler Bereich + £/↑/←). Zusätzlich lädt
+  `reloadCustomCharsets()` beliebig viele benutzerdefinierte `*.charset`-Dateien aus
+  `customCharsetsDirectory()` (`~/.config/Komport-Qt6/charsets/`) — neue Zeichensätze
+  lassen sich so ohne Code-Änderung/Neubau hinzufügen, siehe `TODO.md` Abschnitt 1
+  für das Dateiformat.
 - `KomportCell`/`KomportCellArray` — Zeichen-Zellen-Modell des sichtbaren Bildschirms;
   `KomportCellArray` trägt seit der Feature-Erweiterung auch das DECTCEM-Sichtbarkeits-Flag
   für den Cursor (`cursorVisible()`/`setCursorVisible()`/Signal `cursorVisibilityChanged`).
