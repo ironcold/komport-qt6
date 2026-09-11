@@ -20,6 +20,9 @@
 #include <QCommandLineParser>
 #include <QCommandLineOption>
 #include <QUrl>
+#include <QLibraryInfo>
+#include <QLocale>
+#include <QTranslator>
 
 #include "komport.h"
 
@@ -30,6 +33,29 @@ int main(int argc, char *argv[])
   QCoreApplication::setOrganizationName( QStringLiteral("Komport-Qt6") );
   QCoreApplication::setApplicationName( QStringLiteral("Komport-Qt6") );
   QCoreApplication::setApplicationVersion( QStringLiteral(KOMPORT_VERSION) );
+
+  // Milestone 6: load the system locale's translation, if one is
+  // available, before anything below (including the --help text just a
+  // few lines down) gets a chance to call tr() - installed translators
+  // only affect strings translated *after* installation, not retroactively.
+  // komport/translations/*.ts (compiled to .qm at build time, see
+  // CMakeLists.txt's qt6_add_translation()/-nounfinished, embedded via
+  // Qt's resource system under ":/translations/") is this app's own
+  // strings; qtbase's own translations (OK/Cancel/file-dialog text etc.)
+  // ship separately with the Qt installation itself - both are optional:
+  // load() returns false and leaves app/qtTranslator untouched if no
+  // matching file exists (e.g. an English system, or a language this app
+  // has no .ts file for yet), which is the correct fallback - the
+  // original English tr() source strings display either way.
+  QTranslator translator;
+  if ( translator.load(QLocale::system(), QStringLiteral("komport"), QStringLiteral("_"), QStringLiteral(":/translations")) ) {
+    QCoreApplication::installTranslator( &translator );
+  }
+  QTranslator qtTranslator;
+  if ( qtTranslator.load(QLocale::system(), QStringLiteral("qtbase"), QStringLiteral("_"),
+                          QLibraryInfo::path(QLibraryInfo::TranslationsPath)) ) {
+    QCoreApplication::installTranslator( &qtTranslator );
+  }
 
   QCommandLineParser parser;
   parser.setApplicationDescription(
