@@ -2296,3 +2296,246 @@ entsprechend erweitert ("Connection, terminal and appearance settings").
 Reine Label-Änderung, kein Test hing am alten Text. Verifiziert: Clean-Build
 0 Warnungen, alle 7 `ctest`-Targets grün, Offscreen-Smoke-Test grün. PR #4
 auf Codeberg, vom Nutzer gemergt, `master` auf beiden Remotes synchronisiert.
+
+## 22. Meilenstein 6 — Internationalisierung (i18n) mit Qt6 Linguist (2026-09-11)
+
+Die meisten sichtbaren String-Literale waren bei näherer Prüfung bereits
+mit `tr()` umschlossen (frühere Entwicklung hatte das schon weitgehend
+mitgemacht) — ein erster Grep-Abgleich (Konstruktionsaufrufe von
+`QLabel`/`QCheckBox`/`QMessageBox`/etc. gegen `tr(`) übersah aber zwei
+echte Lücken, die eine anschließende Codex-Review fand: die Paritäts-
+(NONE/EVEN/ODD) und Flusskontroll-Werte (XON/XOFF/RTS/CTS/NONE) im
+Settings-Dialog waren als reine `QComboBox::addItems({...})`-Aufrufe gar
+nicht erst mit `tr()` versehen — und die vier Farbschema-Namen
+("Breeze Light" usw.) wurden zwar mit `tr(scheme.name)` übersetzt, aber
+`lupdate` kann ein `tr()` mit einem *Laufzeit*-Argument (statt einem
+Literal) nicht extrahieren, sodass keiner dieser vier Namen je in der
+`.ts`-Datei gelandet wäre. Beide gefixt, siehe unten.
+
+**Wichtiger Fallstrick bei der Paritäts-/Flusskontroll-Fix:**
+`KomportSerial::applyPortSettings()` vergleicht `strParity`/
+`strFlowControl` gegen feste englische Bezeichner (`"EVEN"`/`"ODD"`/
+`"XON/XOFF"`/`"RTS/CTS"`, `"NONE"` als Standard für beide), und
+`KomportApp` persistiert genau das, was die ComboBox zurückgibt, direkt in
+`QSettings`. Ein naives `tr()`-Umschließen der Item-*Texte* hätte
+`currentText()` die *übersetzte* deutsche Zeichenkette zurückgeben lassen
+— stillschweigend als `strParity` gespeichert, gegen die englischen
+Literale verglichen, und damit die falsche Parität angewendet (oder ein
+Profil erzeugt, das bei Sprachwechsel nicht mehr korrekt geparst wird) —
+ein Funktions-/Datenintegritätsbug, keine bloße Übersetzungslücke.
+Behoben mit demselben `Qt::UserRole`-Entkopplungsmuster, das schon für
+`CharsetComboBox` existierte: die Anzeige ist übersetzbar, der
+gespeicherte/verglichene Wert (`UserRole`-Daten) bleibt unabhängig von der
+Sprache der feste englische Bezeichner. `komport.cpp`s
+`FlowControlComboBox`/`ParityComboBox`-Zugriffe entsprechend auf
+`findData()`/`currentData()` umgestellt (statt `setCurrentText()`/
+`currentText()`), inklusive derselben "unbekannter Wert lässt die
+aktuelle Auswahl unangetastet"-Absicherung wie bei `CharsetComboBox`.
+Die vier Farbschema-Namen brauchten keine solche Entkopplung (Auswahl ist
+dort index-basiert, kein String-Vergleich) — nur `QT_TR_NOOP(...)` direkt
+in der Tabellen-Definition, damit `lupdate` sie überhaupt findet.
+
+Der eigentliche Aufwand lag daher im Tooling und der Übersetzung selbst:
+
+- `CMakeLists.txt`: `Qt6::LinguistTools`-Komponente ergänzt;
+  `qt6_add_translation(... OPTIONS -nounfinished)` kompiliert
+  `komport/translations/*.ts` zur Build-Zeit zu `.qm` (niedrigere-Level-
+  API statt `qt_add_translations()` — letztere existiert entgegen einer
+  ersten, von Codex korrigierten Annahme bereits seit Qt 6.2, allerdings
+  als CMake-Technology-Preview mit Schnittstellen-Überarbeitung erst mit
+  Qt 6.7 stabilisiert; die niedrigere API ist seit 6.2 stabil und deshalb
+  die robustere Wahl, nicht wegen einer harten Versionsgrenze);
+  `qt6_add_resources()` bettet die `.qm`-Datei über das Qt-Resource-System
+  ein (wie schon `komport.qrc` für die Icons) — funktioniert identisch aus
+  dem Build-Verzeichnis wie aus einer Installation, kein Such-/Install-Pfad
+  nötig. **Nebenbefund (vorbestehend, nicht durch diesen Meilenstein
+  verursacht):** die deklarierte Mindestversion `find_package(Qt6 6.2 ...)`
+  war schon vorher unerreichbar, da `qt_standard_project_setup()`
+  tatsächlich Qt 6.3 voraussetzt — jetzt auf `6.3` korrigiert.
+- `komport/translations/komport_de.ts`: per `lupdate` aus dem Quellcode
+  extrahiert (154 Strings), 152 davon übersetzt. **2 bewusst
+  unübersetzt gelassen** (Nutzervorgabe: "im Zweifel unübersetzt lassen,
+  damit klar ist, da ist was offen") — "Visual Bell" und "Framing": für
+  beide ließ sich keine belastbare, eindeutige deutsche Konvention
+  verifizieren (Web-Recherche zu "Visual Bell" ergebnislos), `-nounfinished`
+  sorgt dafür, dass diese beim Kompilieren zu `.qm` ausgelassen werden und
+  zur Laufzeit sauber auf den englischen Quelltext zurückfallen, statt
+  eine leere/geratene Übersetzung auszuliefern — bleiben in der `.ts`
+  selbst als `unfinished` sichtbar für eine spätere Vervollständigung.
+- `main.cpp`: zwei `QTranslator`-Instanzen — die eigene
+  (`:/translations/komport_de.qm`, eingebettet) und Qt's eigene
+  Basis-Übersetzung (`qtbase_de.qm`, aus der System-Qt-Installation über
+  `QLibraryInfo::path(QLibraryInfo::TranslationsPath)`, deckt
+  Standard-Dialogtexte wie OK/Abbrechen/Dateiauswahl ab) — beide über
+  `QLocale::system()` geladen, *bevor* der erste `tr()`-Aufruf (die
+  `--help`-Beschreibung) läuft. Beide sind optional: schlägt das Laden
+  fehl (z.B. englisches System, oder eine Sprache ohne eigene `.ts`-Datei),
+  bleibt es beim englischen Quelltext — kein Fehler, kein Absturz.
+- Verifiziert per Offscreen-Smoketest mit `LANG=de_DE.UTF-8`/`LANG=en_US.UTF-8`:
+  `--help`-Ausgabe korrekt lokalisiert (inkl. Qt's eigener Basis-Strings
+  wie "Aufruf:"/"Optionen:"), englischer Fallback funktioniert
+  unverändert, kein Absturz, echte `~/.config/Komport-Qt6/Komport-Qt6.conf`
+  per md5sum unverändert.
+
+Weitere Sprachen (über Deutsch hinaus) sind mit demselben Mechanismus
+jederzeit ergänzbar (weitere `komport/translations/komport_<sprache>.ts`
++ ein Eintrag in `KOMPORT_TS_FILES` in `CMakeLists.txt`) — bei Bedarf
+später, ggf. mit Gemma/Qwen auf lokaler Hardware für die
+Rohübersetzung vorbereitet (spart Cloud-Tokens), nach demselben engen
+Zuschnitt (bei Unsicherheit unübersetzt lassen). PR #8 auf Codeberg,
+gemergt.
+
+### 22.1 Nachtrag: alle 24 EU-Amtssprachen (2026-09-11)
+
+Nutzerwunsch, in zwei Schritten gewachsen: zunächst eine handvoll
+"üblicher Verdächtiger" (Französisch, Spanisch, Italienisch,
+Portugiesisch PT+BR) plus für die Retro-Szene interessante
+osteuropäische Sprachen (Ungarisch, Polnisch, Tschechisch, dazu bonusweise
+Russisch), dann nach durchweg guter Qualität die Entscheidung, gleich
+alle 24 EU-Amtssprachen komplett vorzubereiten. Rohübersetzung komplett
+lokal per Gemma4 (`gemma4:31b` auf dem M5-Server via `hermes chat`,
+strikt sequentiell — nur ein Gemma-Thread gleichzeitig möglich, so vom
+Nutzer vorgegeben), damit kein Cloud-Token-Budget für reine
+Wörterbucharbeit verbraucht wird. Eigenes Tooling (nicht Teil des
+Repos, nur Wegwerf-Skripte unter `/tmp`) extrahierte alle 162
+Quell-Strings einmal geordnet, baute daraus pro Sprache einen
+wiederverwendbaren Prompt (inkl. expliziter Tastenkürzel-Eindeutigkeits-
+Gruppen pro Menü und einer Nicht-übersetzen-Liste für RX/TX,
+"Komport-Qt6", "(wr mem)", VT100/VT102/ASCII/Latin-1) und spielte die
+Antwort anhand der Dokumentreihenfolge (nicht Inhalt, wegen doppelter
+Quell-Strings) in die jeweilige `.ts`-Datei zurück.
+
+Jede Sprache durchlief dieselbe Prüfkette: Tastenkürzel-Kollisionen
+automatisiert erkannt (Skript prüft die vier riskanten Menügruppen),
+Korruptions-Scan auf fremde Schriftzeichen (nach dem
+Ungarisch-Vorfall unten ergänzt), Stichproben der Schlüsseleinträge
+(Menü-Akzeleratoren, RX/TX, Produktbeschreibung, "wr mem"),
+abschließend erneuter `lupdate`-Lauf zur Bestätigung
+"0 new and 162 already existing". Tastenkürzel-Kollisionen kamen in
+9 von 24 Sprachen vor (Französisch, Italienisch, Portugiesisch PT/BR,
+Tschechisch, Russisch, Bulgarisch, Kroatisch, Schwedisch, Rumänisch,
+Litauisch/Lettisch) und wurden jeweils durch einen anderen, noch freien
+Buchstaben aus demselben übersetzten Wort behoben.
+
+**Qualitätsprobleme, nach demselben Prinzip behandelt wie beim
+Ungarisch-Fund** (Web-Recherche bei Unsicherheit, im Zweifel
+unübersetzt lassen):
+- **Ungarisch:** ein Vietnamesisch-Schriftfragment ("cổngal" statt
+  "soros port", echte Modell-Halluzination, per Regex-Scan auf
+  vietnamesische Diakritika gefunden), ein falscher Fachbegriff für
+  "Toolbar" (korrigiert auf "eszköztár", per Web-Recherche verifiziert),
+  ein unklarer Begriff für "Flow control" (Recherche zeigte: in der
+  ungarischen PuTTY-Community bleibt dieser Begriff meist unübersetzt —
+  übernommen). Qwen3.8 als Vergleichs-Referenz getestet (Nutzer-Vorschlag
+  für den Fall schwacher Gemma4-Qualität) — kompletter Fehlschlag (30 Min
+  Timeout, keine Ausgabe); auf Nutzerentscheidung hin blieb die manuell
+  korrigierte Gemma4-Fassung.
+- **Estnisch:** derselbe Halluzinations-Fehlertyp wie Ungarisch — "seire-"
+  (Überwachung) statt "jada-" (seriell) in drei Vorkommen von
+  "serieller Port", per Web-Recherche auf "jadaport" korrigiert.
+- **Maltesisch:** "Fenster" durchgehend mit einem erfundenen Wort
+  ("tielet") statt dem korrekten "tieqa" übersetzt (4 Vorkommen), "Ready."
+  als "Priest." fehlübersetzt, ein Wortgemisch ("għall-q lettura" statt
+  "għall-qari") — alle per Web-Recherche verifiziert und einzeln
+  korrigiert.
+- **Irisch:** durchgehend fehlerhafte/erfundene Begriffe über das ganze
+  Dokument verteilt (File/Edit/View/Quit/Settings falsch,
+  widersprüchliche Schreibweisen desselben Worts an verschiedenen
+  Stellen) — deutlich größerer Umfang als bei den anderen Sprachen, kein
+  punktuell behebbarer Einzelfund mehr. Dem Nutzer vorgelegt statt
+  eigenmächtig zu raten; Entscheidung: `komport_ga_IE.ts` bleibt
+  vollständig unübersetzt (Skeleton, 162/162 `unfinished`) — fällt zur
+  Laufzeit sauber auf den englischen Quelltext zurück, keine
+  Funktionseinbuße, spätere Vervollständigung (idealerweise mit
+  Muttersprachler-Prüfung) bleibt offen.
+
+Ergebnis: 23 von 24 EU-Amtssprachen vollständig übersetzt (162/162,
+Deutsch weiterhin mit 1 bewusst offenem Eintrag wie oben), Irisch
+bewusst als Skeleton zurückgestellt. Vollständige Liste in
+`CMakeLists.txt`s `KOMPORT_TS_FILES`. Build (`-Wall -Wextra`, keine
+neuen Warnungen), alle 9 `ctest`-Ziele grün, Offscreen-Smoketest über
+mehrere neue Locales (u.a. Griechisch als anderes Schriftsystem,
+Maltesisch als am stärksten manuell korrigierte Sprache, Irisch als
+unvollständige Sprache — überall sauberer Fallback, kein Absturz),
+echte `~/.config/Komport-Qt6/Komport-Qt6.conf` per md5sum unverändert.
+
+**Codex-Review-Funde (2 von 2, beide gefixt):**
+- **Tooling-Artefakte in 26 Übersetzungen:** der letzte Eintrag
+  ("Scheme:"/"Schema:"/... je nach Sprache) jeder betroffenen `.ts`-Datei
+  enthielt sichtbaren Text aus dem eigenen Übersetzungs-Tooling
+  (`EXIT:0` in 23 Dateien, `session_id: ...` in 3 weiteren) — ein
+  Regex-Parsing-Fehler im (nicht versionierten) `/tmp`-Hilfsskript, das
+  beim letzten Eintrag einer Gemma4-Antwort alles bis Dateiende statt
+  nur bis zum nächsten nummerierten Marker erfasste. Vor dem Review
+  unentdeckt, da die automatisierten Checks (Tastenkürzel, Fremdschrift-
+  Scan) genau diesen Fall nicht abdeckten. Direkt als eindeutiger,
+  ermessensfreier Datenfehler behoben (kein Übersetzungs-Ermessen
+  beteiligt, reine Artefakt-Entfernung) — abweichend vom sonst üblichen
+  "erst vorlegen, dann fixen"; dem Nutzer transparent gemeldet und auf
+  Bestätigung hin beibehalten.
+- **Locale-Fallback-Lücke:** `QTranslator::load()`s Dateinamen-Fallback
+  streicht bei einer Locale wie `fr_BE` schrittweise Endungen ab
+  (`komport_fr_BE` → `komport_fr`) — ein nur länderspezifisch benanntes
+  Katalog wie `komport_fr_FR.ts` ist für gleichsprachige Nutzer außerhalb
+  dieses einen Landes (fr_BE, nl_BE, sv_FI, de_AT, ...) unsichtbar,
+  obwohl die Übersetzung für ihre Sprache vollständig vorliegt. Gefixt
+  durch 22 zusätzliche sprachweite Alias-`.ts`-Dateien (`komport_fr.ts`,
+  `komport_nl.ts`, ...) — reine Kopien der jeweils einzigen
+  Länder-Variante mit angepasstem `<TS language="...">`-Attribut, keine
+  eigenständig gepflegte Übersetzung. Portugiesisch (zwei echte
+  Varianten: `pt_PT`/`pt_BR`) bekommt den Alias `komport_pt.ts` nach
+  Linux/KDE-Konvention von `pt_PT` (europäisches Portugiesisch) kopiert;
+  `pt_BR` bleibt eigenständig, da bewusst angelegt, keine Fallback-Lücke.
+  Irisch bekommt keinen Alias (Skeleton ohne Inhalt). Verifiziert per
+  Offscreen-Smoketest mit `fr_BE`/`nl_BE`/`sv_FI`/`pt_AO` — alle laden
+  jetzt die jeweilige Sprachübersetzung statt auf Englisch
+  zurückzufallen.
+
+Nach beiden Fixes erneut: Build (`-Wall -Wextra`, keine neuen
+Warnungen), alle 9 `ctest`-Ziele grün, echte
+`~/.config/Komport-Qt6/Komport-Qt6.conf` per md5sum unverändert.
+PR #9 auf Codeberg, gemergt.
+
+## 23. Meilenstein 7 — Retro-Computing- & Industrie-Zeichensatz-Übersetzung (2026-09-09)
+
+Eigenständiges Feature, unabhängig von den VT220/Farbschema-Meilensteinen
+4/5 — reine Byte-Ebene (vor der Terminal-Emulation), keine Überschneidung.
+Sitzt an der gleichen Stelle im Datenfluss wie der Hex-Monitor (roher
+RX/TX-Bytestrom), bevor `KomportEmulation` die Escape-Sequenzen
+interpretiert.
+
+Neue `KomportCharset`-Klasse, byte-basierte Übersetzung zwischen rohem
+seriellem Bytestrom und Terminal-Emulation (RX in `KomportEmulation::
+slotReceivedChar()`s `default:`-Zweig, TX in `slotKeyPressed()`/
+`slotSimKeyPressed()`/Makro-Text), vollständig in die Profilverwaltung
+integriert. Umgesetzt: CP437 (0x80-0xFF-Bereich) und PETSCII
+(ASCII-kompatibler Bereich + £/↑/← + C0-Steuerbereich als Identität).
+Bewusst nicht umgesetzt: "Amiga" (keine belastbare Quelle für die
+eigenständige Amiga-1.x-Zeichenbelegung, per Web-Recherche verifiziert
+statt geraten) und CP437s ikonischer 0x00-0x1F-Grafikbereich (echter
+Konflikt mit VT100-Steuercodes, siehe `TODO.md` Abschnitt 6.3) — beide
+Abweichungen vom ursprünglichen Spec-Umfang sind bewusste, dokumentierte
+Entscheidungen, keine übersehenen Lücken. Vier Codex-Review-Runden
+(`gpt-5.6-sol`, erste zusätzlich mit Gemma4-Gate) bis zur bestätigten
+Konvergenz ("no Medium or High issues found"), 14 Findings insgesamt,
+alle gefixt und verifiziert — u.a. eine Leerzeichen/NUL-Byte-Kollision
+im CP437-Rückwärts-Mapping, ein Profil-Leck-Bug derselben Klasse wie
+bei Meilenstein 5, mehrere stillschweigend-falsche-Byte-Fallbacks bei
+CP437/PETSCII, eine neue längenbasierte `KomportSerial::putStr()`-
+Überladung für korrekt übertragene eingebettete NUL-Bytes (echter
+Pty-Paar-Regressionstest via `openpty()`). `tests/tst_charset.cpp` neu.
+PR #6 auf Codeberg, gemergt.
+
+### 23.1 Nachtrag: benutzerdefinierte Zeichensätze ohne Code (2026-09-09)
+
+Nutzerwunsch: `KomportCharset` lädt zusätzlich beliebig viele
+`*.charset`-Dateien aus `customCharsetsDirectory()`
+(`~/.config/Komport-Qt6/charsets/` — der "Custom Charsets Folder..."-
+Button im Settings-Dialog öffnet ihn direkt), ohne Neubau nötig — siehe
+`TODO.md` Abschnitt 1 für Format und Details. Acht Codex-Review-Runden
+(`gpt-5.6-sol`) auf diesen Nachtrag, ~30 Findings insgesamt (u.a. zwei
+echte High-Bugs auf dem interaktiven RX/TX-Pfad: mehrdeutige
+Byte-zu-Zeichen-Zuordnungen in Custom-Tabellen, ein "?"-Platzhalter-
+Fallback, der bei manchen Tabellen selbst ein falsches Byte gesendet
+hätte), Runde 8 ohne neue Funde (Konvergenz bestätigt). PR #7 auf
+Codeberg, gemergt.
