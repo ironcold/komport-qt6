@@ -1,0 +1,75 @@
+# Name: ATASCII
+#
+# Atari 8-bit (400/800/XL/XE) character set, the safely mappable subset.
+# Source: Wikipedia "ATASCII" (raw table + its separate control-character
+# list, both cross-checked directly).
+# https://en.wikipedia.org/wiki/ATASCII
+#
+# Deliberately NOT included, same reasoning as the built-in CP437's
+# 0x00-0x1F scope reduction (TODO.md Abschnitt 6.3 - a real VT100 host
+# could legitimately send these same byte values meaning their standard
+# C0/control function, and KomportEmulation's slotReceivedChar() only
+# special-cases BEL/BS/HT/LF/CR/ESC, so anything else falls straight
+# into charset translation regardless of what a real device intended):
+# - 0x00-0x1A (except 0x60/0x7B below): ATASCII's own graphics glyphs
+#   for this range never collide with Atari's OWN control codes (Atari
+#   keeps its 16 control functions cleanly in separate byte positions -
+#   0x1B, 0x1C-0x1F, 0x7D-0x7F, 0x9B-0x9F, 0xFD-0xFF), but a *different*
+#   real serial host speaking plain ASCII/VT100 could still send these
+#   same bytes meaning VT/FF/SO/SI/DLE/etc. - same conflict class as
+#   CP437, excluded for the same reason.
+# - 0x1B, 0x1C-0x1F, 0x7D-0x7F, 0x9B-0x9F, 0xFD-0xFF: ATASCII's own 16
+#   control characters (Escape, cursor movement, Clear Screen, Delete,
+#   Tab, End-of-Line, Delete/Insert Line, Tab stops, Buzzer, Delete/
+#   Insert Character) - genuine control functions, not display
+#   characters, excluded for the same reason as 0x00-0x1A above. Note
+#   on 0x9B specifically: Wikipedia's own table nominally lists it as
+#   "U+000A LINE FEED", but KomportEmulation's control-code switch
+#   matches the *raw* incoming byte (0x9B), not a charset-translated
+#   result - mapping 0x9B here would not actually produce a working
+#   line break, only an invisible character occupying one cell, so it
+#   is excluded as non-functional rather than merely risky.
+# - 0x80-0xFF, all entries not listed below: ATASCII's "inverse video"
+#   range is almost entirely just the 0x00-0x7F glyphs redrawn in
+#   inverse colours, not a distinct character - not representable in
+#   this byte-to-single-Unicode-codepoint format at all (and mapping
+#   them to the same codepoint as their non-inverse original would
+#   only create an ambiguous byte<->character collision, triggering
+#   this project's own duplicate-mapping warning, for no real gain).
+#   The entries below are the exception: genuine distinct glyphs whose
+#   visual inverse happens to already be a separate standard Unicode
+#   character in its own right (e.g. the inverse of an upper-left
+#   triangle is visually a lower-right triangle, a different glyph).
+#
+# The two ASCII-range substitutions (backtick and left-brace replaced
+# by card-suit symbols):
+60=2666
+7B=2660
+# 0x80-0xFF entries with a genuinely distinct Unicode code point:
+82=258A
+88=25E4
+89=259B
+8A=25E5
+8B=2599
+8C=259F
+8D=2586
+# 0x8E and 0x96 are also genuinely distinct glyphs (U+1FB85 "upper
+# three quarters block", U+1FB8A "right three quarters block"), but
+# both code points are above 0xFFFF - this file format has no astral/
+# surrogate-pair support at all (see komportcharset.cpp's
+# loadCustomCharsetFile(), "no surrogate-pair/astral support"), so
+# they cannot be represented directly. Mapped to U+FFFD (REPLACEMENT
+# CHARACTER) instead of leaving them unlisted, on purpose: an unlisted
+# byte falls back to plain identity, which would display as a
+# plausible-looking but simply wrong Latin-1/control-picture character
+# (Codex review finding) rather than visibly signal "a real character
+# exists here that this file cannot show". Expect the app's own
+# duplicate-mapping warning for these two bytes when this file loads -
+# harmless and expected, since both intentionally share one target
+# code point.
+8E=FFFD
+8F=259C
+94=25D8
+96=FFFD
+95=2580
+99=2590

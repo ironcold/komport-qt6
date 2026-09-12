@@ -1,0 +1,167 @@
+# Name: Atari ST
+#
+# Atari ST character set (ST/STE/TT/Falcon ROM font), bytes 0x80-0xFF.
+# Source: Wikipedia "Atari ST character set" (raw table, cross-checked
+# against its cited Unicode Consortium CP437 mapping reference for the
+# handful of ambiguous/homoglyph code points noted below).
+# https://en.wikipedia.org/wiki/Atari_ST_character_set
+#
+# Structurally close to IBM CP437, but swaps CP437's box-drawing block
+# (176-223) for the Hebrew alphabet plus a different set of math/Greek
+# symbols - this file follows the Atari ST's own table, not CP437's.
+# Bytes 0x00-0x7F are plain ASCII (unlisted below, kept as identity).
+#
+# A few source bytes are documented homoglyphs/ambiguous in the original
+# hardware's own font (noted inline) - the codepoint chosen here is the
+# one the Wikipedia article lists as primary/canonical for that slot.
+80=00C7
+81=00FC
+82=00E9
+83=00E2
+84=00E4
+85=00E0
+86=00E5
+87=00E7
+88=00EA
+89=00EB
+8A=00E8
+8B=00EF
+8C=00EE
+8D=00EC
+8E=00C4
+8F=00C5
+90=00C9
+91=00E6
+92=00C6
+93=00F4
+94=00F6
+95=00F2
+96=00FB
+97=00F9
+98=00FF
+99=00D6
+9A=00DC
+9B=00A2
+9C=00A3
+9D=00A5
+# 0x9E: sharp S (ß) on Atari ST; CP437 uses this slot ambiguously for
+# sharp S vs. Greek beta - Atari ST's own table lists sharp S here.
+9E=00DF
+9F=0192
+A0=00E1
+A1=00ED
+A2=00F3
+A3=00FA
+A4=00F1
+A5=00D1
+A6=00AA
+A7=00BA
+A8=00BF
+A9=2310
+AA=00AC
+AB=00BD
+AC=00BC
+AD=00A1
+AE=00AB
+AF=00BB
+B0=00E3
+B1=00F5
+B2=00D8
+B3=00F8
+B4=0153
+B5=0152
+B6=00C0
+B7=00C3
+B8=00D5
+B9=00A8
+BA=00B4
+BB=2020
+BC=00B6
+BD=00A9
+BE=00AE
+BF=2122
+C0=0133
+C1=0132
+# 0xC2-0xD7: Hebrew alphabet, alef through tav.
+C2=05D0
+C3=05D1
+C4=05D2
+C5=05D3
+C6=05D4
+C7=05D5
+C8=05D6
+C9=05D7
+CA=05D8
+CB=05D9
+CC=05DB
+CD=05DC
+CE=05DE
+CF=05E0
+D0=05E1
+D1=05E2
+D2=05E4
+D3=05E6
+D4=05E7
+D5=05E8
+D6=05E9
+D7=05EA
+# 0xD8-0xDC: Hebrew final letter forms (nun, kaf, mem, pe, tsadi).
+D8=05DF
+D9=05DA
+DA=05DD
+DB=05E3
+DC=05E5
+DD=00A7
+DE=2227
+DF=221E
+E0=03B1
+# 0xE1: Greek beta on Atari ST; CP437 uses this slot ambiguously for
+# beta vs. sharp S (see 0x9E above).
+E1=03B2
+E2=0393
+# 0xE3: Greek pi; some period fonts rendered this ambiguously with the
+# n-ary product sign (U+220F) - pi is the table's primary mapping.
+E3=03C0
+# 0xE4: Greek sigma; also used historically for the n-ary summation
+# sign (U+2211) - sigma is the table's primary mapping.
+E4=03A3
+E5=03C3
+# 0xE6: micro sign / Greek mu homoglyph - micro sign is primary here.
+E6=00B5
+E7=03C4
+E8=03A6
+E9=0398
+# 0xEA: Greek omega; Unicode treats the ohm sign (U+2126) as equivalent
+# and recommends using omega for both - matches the table's choice.
+EA=03A9
+# 0xEB: Greek delta; also used historically as a stand-in for Icelandic
+# eth (U+00F0) or the partial-derivative sign (U+2202) - delta primary.
+EB=03B4
+# 0xEC: contour integral on Atari ST - note this differs from CP437,
+# which puts infinity here instead (Atari ST has infinity at 0xDF).
+EC=222E
+# 0xED: Greek phi symbol; also used historically for empty-set (U+2205)
+# or the diameter sign (U+2300) - phi symbol is the table's primary choice.
+ED=03D5
+# 0xEE: element-of sign; also used historically for Greek epsilon or,
+# later, the euro sign - element-of is the table's primary choice.
+EE=2208
+EF=2229
+F0=2261
+F1=00B1
+F2=2265
+F3=2264
+F4=2320
+F5=2321
+F6=00F7
+F7=2248
+F8=00B0
+F9=2022
+FA=00B7
+FB=221A
+FC=207F
+FD=00B2
+FE=00B3
+# 0xFF: macron; some period MS-DOS software instead used this slot for
+# a non-breaking space - macron is the table's primary mapping.
+FF=00AF

@@ -217,6 +217,155 @@ Vollständige technische Details/Rationale im Code-Kommentar von
 `KomportApp::reconcileCharsetSelectionAfterReload()`/
 `reconcileCharsetSelectionAfterReloadForAllWindows()` (`komport/komport.h`).
 
+### 1.1 Nachtrag: Beispiel-Zeichensätze für weitere Retrocomputer (2026-09-12)
+
+Nutzerwunsch: weitere Retrocomputer-Zeichensätze (Amiga als Ausgangspunkt,
+dann eine breitere Liste) über denselben `*.charset`-Mechanismus statt als
+fest eingebaute C++-Zeichensätze — keine Code-/Build-Änderung, keine
+eigene Review-Runde auf dem (bereits mehrfach gehärteten) Parser nötig.
+Geliefert als Beispieldateien unter `docs/example-charsets/` zum
+Reinkopieren, nicht automatisch aktiv.
+
+Rohrecherche sollte laut Nutzerwunsch wieder über Gemma4 laufen ("das wäre
+doch auch wieder eine Aufgabe für Gemma"); ein Testlauf mit einem
+Batch-Prompt über sieben Plattformen zeigte aber durchgehend unbrauchbare,
+teils offen selbstwidersprüchliche Fantasiewerte (u. a. eine komplett
+erfundene ATASCII-Satzzeichentabelle, eine Acorn/RISC-OS-Tabelle, die mit
+der echten Wikipedia-Quelltabelle praktisch an jeder einzelnen Byteposition
+nicht übereinstimmte, und zwei MSX-Einträge mit nicht existierenden
+Unicode-Zeichennamen) — deutlich über das hinausgehend, was noch mit ein,
+zwei Einzelkorrekturen zu retten gewesen wäre (anders als der
+Ungarisch-Fund in Meilenstein 6). Das komplette Batch-Ergebnis wurde
+verworfen; stattdessen direkte Web-Recherche gegen Primärquellen
+(Wikipedia-Artikel im rohen Wikitext-Format statt zusammengefasster Prosa,
+da Zusammenfassungen sich mehrfach als unzuverlässig herausstellten — u. a.
+zwei sich widersprechende Antworten zur selben Hebräisch-Buchstaben-Position
+im Atari-ST-Artikel) pro Plattform, jeder einzelne Bytewert verifiziert,
+keine Übernahme ungeprüfter Modellausgabe.
+
+**Ergebnis — sechs Zeichensätze mit echten, dokumentierten Quellen:**
+- **Atari ST** (`atari_st.charset`, 128 Einträge, 0x80-0xFF vollständig):
+  CP437-ähnlich, aber mit hebräischem Alphabet statt Box-Drawing und
+  eigenem Satz Mathematik-/Griechisch-Symbolen.
+- **ATASCII** (`atascii.charset`, 13 Einträge): stark reduziert gegenüber
+  der vollen Atari-8-Bit-Tabelle — dieselbe Scope-Reduktion wie bei
+  CP437 (Abschnitt 6.3) angewendet: Bytes, die auf echter Atari-Hardware
+  selbst zwar sauber von Grafik/Steuerzeichen getrennt sind, aber mit
+  denen ein *anderer* realer seriell angeschlossener VT100-Host
+  (Industrie-CLI, Cisco/Juniper etc.) Standard-C0-Steuerzeichen (VT, FF,
+  SO, SI, ...) meinen könnte, sind ausgelassen; ebenso ATASCIIs eigene
+  16 Steuerzeichen (Escape, Cursorbewegung, Clear Screen, ...) und der
+  "Inverse Video"-Bereich (0x80-0xFF), der fast durchgehend nur
+  Farbinvertierung ohne eigenständigen Unicode-Codepoint ist.
+- **ZX Spectrum** (`zx_spectrum.charset`, 131 Einträge, 128 davon
+  `U+FFFD`): drei echte ASCII-Abweichungen (↑/£/© statt ^/`/DEL) plus
+  der komplette 0x80-0xFF-Bereich auf `U+FFFD` gemappt statt
+  ausgelassen — die 16 ikonischen 2x2-Blockgrafikzeichen (0x80-0x8F)
+  sind in jeder gefundenen Quelle (Wikipedia, das offizielle
+  Sinclair-BASIC-Handbuch) nur als Bild dokumentiert, nie als
+  Text/Tabelle mit Codepoints (zu unsicher für eine Übernahme statt
+  Raten), der UDG-Bereich (0x90-0xA4) hat konstruktionsbedingt kein
+  universelles Mapping, und die BASIC-Token (0xA5-0xFF) stehen für ganze
+  Schlüsselwörter statt einzelner Zeichen — siehe Codex-Review-Fund
+  unten.
+- **Amstrad CPC** (`amstrad_cpc.charset`, 128 Einträge, 27 davon
+  `U+FFFD`): Box-Drawing, Griechisch, Piktogramme. 27 Positionen auf
+  `U+FFFD` gemappt statt ausgelassen, weil ihr echter, dokumentierter
+  Codepoint oberhalb von U+FFFF liegt (siehe unten) — siehe
+  Codex-Review-Fund unten.
+- **Acorn/RISC OS** (`acorn_risc_os.charset`, 32 Einträge, 2 davon
+  `U+FFFD`): Erweiterung von ISO-8859-1 im C1-Bereich (0x80-0x9F) um
+  echte Zeichen (Euro-Zeichen, typografische Anführungszeichen, Pfeile
+  für Scrollbalken, ...); zwei Positionen (astraler Codepoint bzw. ein
+  aus zwei Zeichen kombiniertes Hoch-/Tiefstellungs-Glyph ohne eigenen
+  Codepoint, von der Quelle selbst als "nicht für Unicode
+  vorgeschlagen" vermerkt) auf `U+FFFD` gemappt statt ausgelassen —
+  siehe Codex-Review-Fund unten.
+- **MSX International** (`msx_international.charset`, 128 Einträge, 14
+  davon `U+FFFD`): akzentuierte lateinische Buchstaben, Griechisch,
+  Box-Drawing. 13 astrale Positionen plus die Cursor-Markierung (0xFF,
+  laut Quelle keine echte Zeichenposition) auf `U+FFFD` gemappt statt
+  ausgelassen — siehe Codex-Review-Fund unten.
+
+**Vier Plattformen bewusst ohne Beispieldatei — nicht aus Quellenmangel,
+sondern weil der Mechanismus selbst nicht passt (siehe
+`docs/example-charsets/README.md` für die volle Begründung je Plattform):**
+- **Amiga:** Standard-Zeichensatz ist Byte-für-Byte ISO-8859-1; der
+  einzige "Unterschied" (0x7F als Diagonalstreifen statt leer) ist eine
+  reine Schriftart-Renderingfrage auf echter Hardware, kein
+  unterschiedliches Byte-Mapping — schon vollständig durch "Standard"
+  abgedeckt.
+- **Apple II/IIc/IIgs (MouseText):** auf echter Hardware ein
+  Moduswechsel, der `@`/A-Z/`[`/`\`/`]`/`^`/`_` durch Icons *ersetzt*
+  statt sie zu ergänzen — würde normale Großbuchstaben dauerhaft
+  unlesbar machen.
+- **BBC Micro:** Standard-Oberbyte-Bereich ist konstruktionsbedingt frei
+  belegbar (kein fester Mapping), Teletext/MODE 7 kodiert Farbe/
+  Blinken als inline-Steuerbytes im Textstrom selbst, kein einfaches
+  Byte-zu-Zeichen-Schema.
+- **TRS-80:** druckbarer Bereich ist reines ASCII ohne Abweichungen;
+  die "Squot"-Blockgrafiken liegen komplett im astralen Unicode-Bereich
+  (nicht darstellbar, siehe unten); 0xC0-0xFF ist ein
+  Leerzeichen-Lauflängen-Kodierungsschema, keine Zeichen.
+
+**Wiederkehrende Format-Grenze: keine astralen Codepoints.** Das
+`*.charset`-Dateiformat unterstützt nur Codepoints bis `FFFF`
+(`loadCustomCharsetFile()` lehnt alles darüber explizit ab, "no
+surrogate-pair/astral support"). Mehrere echte, gut dokumentierte
+Zeichen auf Amstrad CPC, MSX und TRS-80 liegen im neueren
+Unicode-Block "Symbols for Legacy Computing" (U+1FB00+, seit
+Unicode 13.0) und damit oberhalb dieser Grenze — pro betroffener Datei
+einzeln im Kopfkommentar vermerkt, nicht stillschweigend ausgelassen.
+
+**Codex-Review-Fund (gefixt):** die ursprüngliche Fassung ließ nicht
+darstellbare Bytes komplett unaufgeführt, was auf Identität zurückfällt
+— für ASCII-Bereiche korrekt (z. B. CP437s 0x00-0x7F), hier aber
+irreführend: ein ausgelassenes MSX-Byte 0xC3 hätte z. B. als "Ã"
+angezeigt, ein plausibel aussehender, aber schlicht falscher
+Latin-1-Buchstabe, statt sichtbar zu signalisieren, dass dort ein
+echtes (nur nicht darstellbares) Zeichen steht. Gefixt durch explizites
+Mapping aller betroffenen Bytes auf `U+FFFD` (REPLACEMENT CHARACTER)
+in allen fünf betroffenen Dateien (Atari ST hat keine ausgelassenen
+Bytes) — reine Datenänderung, kein C++-Code nötig. Bytes, die
+stattdessen bewusst als Identität stehen bleiben (ATASCIIs
+VT100-Steuercode-Konflikt-Bereich, analog zu CP437 Abschnitt 6.3),
+wurden **nicht** umgestellt — Identität ist dort die absichtlich
+sichere Wahl (ein anderer realer Host könnte diese Bytes tatsächlich
+als Steuercode meinen; `U+FFFD` wäre dort selbst wieder unerwünscht
+sichtbarer Datenmüll). Nebeneffekt: mehrere Bytes pro Datei teilen sich
+jetzt denselben Ziel-Codepoint, was die bereits bestehende
+Doppel-Mapping-Warnung des Parsers auslöst (erwartet, harmlos, in jeder
+betroffenen Datei im Kopfkommentar dokumentiert) — nicht mit einem
+echten Fehler zu verwechseln.
+
+**Nebenbefund beim Verifizieren dieses Fixes:** die ursprüngliche
+Offscreen-Smoketest-Methode (Prozess im Hintergrund starten, kurz
+warten, `kill` senden, danach die mitgeschnittene Ausgabe prüfen) hatte
+einen blinden Fleck — `qWarning()`-Text landet im internen
+stdio-Puffer, der bei `kill`/SIGTERM (kein sauberes `exit()`) nie
+geflusht wird, wenn `stderr` nicht an ein echtes Terminal hängt (bei
+einer Datei-Umleitung im Hintergrund immer der Fall). Der Prozess lief
+in Wahrheit korrekt und crashte nicht, aber jede `qWarning()`-Ausgabe
+ging beim Beenden verloren — alle bisherigen "keine `qWarning()`-
+Ausgabe"-Aussagen in diesem Abschnitt (vor diesem Fund) waren dadurch
+unbeabsichtigt ungeprüft, nicht falsch verifiziert als richtig.
+Aufgedeckt durch einen gezielten Test mit `QT_FATAL_WARNINGS=1` (der
+Prozess crashte sofort bei der ersten `qWarning()` — bewies, dass der
+Code-Pfad lief, obwohl die Log-Datei leer blieb). Behoben durch ein
+Pseudo-Terminal (`script -qec "timeout 3 <binary>" <logfile>`) statt
+Hintergrund+kill — damit verhält sich `stderr` wie ein echtes Terminal
+und flusht normal. Alle sechs Dateien (einzeln und gemeinsam) mit dieser
+korrigierten Methode neu verifiziert: exakt die erwarteten
+Doppel-Mapping-Warnungen (1/27/0/1/13/127, Summe 169 bei allen sechs
+gemeinsam), keine unerwartete Warnung, kein Parse-Fehler.
+
+Build weiterhin sauber (`-Wall -Wextra`, keine neuen Warnungen), alle 9
+`ctest`-Ziele grün, echte `~/.config/Komport-Qt6/Komport-Qt6.conf` per
+md5sum unverändert. Reine Datenänderung (Dateien unter `docs/`,
+Doku-Updates) — kein C++-Code geändert, kein Review-Zyklus auf dem
+Parser selbst nötig (der ist bereits über vier Runden gehärtet, siehe
+oben).
+
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 
 - `KomportDoc::openDocument/saveDocument` waren im Original bereits reine

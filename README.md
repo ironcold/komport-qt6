@@ -50,6 +50,8 @@ Komport-Qt6 comes with **IBM CP437** and **PETSCII** built in, selectable from t
 
 That's the whole mechanism — anyone can extend the character-set list on their own, for whatever oddball encoding their hardware happens to speak.
 
+**Ready-made retro-computer examples:** [`docs/example-charsets/`](docs/example-charsets/) ships verified `*.charset` files for Atari ST, Atari 8-bit (ATASCII), Sinclair ZX Spectrum, Amstrad CPC, Acorn Archimedes/RISC OS, and MSX (International) — just copy the one you want into your custom-charsets folder. Its own README also explains which well-known retro platforms (Amiga, Apple II MouseText, BBC Micro, TRS-80) were deliberately left out, and why.
+
 ---
 
 ## 📦 Installation (Ubuntu / Debian-based)

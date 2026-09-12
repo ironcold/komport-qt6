@@ -1,0 +1,165 @@
+# Name: Amstrad CPC
+#
+# Amstrad CPC (464/664/6128 etc.) firmware character set, bytes
+# 0x80-0xFF - block/box-drawing graphics, accented letters, Greek
+# letters, card suits, and a handful of pictograms. 0x00-0x7F is plain
+# ASCII (unlisted below, kept as identity); entirely above the 7-bit
+# ASCII range, so unlike CP437/ATASCII this whole block carries none of
+# their VT100-control-code conflict risk (see TODO.md Abschnitt 6.3).
+# 0x80-0x9F doubles as the ISO/ECMA-48 "C1" 8-bit control range in some
+# other 8-bit-terminal contexts, same as the Acorn/RISC OS charset in
+# this same folder - KomportEmulation does not implement any C1 control
+# function today regardless of charset, so this does not newly break a
+# working control function, only makes some previously-invisible bytes
+# visible as CPC characters instead.
+#
+# Source: Wikipedia "Amstrad CPC character set" (raw table).
+# https://en.wikipedia.org/wiki/Amstrad_CPC_character_set
+#
+# 27 bytes - all of 0xC0-0xCA, 0xCE, all of 0xD8-0xDF, 0xEF, and
+# 0xF8-0xFD - map to U+FFFD (REPLACEMENT CHARACTER) rather than a real
+# glyph: the source's own table assigns them real, distinct glyphs, but
+# every one of those specific code points lies in Unicode's "Symbols
+# for Legacy Computing" block (added in Unicode 13.0-16.0) and is above
+# 0xFFFF - this file format has no astral/surrogate-pair support at all
+# (see komportcharset.cpp's loadCustomCharsetFile(), "no surrogate-pair/
+# astral support"), so none of them can be represented directly. (Three
+# of these - 0xEF, 0xFC, 0xFD - had no Unicode assignment whatsoever
+# before Unicode 16.0, per the source article; the rest are simply out
+# of this format's representable range for an unrelated reason.)
+# All 27 are mapped to U+FFFD instead of left unlisted, on purpose: an
+# unlisted byte falls back to plain identity, which would display as a
+# plausible-looking but simply wrong Latin-1/control-picture character
+# (Codex review finding) rather than visibly signal "a real character
+# exists here that this file cannot show". Expect the app's own
+# duplicate-mapping warning for these 27 bytes when this file loads -
+# harmless and expected, since they intentionally share one target
+# code point.
+80=00A0
+81=2598
+82=259D
+83=2580
+84=2596
+85=258C
+86=259E
+87=259B
+88=2597
+89=259A
+8A=2590
+8B=259C
+8C=2584
+8D=2599
+8E=259F
+8F=2588
+90=00B7
+91=2575
+92=2576
+93=2514
+94=2577
+95=2502
+96=250C
+97=251C
+98=2574
+99=2518
+9A=2500
+9B=2534
+9C=2510
+9D=2524
+9E=252C
+9F=253C
+A0=005E
+A1=00B4
+A2=00A8
+A3=00A3
+A4=00A9
+A5=00B6
+A6=00A7
+A7=2018
+A8=00BC
+A9=00BD
+AA=00BE
+AB=00B1
+AC=00F7
+AD=00AC
+AE=00BF
+AF=00A1
+B0=03B1
+B1=03B2
+B2=03B3
+B3=03B4
+B4=03B5
+B5=03B8
+B6=03BB
+B7=03BC
+B8=03C0
+B9=03C3
+BA=03C6
+BB=03C8
+BC=03C7
+BD=03C9
+BE=03A3
+BF=03A9
+C0=FFFD
+C1=FFFD
+C2=FFFD
+C3=FFFD
+C4=FFFD
+C5=FFFD
+C6=FFFD
+C7=FFFD
+C8=FFFD
+C9=FFFD
+CA=FFFD
+CB=2573
+CC=2571
+CD=2572
+CE=FFFD
+CF=2592
+D0=2594
+D1=2595
+D2=2581
+D3=258F
+D4=25E4
+D5=25E5
+D6=25E2
+D7=25E3
+D8=FFFD
+D9=FFFD
+DA=FFFD
+DB=FFFD
+DC=FFFD
+DD=FFFD
+DE=FFFD
+DF=FFFD
+E0=263A
+E1=2639
+E2=2663
+E3=2666
+E4=2665
+E5=2660
+E6=25CB
+E7=25CF
+E8=25A1
+E9=25A0
+EA=2642
+EB=2640
+EC=2669
+ED=266A
+EE=263C
+EF=FFFD
+F0=2B61
+F1=2B63
+F2=2B60
+F3=2B62
+F4=25B2
+F5=25BC
+F6=25B6
+F7=25C0
+F8=FFFD
+F9=FFFD
+FA=FFFD
+FB=FFFD
+FC=FFFD
+FD=FFFD
+FE=2B65
+FF=2B64

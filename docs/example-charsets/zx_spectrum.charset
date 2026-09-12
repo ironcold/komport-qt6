@@ -1,0 +1,172 @@
+# Name: ZX Spectrum
+#
+# Sinclair ZX Spectrum character set - the only three bytes that differ
+# from plain US-ASCII in the printable 0x20-0x7F range.
+# Source: Wikipedia "ZX Spectrum character set" (quoted directly: "code
+# point 0x5E is an up-arrow (up arrow) instead of a caret (^), 0x60 is
+# the pound sign (GBP) instead of the grave accent (`), and 0x7F is the
+# copyright sign (C) instead of the control character DEL").
+# https://en.wikipedia.org/wiki/ZX_Spectrum_character_set
+#
+# The entire 0x80-0xFF range maps to U+FFFD (REPLACEMENT CHARACTER)
+# rather than a real glyph, for three different underlying reasons (same
+# "leave out rather than guess" policy as the built-in CP437/PETSCII
+# charsets, see TODO.md Abschnitt 6.3):
+# - 0x80-0x8F: the 16 iconic 2x2 block-graphics characters. Their
+#   general existence and Unicode Block Elements equivalents are well
+#   documented, but every source found (Wikipedia, the official
+#   Sinclair BASIC manual's own character-set appendix, ROM/font
+#   ripper projects) shows the exact byte-to-quadrant assignment only
+#   as an image, never as text/a table of code points - nothing
+#   verifiable enough to transcribe with confidence instead of
+#   guessing a plausible-looking but possibly mirrored/rotated order.
+# - 0x90-0xA4: User-Defined Graphics (UDG) - by design there is no
+#   universal glyph here at all; real Spectrum software POKEs its own
+#   bitmap into this range, so no single correct mapping could exist
+#   even in principle.
+# - 0xA5-0xFF: tokenized BASIC keywords (PRINT, SAVE, LOAD, ...). Not
+#   representable in this file format at all - each entry here is one
+#   byte to exactly one display character, but a BASIC token byte
+#   stands for a whole keyword (multiple characters), not a single
+#   glyph.
+# All three cases are mapped to U+FFFD instead of left unlisted, on
+# purpose: an unlisted byte falls back to plain identity, which would
+# display as an invisible control-picture character - silently implying
+# nothing special is there, when a real Spectrum genuinely shows
+# *something* (a graphic, a user-defined glyph, a whole keyword) at
+# every one of these positions (Codex review finding, applied here even
+# though none of these three ranges hit the format's astral-codepoint
+# limit specifically). Expect the app's own duplicate-mapping warning
+# for this whole range when this file loads - harmless and expected,
+# since all 128 bytes intentionally share one target code point.
+5E=2191
+60=00A3
+7F=00A9
+80=FFFD
+81=FFFD
+82=FFFD
+83=FFFD
+84=FFFD
+85=FFFD
+86=FFFD
+87=FFFD
+88=FFFD
+89=FFFD
+8A=FFFD
+8B=FFFD
+8C=FFFD
+8D=FFFD
+8E=FFFD
+8F=FFFD
+90=FFFD
+91=FFFD
+92=FFFD
+93=FFFD
+94=FFFD
+95=FFFD
+96=FFFD
+97=FFFD
+98=FFFD
+99=FFFD
+9A=FFFD
+9B=FFFD
+9C=FFFD
+9D=FFFD
+9E=FFFD
+9F=FFFD
+A0=FFFD
+A1=FFFD
+A2=FFFD
+A3=FFFD
+A4=FFFD
+A5=FFFD
+A6=FFFD
+A7=FFFD
+A8=FFFD
+A9=FFFD
+AA=FFFD
+AB=FFFD
+AC=FFFD
+AD=FFFD
+AE=FFFD
+AF=FFFD
+B0=FFFD
+B1=FFFD
+B2=FFFD
+B3=FFFD
+B4=FFFD
+B5=FFFD
+B6=FFFD
+B7=FFFD
+B8=FFFD
+B9=FFFD
+BA=FFFD
+BB=FFFD
+BC=FFFD
+BD=FFFD
+BE=FFFD
+BF=FFFD
+C0=FFFD
+C1=FFFD
+C2=FFFD
+C3=FFFD
+C4=FFFD
+C5=FFFD
+C6=FFFD
+C7=FFFD
+C8=FFFD
+C9=FFFD
+CA=FFFD
+CB=FFFD
+CC=FFFD
+CD=FFFD
+CE=FFFD
+CF=FFFD
+D0=FFFD
+D1=FFFD
+D2=FFFD
+D3=FFFD
+D4=FFFD
+D5=FFFD
+D6=FFFD
+D7=FFFD
+D8=FFFD
+D9=FFFD
+DA=FFFD
+DB=FFFD
+DC=FFFD
+DD=FFFD
+DE=FFFD
+DF=FFFD
+E0=FFFD
+E1=FFFD
+E2=FFFD
+E3=FFFD
+E4=FFFD
+E5=FFFD
+E6=FFFD
+E7=FFFD
+E8=FFFD
+E9=FFFD
+EA=FFFD
+EB=FFFD
+EC=FFFD
+ED=FFFD
+EE=FFFD
+EF=FFFD
+F0=FFFD
+F1=FFFD
+F2=FFFD
+F3=FFFD
+F4=FFFD
+F5=FFFD
+F6=FFFD
+F7=FFFD
+F8=FFFD
+F9=FFFD
+FA=FFFD
+FB=FFFD
+FC=FFFD
+FD=FFFD
+FE=FFFD
+FF=FFFD
