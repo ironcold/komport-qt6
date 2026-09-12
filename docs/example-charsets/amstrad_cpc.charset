@@ -16,17 +16,25 @@
 # Source: Wikipedia "Amstrad CPC character set" (raw table).
 # https://en.wikipedia.org/wiki/Amstrad_CPC_character_set
 #
-# A large number of bytes - all of 0xC0-0xCA, 0xCE, all of 0xD8-0xDF,
-# 0xEF, and 0xF8-0xFD - are deliberately NOT included: the source's own
-# table assigns them real, distinct glyphs, but every one of those
-# specific code points lies in Unicode's "Symbols for Legacy Computing"
-# block (added in Unicode 13.0-16.0) and is above 0xFFFF - this file
-# format has no astral/surrogate-pair support at all (see
-# komportcharset.cpp's loadCustomCharsetFile(), "no surrogate-pair/
-# astral support"), so none of them can be represented here. (Three of
-# these - 0xEF, 0xFC, 0xFD - had no Unicode assignment whatsoever before
-# Unicode 16.0, per the source article; the rest are simply out of this
-# format's representable range for an unrelated reason.)
+# 27 bytes - all of 0xC0-0xCA, 0xCE, all of 0xD8-0xDF, 0xEF, and
+# 0xF8-0xFD - map to U+FFFD (REPLACEMENT CHARACTER) rather than a real
+# glyph: the source's own table assigns them real, distinct glyphs, but
+# every one of those specific code points lies in Unicode's "Symbols
+# for Legacy Computing" block (added in Unicode 13.0-16.0) and is above
+# 0xFFFF - this file format has no astral/surrogate-pair support at all
+# (see komportcharset.cpp's loadCustomCharsetFile(), "no surrogate-pair/
+# astral support"), so none of them can be represented directly. (Three
+# of these - 0xEF, 0xFC, 0xFD - had no Unicode assignment whatsoever
+# before Unicode 16.0, per the source article; the rest are simply out
+# of this format's representable range for an unrelated reason.)
+# All 27 are mapped to U+FFFD instead of left unlisted, on purpose: an
+# unlisted byte falls back to plain identity, which would display as a
+# plausible-looking but simply wrong Latin-1/control-picture character
+# (Codex review finding) rather than visibly signal "a real character
+# exists here that this file cannot show". Expect the app's own
+# duplicate-mapping warning for these 27 bytes when this file loads -
+# harmless and expected, since they intentionally share one target
+# code point.
 80=00A0
 81=2598
 82=259D
@@ -91,9 +99,21 @@ BC=03C7
 BD=03C9
 BE=03A3
 BF=03A9
+C0=FFFD
+C1=FFFD
+C2=FFFD
+C3=FFFD
+C4=FFFD
+C5=FFFD
+C6=FFFD
+C7=FFFD
+C8=FFFD
+C9=FFFD
+CA=FFFD
 CB=2573
 CC=2571
 CD=2572
+CE=FFFD
 CF=2592
 D0=2594
 D1=2595
@@ -103,6 +123,14 @@ D4=25E4
 D5=25E5
 D6=25E2
 D7=25E3
+D8=FFFD
+D9=FFFD
+DA=FFFD
+DB=FFFD
+DC=FFFD
+DD=FFFD
+DE=FFFD
+DF=FFFD
 E0=263A
 E1=2639
 E2=2663
@@ -118,6 +146,7 @@ EB=2640
 EC=2669
 ED=266A
 EE=263C
+EF=FFFD
 F0=2B61
 F1=2B63
 F2=2B60
@@ -126,5 +155,11 @@ F4=25B2
 F5=25BC
 F6=25B6
 F7=25C0
+F8=FFFD
+F9=FFFD
+FA=FFFD
+FB=FFFD
+FC=FFFD
+FD=FFFD
 FE=2B65
 FF=2B64

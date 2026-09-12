@@ -257,27 +257,35 @@ keine Übernahme ungeprüfter Modellausgabe.
   16 Steuerzeichen (Escape, Cursorbewegung, Clear Screen, ...) und der
   "Inverse Video"-Bereich (0x80-0xFF), der fast durchgehend nur
   Farbinvertierung ohne eigenständigen Unicode-Codepoint ist.
-- **ZX Spectrum** (`zx_spectrum.charset`, 3 Einträge): nur die drei
-  echten ASCII-Abweichungen (↑/£/© statt ^/`/DEL) — die 16 ikonischen
-  2x2-Blockgrafikzeichen (0x80-0x8F) sind in jeder gefundenen Quelle
-  (Wikipedia, das offizielle Sinclair-BASIC-Handbuch) nur als Bild
-  dokumentiert, nie als Text/Tabelle mit Codepoints — zu unsicher für
-  eine Übernahme statt Raten, daher ausgelassen.
-- **Amstrad CPC** (`amstrad_cpc.charset`, 101 von 128 Einträgen):
-  Box-Drawing, Griechisch, Piktogramme. 27 Positionen ausgelassen, weil
-  ihr echter, dokumentierter Codepoint oberhalb von U+FFFF liegt (siehe
-  unten).
-- **Acorn/RISC OS** (`acorn_risc_os.charset`, 30 von 32 Einträgen):
-  Erweiterung von ISO-8859-1 im C1-Bereich (0x80-0x9F) um echte
-  Zeichen (Euro-Zeichen, typografische Anführungszeichen, Pfeile für
-  Scrollbalken, ...); zwei Positionen ausgelassen (astraler Codepoint
-  bzw. ein aus zwei Zeichen kombiniertes Hoch-/Tiefstellungs-Glyph ohne
-  eigenen Codepoint, von der Quelle selbst als "nicht für Unicode
-  vorgeschlagen" vermerkt).
-- **MSX International** (`msx_international.charset`, 114 von 128
-  Einträgen): akzentuierte lateinische Buchstaben, Griechisch,
-  Box-Drawing. 13 astrale Positionen plus die Cursor-Markierung
-  (0xFF, laut Quelle keine echte Zeichenposition) ausgelassen.
+- **ZX Spectrum** (`zx_spectrum.charset`, 131 Einträge, 128 davon
+  `U+FFFD`): drei echte ASCII-Abweichungen (↑/£/© statt ^/`/DEL) plus
+  der komplette 0x80-0xFF-Bereich auf `U+FFFD` gemappt statt
+  ausgelassen — die 16 ikonischen 2x2-Blockgrafikzeichen (0x80-0x8F)
+  sind in jeder gefundenen Quelle (Wikipedia, das offizielle
+  Sinclair-BASIC-Handbuch) nur als Bild dokumentiert, nie als
+  Text/Tabelle mit Codepoints (zu unsicher für eine Übernahme statt
+  Raten), der UDG-Bereich (0x90-0xA4) hat konstruktionsbedingt kein
+  universelles Mapping, und die BASIC-Token (0xA5-0xFF) stehen für ganze
+  Schlüsselwörter statt einzelner Zeichen — siehe Codex-Review-Fund
+  unten.
+- **Amstrad CPC** (`amstrad_cpc.charset`, 128 Einträge, 27 davon
+  `U+FFFD`): Box-Drawing, Griechisch, Piktogramme. 27 Positionen auf
+  `U+FFFD` gemappt statt ausgelassen, weil ihr echter, dokumentierter
+  Codepoint oberhalb von U+FFFF liegt (siehe unten) — siehe
+  Codex-Review-Fund unten.
+- **Acorn/RISC OS** (`acorn_risc_os.charset`, 32 Einträge, 2 davon
+  `U+FFFD`): Erweiterung von ISO-8859-1 im C1-Bereich (0x80-0x9F) um
+  echte Zeichen (Euro-Zeichen, typografische Anführungszeichen, Pfeile
+  für Scrollbalken, ...); zwei Positionen (astraler Codepoint bzw. ein
+  aus zwei Zeichen kombiniertes Hoch-/Tiefstellungs-Glyph ohne eigenen
+  Codepoint, von der Quelle selbst als "nicht für Unicode
+  vorgeschlagen" vermerkt) auf `U+FFFD` gemappt statt ausgelassen —
+  siehe Codex-Review-Fund unten.
+- **MSX International** (`msx_international.charset`, 128 Einträge, 14
+  davon `U+FFFD`): akzentuierte lateinische Buchstaben, Griechisch,
+  Box-Drawing. 13 astrale Positionen plus die Cursor-Markierung (0xFF,
+  laut Quelle keine echte Zeichenposition) auf `U+FFFD` gemappt statt
+  ausgelassen — siehe Codex-Review-Fund unten.
 
 **Vier Plattformen bewusst ohne Beispieldatei — nicht aus Quellenmangel,
 sondern weil der Mechanismus selbst nicht passt (siehe
@@ -309,13 +317,54 @@ Unicode-Block "Symbols for Legacy Computing" (U+1FB00+, seit
 Unicode 13.0) und damit oberhalb dieser Grenze — pro betroffener Datei
 einzeln im Kopfkommentar vermerkt, nicht stillschweigend ausgelassen.
 
-Jede Datei einzeln validiert (Format-Check gegen dieselben Regeln wie
-der echte Parser: Byte/Codepoint-Bereich, Surrogate-Ausschluss, keine
-doppelten Ziel-Codepoints) und per Offscreen-Smoketest geladen (einzeln
-und alle sechs gemeinsam) — keine `qWarning()`-Ausgabe, kein Absturz.
-Reine Datenänderung (neue Dateien unter `docs/`, Doku-Updates) — kein
-C++-Code geändert, kein Review-Zyklus auf dem Parser nötig (der ist
-bereits über vier Runden gehärtet, siehe oben).
+**Codex-Review-Fund (gefixt):** die ursprüngliche Fassung ließ nicht
+darstellbare Bytes komplett unaufgeführt, was auf Identität zurückfällt
+— für ASCII-Bereiche korrekt (z. B. CP437s 0x00-0x7F), hier aber
+irreführend: ein ausgelassenes MSX-Byte 0xC3 hätte z. B. als "Ã"
+angezeigt, ein plausibel aussehender, aber schlicht falscher
+Latin-1-Buchstabe, statt sichtbar zu signalisieren, dass dort ein
+echtes (nur nicht darstellbares) Zeichen steht. Gefixt durch explizites
+Mapping aller betroffenen Bytes auf `U+FFFD` (REPLACEMENT CHARACTER)
+in allen fünf betroffenen Dateien (Atari ST hat keine ausgelassenen
+Bytes) — reine Datenänderung, kein C++-Code nötig. Bytes, die
+stattdessen bewusst als Identität stehen bleiben (ATASCIIs
+VT100-Steuercode-Konflikt-Bereich, analog zu CP437 Abschnitt 6.3),
+wurden **nicht** umgestellt — Identität ist dort die absichtlich
+sichere Wahl (ein anderer realer Host könnte diese Bytes tatsächlich
+als Steuercode meinen; `U+FFFD` wäre dort selbst wieder unerwünscht
+sichtbarer Datenmüll). Nebeneffekt: mehrere Bytes pro Datei teilen sich
+jetzt denselben Ziel-Codepoint, was die bereits bestehende
+Doppel-Mapping-Warnung des Parsers auslöst (erwartet, harmlos, in jeder
+betroffenen Datei im Kopfkommentar dokumentiert) — nicht mit einem
+echten Fehler zu verwechseln.
+
+**Nebenbefund beim Verifizieren dieses Fixes:** die ursprüngliche
+Offscreen-Smoketest-Methode (Prozess im Hintergrund starten, kurz
+warten, `kill` senden, danach die mitgeschnittene Ausgabe prüfen) hatte
+einen blinden Fleck — `qWarning()`-Text landet im internen
+stdio-Puffer, der bei `kill`/SIGTERM (kein sauberes `exit()`) nie
+geflusht wird, wenn `stderr` nicht an ein echtes Terminal hängt (bei
+einer Datei-Umleitung im Hintergrund immer der Fall). Der Prozess lief
+in Wahrheit korrekt und crashte nicht, aber jede `qWarning()`-Ausgabe
+ging beim Beenden verloren — alle bisherigen "keine `qWarning()`-
+Ausgabe"-Aussagen in diesem Abschnitt (vor diesem Fund) waren dadurch
+unbeabsichtigt ungeprüft, nicht falsch verifiziert als richtig.
+Aufgedeckt durch einen gezielten Test mit `QT_FATAL_WARNINGS=1` (der
+Prozess crashte sofort bei der ersten `qWarning()` — bewies, dass der
+Code-Pfad lief, obwohl die Log-Datei leer blieb). Behoben durch ein
+Pseudo-Terminal (`script -qec "timeout 3 <binary>" <logfile>`) statt
+Hintergrund+kill — damit verhält sich `stderr` wie ein echtes Terminal
+und flusht normal. Alle sechs Dateien (einzeln und gemeinsam) mit dieser
+korrigierten Methode neu verifiziert: exakt die erwarteten
+Doppel-Mapping-Warnungen (1/27/0/1/13/127, Summe 169 bei allen sechs
+gemeinsam), keine unerwartete Warnung, kein Parse-Fehler.
+
+Build weiterhin sauber (`-Wall -Wextra`, keine neuen Warnungen), alle 9
+`ctest`-Ziele grün, echte `~/.config/Komport-Qt6/Komport-Qt6.conf` per
+md5sum unverändert. Reine Datenänderung (Dateien unter `docs/`,
+Doku-Updates) — kein C++-Code geändert, kein Review-Zyklus auf dem
+Parser selbst nötig (der ist bereits über vier Runden gehärtet, siehe
+oben).
 
 ## 6. Bekannte, bewusst nicht behobene Altlasten (vom Original übernommen)
 

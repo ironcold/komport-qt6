@@ -41,18 +41,48 @@ starten — der neue Eintrag erscheint im Zeichensatz-Dropdown.
 | `msx_international.charset` | MSX (International/European variant) |
 
 Every file's header comment names its source and explains exactly which
-bytes were left out and why (real documented control-code conflicts, a
-format limitation, or a genuinely ambiguous/undocumented source value)
-— **none of these tables were guessed**, following the same "research
-it properly, or leave it out" rule used for this project's UI
-translations.
+bytes couldn't be shown as their real character and why (a format
+limitation, or a genuinely ambiguous/undocumented source value) —
+**none of these tables were guessed**, following the same "research it
+properly, or leave it out" rule used for this project's UI
+translations. Bytes with a real, documented glyph this format simply
+cannot encode (see the astral-code-point note below) are explicitly
+mapped to `U+FFFD` (the standard Unicode "replacement character")
+rather than left unlisted — an unlisted byte falls back to plain
+identity, which would display as a plausible-looking but simply wrong
+Latin-1 letter instead of visibly signalling "something real belongs
+here". You'll see this file format's own duplicate-mapping warning when
+loading one of these files as a result (several bytes intentionally
+share the `U+FFFD` target) — expected and harmless. The one exception:
+bytes deliberately left as plain identity because a *different* real
+serial device might genuinely mean a standard control code by that same
+byte value (documented per-file, same reasoning as the built-in CP437
+charset's own scope reduction, see `TODO.md` section 6.3) — for those,
+identity is the intentionally safe choice, and `U+FFFD` would be
+exactly as wrong as the original glyph would have been.
 
 Jede Datei benennt in ihrem Kopfkommentar die Quelle und erklärt genau,
-welche Bytes warum ausgelassen wurden (echte dokumentierte
-Steuercode-Konflikte, eine Formatgrenze, oder ein wirklich unklarer/
-unbelegter Quellwert) — **keine dieser Tabellen wurde geraten**, nach
-derselben "richtig recherchieren, sonst auslassen"-Regel wie bei den
-UI-Übersetzungen dieses Projekts.
+welche Bytes nicht als ihr echtes Zeichen dargestellt werden können und
+warum (eine Formatgrenze, oder ein wirklich unklarer/unbelegter
+Quellwert) — **keine dieser Tabellen wurde geraten**, nach derselben
+"richtig recherchieren, sonst auslassen"-Regel wie bei den
+UI-Übersetzungen dieses Projekts. Bytes mit einem echten, dokumentierten
+Zeichen, das dieses Format schlicht nicht kodieren kann (siehe den
+Astral-Codepoint-Hinweis unten), werden explizit auf `U+FFFD` (das
+Standard-Unicode-"Replacement Character") gemappt statt unaufgeführt zu
+bleiben — ein unaufgeführtes Byte fällt auf reine Identität zurück, was
+als plausibel aussehender, aber schlicht falscher Latin-1-Buchstabe
+angezeigt würde, statt sichtbar zu signalisieren "hier gehört etwas
+Echtes hin". Beim Laden einer dieser Dateien erscheint deshalb die
+eigene Doppel-Mapping-Warnung dieses Dateiformats (mehrere Bytes teilen
+sich absichtlich das Ziel `U+FFFD`) — erwartet und harmlos. Die eine
+Ausnahme: Bytes, die bewusst als reine Identität stehen bleiben, weil
+ein *anderes* reales seriell angeschlossenes Gerät mit demselben
+Bytewert tatsächlich einen Standard-Steuercode meinen könnte
+(pro Datei dokumentiert, dieselbe Begründung wie die Scope-Reduktion
+des eingebauten CP437-Zeichensatzes selbst, siehe `TODO.md` Abschnitt
+6.3) — dort ist Identität die absichtlich sichere Wahl, und `U+FFFD`
+wäre dort genauso falsch wie das ursprüngliche Zeichen gewesen wäre.
 
 ## Platforms deliberately NOT included / bewusst nicht enthaltene Plattformen
 
@@ -115,13 +145,14 @@ platforms (especially Amstrad CPC and MSX) fall into Unicode's newer
 "Symbols for Legacy Computing" block (U+1FB00 and above — added in
 Unicode 13.0+). The `*.charset` file format only supports code points
 up to U+FFFF (see `komportcharset.cpp`'s `loadCustomCharsetFile()`) —
-those specific bytes are left out and documented as such in each
-file's header, not silently dropped.
+those specific bytes are mapped to `U+FFFD` instead (see above) and
+documented as such in each file's header, not silently dropped.
 
 **DE:** Mehrere echte, gut dokumentierte Zeichen auf einigen dieser
 Plattformen (besonders Amstrad CPC und MSX) liegen im neueren
 Unicode-Block "Symbols for Legacy Computing" (U+1FB00 und höher — seit
 Unicode 13.0). Das `*.charset`-Dateiformat unterstützt nur Codepoints
 bis U+FFFF (siehe `loadCustomCharsetFile()` in `komportcharset.cpp`) —
-genau diese Bytes werden ausgelassen und im Kopfkommentar jeder Datei
-dokumentiert, nicht stillschweigend fallen gelassen.
+genau diese Bytes werden stattdessen auf `U+FFFD` gemappt (siehe oben)
+und im Kopfkommentar jeder Datei dokumentiert, nicht stillschweigend
+fallen gelassen.

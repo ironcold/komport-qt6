@@ -9,7 +9,8 @@
 # "Differences from ISO/IEC 8859-1" section, both cross-checked).
 # https://en.wikipedia.org/wiki/RISC_OS_character_set
 #
-# Two bytes in the 0x80-0x8F block are deliberately NOT included:
+# Two bytes in the 0x80-0x8F block map to U+FFFD (REPLACEMENT
+# CHARACTER) rather than a real glyph:
 # - 0x84: a window-control icon whose Unicode equivalent (U+1FBC0) is
 #   above 0xFFFF - this file format has no astral/surrogate-pair
 #   support (see komportcharset.cpp's loadCustomCharsetFile()).
@@ -18,6 +19,14 @@
 #   code point at all (it would need two separate characters glued
 #   together), so it cannot be represented in this one-byte-to-one-
 #   code-point format either.
+# Both are mapped to U+FFFD instead of left unlisted, on purpose: an
+# unlisted byte falls back to plain identity, which would display as a
+# plausible-looking but simply wrong Latin-1/control-picture character
+# (Codex review finding) rather than visibly signal "a real character
+# exists here that this file cannot show". Expect the app's own
+# duplicate-mapping warning for these two bytes when this file loads -
+# harmless and expected, since both intentionally share one target
+# code point.
 # RISC OS has other documented variants (EFF, TRC, Welsh, ...) with
 # slightly different 0x80-0x8F assignments - only the standard/default
 # variant is covered here.
@@ -34,8 +43,10 @@
 81=0174
 82=0175
 83=25F0
+84=FFFD
 85=0176
 86=0177
+87=FFFD
 88=21E6
 89=21E8
 8A=21E9

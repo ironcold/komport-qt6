@@ -58,8 +58,18 @@
 # both code points are above 0xFFFF - this file format has no astral/
 # surrogate-pair support at all (see komportcharset.cpp's
 # loadCustomCharsetFile(), "no surrogate-pair/astral support"), so
-# they cannot be represented here and are left as identity instead.
+# they cannot be represented directly. Mapped to U+FFFD (REPLACEMENT
+# CHARACTER) instead of leaving them unlisted, on purpose: an unlisted
+# byte falls back to plain identity, which would display as a
+# plausible-looking but simply wrong Latin-1/control-picture character
+# (Codex review finding) rather than visibly signal "a real character
+# exists here that this file cannot show". Expect the app's own
+# duplicate-mapping warning for these two bytes when this file loads -
+# harmless and expected, since both intentionally share one target
+# code point.
+8E=FFFD
 8F=259C
 94=25D8
+96=FFFD
 95=2580
 99=2590
