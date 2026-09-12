@@ -1,0 +1,142 @@
+# Name: MSX International
+#
+# MSX "International" character set (the European/Western variant -
+# MSX also has distinct Japanese/Arabic/etc. regional ROM variants not
+# covered here), bytes 0x80-0xFF - accented Latin letters, Greek
+# letters, box/block-drawing graphics, math symbols. 0x00-0x7F is plain
+# ASCII (unlisted below, kept as identity); entirely above the 7-bit
+# ASCII range, so this carries none of CP437/ATASCII's VT100-
+# control-code conflict risk (see TODO.md Abschnitt 6.3).
+#
+# Source: Wikipedia "MSX character set" (raw table, "International"
+# variant specifically - there are several regional tables on that page).
+# https://en.wikipedia.org/wiki/MSX_character_set
+#
+# Two positions (0xB4/0xB5, O-with-tilde) are noted by the source itself
+# as ambiguous across MSX ROM revisions (could instead be O-with-double-
+# acute) - the table's primary/first-listed value is used here, same
+# approach as the built-in Atari ST charset's own documented homoglyphs.
+#
+# Deliberately NOT included:
+# - 0xFF: the source's table marks this as the on-screen cursor
+#   indicator, not a static character at all.
+# - 21 other positions across 0xC0-0xD7 whose source table entry is a
+#   real, distinct glyph, but every one of those specific code points
+#   lies in Unicode's "Symbols for Legacy Computing" block (added in
+#   Unicode 13.0+) and is above 0xFFFF - this file format has no
+#   astral/surrogate-pair support at all (see komportcharset.cpp's
+#   loadCustomCharsetFile(), "no surrogate-pair/astral support").
+80=00C7
+81=00FC
+82=00E9
+83=00E2
+84=00E4
+85=00E0
+86=00E5
+87=00E7
+88=00EA
+89=00EB
+8A=00E8
+8B=00EF
+8C=00EE
+8D=00EC
+8E=00C4
+8F=00C5
+90=00C9
+91=00E6
+92=00C6
+93=00F4
+94=00F6
+95=00F2
+96=00FB
+97=00F9
+98=00FF
+99=00D6
+9A=00DC
+9B=00A2
+9C=00A3
+9D=00A5
+9E=20A7
+9F=0192
+A0=00E1
+A1=00ED
+A2=00F3
+A3=00FA
+A4=00F1
+A5=00D1
+A6=00AA
+A7=00BA
+A8=00BF
+A9=2310
+AA=00AC
+AB=00BD
+AC=00BC
+AD=00A1
+AE=00AB
+AF=00BB
+B0=00C3
+B1=00E3
+B2=0128
+B3=0129
+B4=00D5
+B5=00F5
+B6=0170
+B7=0171
+B8=0132
+B9=0133
+BA=00BE
+BB=223D
+BC=25CA
+BD=2030
+BE=00B6
+BF=00A7
+C0=2582
+C1=259A
+C2=2586
+C4=25AC
+C6=258E
+C7=259E
+C8=258A
+D3=2598
+D4=2597
+D5=259D
+D6=2596
+D8=0394
+D9=2021
+DA=03C9
+DB=2588
+DC=2584
+DD=258C
+DE=2590
+DF=2580
+E0=03B1
+E1=00DF
+E2=0393
+E3=03C0
+E4=03A3
+E5=03C3
+E6=00B5
+E7=03C4
+E8=03A6
+E9=0398
+EA=03A9
+EB=03B4
+EC=221E
+ED=2300
+EE=2208
+EF=2229
+F0=2261
+F1=00B1
+F2=2265
+F3=2264
+F4=2320
+F5=2321
+F6=00F7
+F7=2248
+F8=00B0
+F9=2219
+FA=00B7
+FB=221A
+FC=207F
+FD=00B2
+FE=25A0

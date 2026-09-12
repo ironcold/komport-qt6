@@ -1,0 +1,62 @@
+# Name: Acorn/RISC OS
+#
+# Acorn/RISC OS 8-bit character set (Archimedes and later ARM-based Acorn
+# machines) - the standard variant, an extension of ISO-8859-1 that
+# redefines 0x80-0x9F (ISO-8859-1's C1 control range) with real
+# printable characters; 0xA0-0xFF matches ISO-8859-1/Latin-1 exactly
+# (already covered by identity, no entries needed for that range).
+# Source: Wikipedia "RISC OS character set" (raw table + its own
+# "Differences from ISO/IEC 8859-1" section, both cross-checked).
+# https://en.wikipedia.org/wiki/RISC_OS_character_set
+#
+# Two bytes in the 0x80-0x8F block are deliberately NOT included:
+# - 0x84: a window-control icon whose Unicode equivalent (U+1FBC0) is
+#   above 0xFFFF - this file format has no astral/surrogate-pair
+#   support (see komportcharset.cpp's loadCustomCharsetFile()).
+# - 0x87: a combined subscript-8-superscript-7 glyph - the source
+#   itself notes this was "not proposed for Unicode" and has no single
+#   code point at all (it would need two separate characters glued
+#   together), so it cannot be represented in this one-byte-to-one-
+#   code-point format either.
+# RISC OS has other documented variants (EFF, TRC, Welsh, ...) with
+# slightly different 0x80-0x8F assignments - only the standard/default
+# variant is covered here.
+#
+# Note: 0x80-0x9F is also the ISO/ECMA-48 "C1" 8-bit control-code range
+# (NEL, HTS, CSI, etc. as single bytes) in some other 8-bit-terminal
+# contexts - KomportEmulation does not implement any C1 control
+# function today regardless of charset (every byte here already just
+# draws as an invisible placeholder under "Standard"), so this table
+# does not newly break any working control function; it only makes
+# some of these previously-invisible bytes visible as RISC OS's own
+# characters instead.
+80=20AC
+81=0174
+82=0175
+83=25F0
+85=0176
+86=0177
+88=21E6
+89=21E8
+8A=21E9
+8B=21E7
+8C=2026
+8D=2122
+8E=2030
+8F=2022
+90=2018
+91=2019
+92=2039
+93=203A
+94=201C
+95=201D
+96=201E
+97=2013
+98=2014
+99=2212
+9A=0152
+9B=0153
+9C=2020
+9D=2021
+9E=FB01
+9F=FB02

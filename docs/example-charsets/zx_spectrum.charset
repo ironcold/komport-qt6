@@ -1,0 +1,32 @@
+# Name: ZX Spectrum
+#
+# Sinclair ZX Spectrum character set - the only three bytes that differ
+# from plain US-ASCII in the printable 0x20-0x7F range.
+# Source: Wikipedia "ZX Spectrum character set" (quoted directly: "code
+# point 0x5E is an up-arrow (up arrow) instead of a caret (^), 0x60 is
+# the pound sign (GBP) instead of the grave accent (`), and 0x7F is the
+# copyright sign (C) instead of the control character DEL").
+# https://en.wikipedia.org/wiki/ZX_Spectrum_character_set
+#
+# Deliberately NOT included (same "leave out rather than guess" policy
+# as the built-in CP437/PETSCII charsets, see TODO.md Abschnitt 6.3):
+# - 0x80-0x8F: the 16 iconic 2x2 block-graphics characters. Their
+#   general existence and Unicode Block Elements equivalents are well
+#   documented, but every source found (Wikipedia, the official
+#   Sinclair BASIC manual's own character-set appendix, ROM/font
+#   ripper projects) shows the exact byte-to-quadrant assignment only
+#   as an image, never as text/a table of code points - nothing
+#   verifiable enough to transcribe with confidence instead of
+#   guessing a plausible-looking but possibly mirrored/rotated order.
+# - 0x90-0xA4: User-Defined Graphics (UDG) - by design there is no
+#   universal glyph here at all; real Spectrum software POKEs its own
+#   bitmap into this range, so no single correct mapping could exist
+#   even in principle.
+# - 0xA5-0xFF: tokenized BASIC keywords (PRINT, SAVE, LOAD, ...). Not
+#   representable in this file format at all - each entry here is one
+#   byte to exactly one display character, but a BASIC token byte
+#   stands for a whole keyword (multiple characters), not a single
+#   glyph.
+5E=2191
+60=00A3
+7F=00A9
