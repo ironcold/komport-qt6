@@ -634,6 +634,24 @@ dokumentierte Entscheidungen, keine übersehenen Lücken. Nachtrag
 möglich, siehe Abschnitt 1. Review-Funde und Fixes in `TODO-ARCHIVE.md`
 Abschnitt 23 (23.1 für den Custom-Charset-Nachtrag).
 
+### Meilenstein 8 — Session-/Transport-Fundament — geplant
+
+Die nach dem `v1.0.0`-Release ergänzte Produktvision (verlustfreie Sessions,
+offline Analyse, passive Wiedergabe, spätere Decoder, Simulation und Netzwerk)
+beginnt bewusst nicht mit einem UI-Feature. Zuerst wird die gemeinsame,
+transportneutrale Grundlage aus `SessionEvent`, `ITransport` und einem
+`SessionController` gebaut. Der erste Code-Schnitt ist
+`docs/specs/SPEC-M8-session-transport-foundation.md`; er umfasst nur den
+additiven Übergang des bestehenden lokalen Serial-Pfads auf bytegenaue
+Ereignisse und Tests. Kein Dateiformat, kein Replay, kein Decoder, keine
+aktive Übertragung.
+
+**Voraussetzung vor Code:** ADR-002 bis ADR-007 und der M8-Spec müssen nach
+dem neuen Governance-Prozess reviewt und akzeptiert sein. Die darauf folgende
+Reihenfolge bleibt: M9 Recorder/`.kpsession`, M10 Loader und passive Replay,
+M11 Decoder, M12 aktive Wiedergabe/exakte Simulation, erst danach
+TCP/Remote-Agent.
+
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 
 Architektonischer Leitfaden für später, explizit **nicht** für den aktuellen
