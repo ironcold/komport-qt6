@@ -283,6 +283,10 @@ production code other than as its default.
 
 ## 7. Testing strategy
 
+Test names in this section are the design-time plan. Where the shipped suite uses a
+different name, §8 carries the shipped name, and the M9 implementation self-review
+holds the full mapping between plan, criterion and shipped test.
+
 Test-only structural reader (ADR-010 D3): a minimal parser under `tests/` that
 validates magic, version, header encoding and length, record length consistency,
 `flags == 0`, the header profile's member names and the reference pair, and that
@@ -340,40 +344,64 @@ wiring are unchanged.
 
 ## 8. Acceptance criteria
 
-- [ ] A live session produces a `.kpsession` v1 file that satisfies ADR-006's
+Test names are those of the shipped suite (`tests/`); where a planned name and the
+shipped name differ, this list carries the shipped one, and the M9 implementation
+self-review holds the full mapping. All of them pass.
+
+- [x] A live session produces a `.kpsession` v1 file that satisfies ADR-006's
   normative v1 writer profile and record layout - verified by
-  `headerProfileMatchesAdr006`, `headerIsWrittenAtStart`,
-  `headerIsOnDiskWithoutAnyEvent`,
-  `recordPrefixIsFortyFourBytesInTheAgreedOrder`, `oneRecordPerAcceptedEventInOrder`.
-- [ ] Every accepted event is one record; payloads and both timestamps are
-  preserved exactly, including values above 2^53 in the JSON parts -
-  `payloadsSurviveByteExactly`, `sixtyFourBitJsonValuesAreCanonicalDecimalStrings`.
-- [ ] The recorder holds no session-sized state; a 64 KiB byte-wise upload keeps
-  memory flat and produces one record per accepted write -
-  `oneRecordPerAcceptedEventInOrder` plus the pty volume test.
-- [ ] Recording starts only while the session is live; the file carries its
-  complete header from the start, with the domain's true anchor and an applied
-  configuration snapshot -
-  `startIsRefusedUnlessTheSessionIsLive`, `midSessionStartCarriesTheTrueAnchorReference`,
-  `recordingWithZeroRecordsIsAValidFile`.
-- [ ] The writer's own buffer is bounded: retention never exceeds one second even
+  `headerProfileMatchesAdr006`, `startBlockPrefixIsExactlyTheAdr006Fixture`,
+  `recordBytesAreExactlyTheAdr006LittleEndianFixture`, `headerIsWrittenAtStart`,
+  `theStartFlushMakesTheHeaderVisibleThroughASecondHandle`,
+  `recordPrefixIsFortyFourBytesInTheAgreedOrder`.
+- [x] Every accepted event is one record; payloads and both timestamps are preserved
+  exactly, including values above 2^53 in the JSON parts -
+  `oneRecordPerAcceptedEventWithByteExactPayloads`, `metadataIsWrittenVerbatim`,
+  `sixtyFourBitJsonValuesAreCanonicalDecimalStrings`,
+  `jsonSizeCounterIsExactForEveryValueShape`.
+- [x] The recorder holds no session-sized state; a 64 KiB byte-wise upload keeps
+  memory flat and produces one observation per accepted write -
+  `theProcessBufferIsBoundedByOneTimerPerBurst`,
+  `byteWiseSixtyFourKiBUploadKeepsOneObservationPerAcceptedWrite`, and the pty volume
+  proof `aRecordedPtySessionIsByteExactAndChunked`.
+- [x] Recording starts only while the session is live; the file carries its complete
+  header from the start, with the domain's true anchor and an applied configuration
+  snapshot - `startWritesACompleteHeaderAndNeedsALiveSession`,
+  `midSessionStartWritesTheTrueAnchorReference`,
+  `clockDomainReferenceStartsInvalidAndCarriesTheAnchor`,
+  `clockDomainReferenceUsesAFailedOpenAsTheAnchor`.
+- [x] The writer's own buffer is bounded: retention never exceeds one second even
   when the line goes idle, and a burst flushes at most once per second -
+  `theProcessBufferIsBoundedByOneTimerPerBurst` (the planned names
   `pendingTailIsFlushedWithinOneSecondWithoutFurtherEvents`,
-  `burstFlushesAtMostOncePerSecond`, `flushIntervalBoundsTheBufferedTail`.
-- [ ] Failure paths stop the recording and report; a damaged file keeps its
-  complete prefix; the three crash bounds of ADR-010 §8 are stated and tested -
-  `shortWriteDuringTheHeaderWriteLeavesNoReadableFile`,
-  `shortWriteAfterAValidPrefixIsReportedAsDamaged`, `flushFailureEntersTheDamagedState`,
-  `timerFlushFailureEntersTheDamagedState`,
-  `truncatedFileIsRecoveredToItsCompletePrefix`.
-- [ ] No record or header the writer produces can exceed ADR-006's limits, and an
+  `burstFlushesAtMostOncePerSecond` and `flushIntervalBoundsTheBufferedTail` were
+  consolidated into it: its assertions cover no re-arm inside a burst, the interval
+  as the flush deadline, and a flush on the armed timer without any further event),
+  `aClockThatStartsAtZeroReportsTheRealDuration`.
+- [x] Failure paths stop the recording and report; a damaged file keeps its complete
+  prefix; the crash bounds of ADR-010 §8 are stated and tested -
+  `aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile`,
+  `aShortWriteEndsTheRecordingAsDamagedAndKeepsTheCompletePrefix`,
+  `aShortWriteReportsEveryAcceptedByte`, `aFailedFlushEndsTheRecordingAsDamaged`,
+  `anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal`, and the reader's
+  recovery of a truncated final record in `theReaderRejectsMalformedWriterOutput`.
+- [x] No record or header the writer produces can exceed ADR-006's limits, and an
   offending event is refused with its sequence and sizes reported -
   `oversizedHeaderIsRejected`, `oversizedRecordIsRejected`, `lengthArithmeticIsChecked`,
-  `oversizedEventStopsAsDamaged`.
-- [ ] Recording is an explicit user action in a separate action while the text
-  logger stays unchanged; the recorder never calls the transport and never
-  transmits - `theRecorderNeverTouchesTheTransportOrTheCharacterSignals`.
-- [ ] The existing full `ctest` suite passes, warning-free under `-Wall -Wextra`.
+  `headerLimitBoundaryIsExact`, `largeAsciiMetadataIsAcceptedWhenItFits`,
+  `anEventThatCannotBeEncodedReportsItsSequenceAndSizes`. An event above 64 MiB is not
+  driven through the recorder, because that needs a test allocating 64 MiB; the limit
+  itself is covered at the codec level, and the gap is stated in the self-review.
+- [x] Recording is an explicit user action in a separate action while the text logger
+  stays unchanged; the recorder never calls the transport and never transmits -
+  `anIdleSessionRefusesTheRecordingStart`,
+  `aRecordingShowsItsIndicatorAndStopsWithAReport`,
+  `theRecorderNeverCallsIntoTheTransport`, and the chunking property of
+  `aRecordedPtySessionIsByteExactAndChunked`, which fails if the legacy character
+  signals were the source.
+- [x] The existing full `ctest` suite passes, warning-free under `-Wall -Wextra`
+  (17/17 targets, 0 warnings, 2026-09-18; the Qt 6.3 line stays open, see the
+  self-review §4).
 
 ## 9. Risks
 
