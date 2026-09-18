@@ -933,7 +933,14 @@ void KomportApp::closeEvent(QCloseEvent *event)
     // slotFileClose() used to close it itself before calling close(), but
     // that meant serial teardown depended on which path was used.
     // KomportSerial::close() is safe to call again regardless.
-    view->getSerial()->close();
+    // SPEC-M9 5.8: closing the session - the transport first, while the controller
+    // and the recorder are still alive, then finalising a running recording - is a
+    // document operation, so that the normative ordering is testable without a
+    // window.
+    const SessionRecordingReport report = doc->closeSession();
+    if ( report.damaged )
+      qWarning( "M9: the recording of %s ended damaged: %s",
+                qPrintable( report.path ), qPrintable( report.reason ) );
     event->accept();
   } else {
     event->ignore();

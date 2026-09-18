@@ -26,12 +26,18 @@
 
 #include "komportdoc.h"
 #include "sessioncontroller.h"
+#include "sessionrecorder.h"
+
+#include "sessionrecordreader.h"
 
 #include <QScopeGuard>
 #include <QTest>
 
 #include <QByteArray>
+#include <QFile>
+#include <QJsonObject>
 #include <QList>
+#include <QTemporaryDir>
 
 #include <fcntl.h>
 #include <pty.h>
@@ -52,6 +58,31 @@ QString makePty(int *masterFd)
   return QString::fromLocal8Bit(slaveName);
 }
 
+/** The applied-configuration snapshot a recording header carries (ADR-006's four
+  * sections, ADR-010 D7): the live configuration metadata *without* the
+  * per-transaction members, which are properties of one transaction and not part
+  * of a snapshot. The codec validates the result, so this also checks that M8's
+  * metadata shape and ADR-006's profile agree. */
+QJsonObject sessionSnapshot(const ConfigurationResult &_result)
+{
+  QJsonObject snapshot = _result.toMetadata();
+  snapshot.remove(QStringLiteral("applyStatus"));
+  snapshot.remove(QStringLiteral("changedGroups"));
+  snapshot.remove(QStringLiteral("message"));
+  return snapshot;
+}
+
+/** A recording request for @p path, with the snapshot of @p serial's session. */
+SessionRecordingRequest recordingRequest(const QString &_path, KomportSerial *_serial)
+{
+  SessionRecordingRequest request;
+  request.path = _path;
+  request.applicationName = QStringLiteral("Komport");
+  request.applicationVersion = QStringLiteral("test");
+  request.configuration = sessionSnapshot(_serial->applyConfiguration(_serial->requestedConfiguration()));
+  return request;
+}
+
 } // namespace
 
 class TstSessionDocument : public QObject
@@ -61,6 +92,8 @@ private slots:
   void theDocumentOwnerControllerObservesTheDocumentTransport();
   void destroyingTheDocumentEndsTheSessionWithoutEvents();
   void aFailedLiveEndpointChangeIsNotRetried();
+  void theDocumentOwnsARecorderBesideTheController();
+  void closingTheTransportBeforeStoppingRecordsTheTerminalClosedEvent();
 };
 
 void TstSessionDocument::theDocumentOwnerControllerObservesTheDocumentTransport()
@@ -204,6 +237,113 @@ void TstSessionDocument::aFailedLiveEndpointChangeIsNotRetried()
   QCOMPARE(failedOpenEvents, 1);   // exactly one attempt and one error per action
   QCOMPARE(serial->isOpen(), false);
   QCOMPARE(document->getSessionController()->state() == SessionController::State::Idle, true);
+}
+
+/** The document owns a recorder beside the controller (SPEC-M9 5.8), created
+  *  after it and destroyed before it. */
+void TstSessionDocument::theDocumentOwnsARecorderBesideTheController()
+{
+  KomportDoc document(nullptr);
+  SessionRecorder *recorder = document.getSessionRecorder();
+
+  QVERIFY(recorder != nullptr);
+  QCOMPARE(static_cast<int>(recorder->state()), static_cast<int>(SessionRecorder::State::Stopped));
+  QVERIFY(recorder->lastReport().path.isEmpty());
+
+  // The recorder observes the document's controller, so an idle session has no
+  // clock-domain anchor: the start is refused and the target is not even touched.
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionRecordingRequest request;
+  request.path = directory.filePath(QStringLiteral("never-written.kpsession"));
+  const SessionRecordingStart refused = recorder->start(request);
+  QCOMPARE(refused.ok, false);
+  QVERIFY(refused.reason.contains(QStringLiteral("live")));
+  QCOMPARE(QFile::exists(request.path), false);
+}
+
+/** The close ordering of SPEC-M9 5.8 is normative: the transport is closed first,
+  *  while controller and recorder are still alive, so the terminal
+  *  `TransportClosed` event still lands in the file; only then is the recording
+  *  finalised. This is the order KomportApp::closeEvent() performs. */
+void TstSessionDocument::closingTheTransportBeforeStoppingRecordsTheTerminalClosedEvent()
+{
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+  ::fcntl(masterFd, F_SETFL, ::fcntl(masterFd, F_GETFL, 0) | O_NONBLOCK);
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = directory.filePath(QStringLiteral("close-order.kpsession"));
+
+  KomportDoc document(nullptr);
+  SessionController *controller = document.getSessionController();
+  SessionRecorder *recorder = document.getSessionRecorder();
+  QVERIFY(controller != nullptr);
+  QVERIFY(recorder != nullptr);
+
+  QList<SessionEvent> events;
+  QObject::connect(controller, &SessionController::eventObserved,
+                   [&events](const SessionEvent &_event) { events.append(_event); });
+
+  document.getSerial()->setDeviceName(slaveName);
+  document.getSerial()->setBaudRate(qint32(9600));
+  QVERIFY(document.getSerial()->open());
+  QCOMPARE(controller->state() == SessionController::State::Live, true);
+
+  // Recording starts mid-session, the way the application starts it: the live state
+  // is what makes the domain's anchor available for the header.
+  const int eventsBeforeStart = events.size();
+  const SessionRecordingStart started = recorder->start(recordingRequest(path, document.getSerial()));
+  QVERIFY2(started.ok, qPrintable(started.reason));
+  // Reading the applied configuration for the header is not a transaction: it
+  // changes nothing and produces no observation.
+  QCOMPARE(events.size(), eventsBeforeStart);
+  QCOMPARE(controller->state() == SessionController::State::Live, true);
+
+  // Some traffic, so the file holds data before the close.
+  const QByteArray payload("document close ordering");
+  QCOMPARE(::write(masterFd, payload.constData(), payload.size()), qint64(payload.size()));
+  QTRY_VERIFY_WITH_TIMEOUT(events.size() > eventsBeforeStart, 5000);
+
+  // The production close path of SPEC-M9 5.8 - the same call KomportApp::closeEvent()
+  // makes. It closes the transport first, while the controller and the recorder are
+  // still alive, and only then finalises the recording. Reversing the two steps
+  // inside it would drop the terminal event from the file and fail the assertions
+  // below.
+  const SessionRecordingReport report = document.closeSession();
+  QVERIFY2(!report.damaged, qPrintable(report.reason));
+  QCOMPARE(report.path, path);
+  QCOMPARE(events.last().type == SessionEventType::TransportClosed, true);
+  QCOMPARE(controller->state() == SessionController::State::Idle, true);
+
+  QFile file(path);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  const SessionRecordFile recorded = readSessionRecordFile(file.readAll());
+  QVERIFY2(recorded.loadable, qPrintable(recorded.error));
+
+  bool sawRx = false;
+  bool sawOpened = false;
+  int closedRecords = 0;
+  for (const SessionRecordFileRecord &record : recorded.records) {
+    if (record.eventType == quint16(SessionEventType::TransportClosed))
+      ++closedRecords;
+    if (record.eventType == quint16(SessionEventType::TransportOpened))
+      sawOpened = true;
+    if (record.eventType == quint16(SessionEventType::Data)
+        && record.direction == quint8(SessionDirection::Rx))
+      sawRx = true;
+  }
+  QVERIFY2(sawRx, "the traffic before the close was not recorded");
+  QVERIFY2(closedRecords == 1, "the terminal TransportClosed event is missing from the file");
+  // The recording began after the session was opened, so its file starts with the
+  // traffic and ends with the terminal event - which is the whole point of the order.
+  QVERIFY(!sawOpened);
+  QCOMPARE(recorded.records.last().eventType, quint16(SessionEventType::TransportClosed));
+  QCOMPARE(report.records, quint64(recorded.records.size()));
 }
 
 QTEST_MAIN(TstSessionDocument)

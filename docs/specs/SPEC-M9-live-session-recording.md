@@ -61,8 +61,9 @@ Included:
 - The controller's state is observable (`State::Idle` / `State::Live`).
 - The controller is owned by `KomportDoc`; the transport is a by-value member
   destroyed after the controller; `~KomportSerial` emits no event.
-- `KomportApp::closeEvent()` closes the transport before the document is torn
-  down, which is what makes a terminal `TransportClosed` event recordable.
+- `KomportApp::closeEvent()` initiates closure by calling `KomportDoc::closeSession()`
+  before the document is torn down, which is what makes a terminal `TransportClosed`
+  event recordable.
 - While the transport is closed, a configuration request is stored without a
   hardware transaction (`storedOnly`), so "requested" and "applied" differ.
 - Nothing consumes the stream yet; the recorder is its first consumer.
@@ -193,7 +194,7 @@ with zero records (ADR-010 D1).
 | flush | a one-second timer on the session thread, armed by the first unflushed write of a live recording and firing at most once per second per burst; the final flush happens on stop (ADR-010 D2/§8). Retention is therefore bounded even when the line goes idle and no further event arrives |
 | stop (user action) | final flush, close, report path, record count, bytes, duration, state |
 | stop with no event recorded | report "no session data recorded"; the file with its complete header remains a valid v1 file with zero records |
-| application close | the application closes the transport first (while controller and recorder are live), then stops and finalises the recorder; see §5.8 |
+| application close | the application's close path calls `KomportDoc::closeSession()`, which closes the transport first (while controller and recorder are live) and then finalises a running recorder, returning its report; see §5.8 |
 | short or failed write | stop as damaged, report with the byte counts; the complete prefix stays valid |
 | flush failure | damaged transition, reported like a write failure |
 | invalid event, oversized event | damaged transition; the event is not written, its sequence number and sizes are reported |
@@ -218,11 +219,16 @@ with zero records (ADR-010 D1).
 
 `KomportDoc` owns the recorder beside the controller and destroys the controller
 first, then the recorder, then the transport. `~KomportSerial` emits no event, so
-a direct document destruction records no terminal session event; on the normal
-application-close path `KomportApp::closeEvent()` closes the transport first,
-where controller and recorder are still alive, and that is when the terminal
-`TransportClosed` event is recorded. The close ordering is normative for this
-milestone.
+a direct document destruction records no terminal session event.
+
+On the normal application-close path `KomportApp::closeEvent()` initiates closure
+by calling the document's `closeSession()` operation. That operation closes the
+transport first, while controller and recorder are still alive - which is when the
+terminal `TransportClosed` event is recorded - and only then finalises a running
+recorder, returning its report (an empty report when nothing was being recorded).
+The sequence is a document operation so that the ordering itself is testable
+without a window; the application keeps the timing decision and the presentation of
+the outcome. The close ordering is normative for this milestone.
 
 ### 5.9 File-sink seam (internal, testable)
 
@@ -396,8 +402,11 @@ controller accessor. No decision remains open.
 3. `SessionRecorder` with the file-sink and clock seams, the state machine and the
    error handling, plus the test-side structural reader and the recorder tests
    (including the mid-session start, the failure paths and the recovery rule).
-4. `KomportDoc` ownership, destruction order and the document-level tests.
+4. `KomportDoc` ownership, destruction order, the `closeSession()` operation (the
+   normative close ordering, as a testable document operation) and the
+   document-level tests.
 5. Application wiring: the `Record Live Session...` action, the indicator, the
-   close ordering and the outcome reporting.
+   delegation of the close path to `KomportDoc::closeSession()` and the outcome
+   reporting.
 6. Full pty end-to-end recording test and the complete suite; warning-free build.
 7. Self-review against this specification, then the independent review.

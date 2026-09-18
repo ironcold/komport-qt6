@@ -42,6 +42,10 @@ KomportDoc::KomportDoc(QObject *parent) : QObject(parent)
   // The controller observes the transport through its signals only; it neither
   // owns nor calls it, and it is destroyed before the transport below.
   mSessionController = std::make_unique<SessionController>(&mSerial);
+  // SPEC-M9 5.8: the document also owns the recorder that consumes the
+  // controller's event stream. It is created after the controller, because it
+  // observes it, and destroyed before it (see the destructor).
+  mSessionRecorder = std::make_unique<SessionRecorder>(mSessionController.get());
   // Note: unlike the original Qt3 QPtrList, this list does not own/delete
   // the views it tracks - it is only used to broadcast repaints across all
   // open windows (see slotUpdateAllViews()). Views are owned as normal
@@ -55,6 +59,11 @@ KomportDoc::~KomportDoc()
   // it here (rather than relying on member or QObject-child order) is what makes
   // that ordering explicit, because mSerial is a by-value member of this object.
   mSessionController.reset();
+  // SPEC-M9 5.8: then the recorder, whose destruction flushes and closes a running
+  // recording silently - no event, no report. Reaching this point is not an error
+  // and not a notification: the application's close path stops the recorder
+  // explicitly (KomportApp::closeEvent()), and this is only the safety net.
+  mSessionRecorder.reset();
 }
 
 void KomportDoc::addView(KomportView *view)
@@ -217,6 +226,23 @@ KomportSerial* KomportDoc::getSerial(){
 /** the document-owned session controller (SPEC-M8 6.2) */
 SessionController* KomportDoc::getSessionController(){
   return mSessionController.get();
+}
+
+SessionRecorder* KomportDoc::getSessionRecorder(){
+  return mSessionRecorder.get();
+}
+
+SessionRecordingReport KomportDoc::closeSession()
+{
+  // SPEC-M9 5.8, normative close ordering: the transport is closed *first*, while
+  // the controller and the recorder are still alive, so the terminal
+  // `TransportClosed` event is still recorded. Only then is a running recording
+  // finalised (a last flush, a close and a report). Doing it the other way round
+  // would lose that final event from the file.
+  mSerial.close();
+  if ( mSessionRecorder->state() == SessionRecorder::State::Stopped )
+    return SessionRecordingReport();
+  return mSessionRecorder->stop();
 }
 /** No descriptions */
 void KomportDoc::slotViewModified(KomportView* _v){

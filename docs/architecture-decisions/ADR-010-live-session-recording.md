@@ -51,12 +51,15 @@ controller and destroys it after the controller and before the transport.
 That order is a lifetime guarantee, not a recording mechanism: `KomportSerial`'s
 destructor deliberately emits no `closed` event (M8 rule, with a regression test
 proving document destruction emits nothing). The terminal `TransportClosed` event
-is recordable because the application closes the transport *before* the document
-is torn down - `KomportApp::closeEvent()` calls `KomportSerial::close()` while
+is recordable because the transport is closed *before* the document is torn down -
+the application's close path calls the document's `closeSession()` operation while
 controller and recorder are alive - not because of the destruction order. The
 application-close ordering is therefore part of this decision, not an
-implementation detail: close the transport, then stop and finalise the recorder,
-then continue destruction.
+implementation detail: close the transport, then finalise the recorder, then
+continue destruction. `KomportDoc::closeSession()` performs exactly that sequence
+(and returns the recording's report), so the order is a document operation that can
+be tested without a window, while the application keeps the decision of when to
+close and how to report the outcome.
 
 ### 2. Append-only streaming; the session is never held in memory
 
