@@ -162,6 +162,8 @@ private slots:
   void unusableBaudRateIsReportedAndNotStored();
   void ptyCarriesEveryByteValueInBothDirections();
   void portErrorDuringApplyStaysWithinTheObservationBudget();
+  void failedOpenKeepsTheSynchronousLegacyNotification();
+  void legacySettersFollowTheOperationTableForEveryField();
   void reentrantLegacyReceiverKeepsTheTransactionBudget();
   void observationsRequireALiveActivation();
   void byteWiseSixtyFourKiBUploadKeepsOneObservationPerAcceptedWrite();
@@ -398,7 +400,9 @@ void TstTransport::bufferingAndCompatibilityChangesReportTheirOwnGroup()
   compareGroups(changedGroupsOf(configSpy, 0), QStringList{ QStringLiteral("localBuffering") });
   QCOMPARE(serial.applyCalls, appliesBefore); // no hardware application
 
-  // startBits is stored and reported but never applied to hardware.
+  // startBits is stored and reported but never applied to hardware; the metadata
+  // of that result shows the unchanged hardware and buffering sections (SPEC-M8 13).
+  const QJsonObject bufferingMetadata = configSpy.at(0).at(2).value<QJsonObject>();
   TransportConfiguration compatibility = serial.requestedConfiguration();
   compatibility.startBits = QStringLiteral("2");
   serial.applyConfiguration(compatibility);
@@ -406,6 +410,22 @@ void TstTransport::bufferingAndCompatibilityChangesReportTheirOwnGroup()
   compareGroups(changedGroupsOf(configSpy, 1), QStringList{ QStringLiteral("compatibility") });
   QCOMPARE(serial.applyCalls, appliesBefore);
   QCOMPARE(serial.effectiveConfiguration().startBits, QStringLiteral("2"));
+
+  const QJsonObject compatibilityMetadata = configSpy.at(1).at(2).value<QJsonObject>();
+  QCOMPARE(compatibilityMetadata.value(QStringLiteral("effective")).toObject(),
+           bufferingMetadata.value(QStringLiteral("effective")).toObject());
+  QCOMPARE(compatibilityMetadata.value(QStringLiteral("requested")).toObject(),
+           bufferingMetadata.value(QStringLiteral("requested")).toObject());
+  QCOMPARE(compatibilityMetadata.value(QStringLiteral("localBuffering")).toObject(),
+           bufferingMetadata.value(QStringLiteral("localBuffering")).toObject());
+  QVERIFY(!compatibilityMetadata.value(QStringLiteral("requested")).toObject()
+               .contains(QStringLiteral("startBits")));
+  QCOMPARE(compatibilityMetadata.value(QStringLiteral("compatibility")).toObject()
+               .value(QStringLiteral("startBits")).toString(), QStringLiteral("2"));
+  // The field stays part of the stored configuration that the profile and the
+  // dialog carry, which is the unchanged config behaviour of that field
+  // (SPEC-M8 13).
+  QCOMPARE(serial.requestedConfiguration().startBits, QStringLiteral("2"));
 }
 
 void TstTransport::partialAndFailedAppliesReportTheirApplyStatus()
@@ -454,18 +474,24 @@ void TstTransport::partialAndFailedAppliesReportTheirApplyStatus()
            QStringLiteral("configurationChanged,transportError"));
 
   // Failed without any change: a request whose only hardware difference is
-  // rejected changes nothing, so it reports only an Error.
+  // rejected changes nothing, so it reports only an Error - with the failed status
+  // and, because nothing changed, no affected groups (SPEC-M8 6.2).
   serial.rejectDataBits = true;
   serial.rejectStopBits = true;
   serial.rejectParity = true;
   serial.rejectFlowControl = true;
   TransportConfiguration failed = serial.requestedConfiguration();
   failed.flowControl = QStringLiteral("RTS/CTS");
-  serial.applyConfiguration(failed);
+  const ConfigurationResult failedResult = serial.applyConfiguration(failed);
   QCOMPARE(configSpy.size(), 1);           // unchanged
+  QCOMPARE(applyStatusOfResult(failedResult), QStringLiteral("failed"));
+  QVERIFY(failedResult.changedGroups.isEmpty());
   QCOMPARE(errorSpy.size(), 2);
-  QCOMPARE(errorSpy.at(1).at(2).value<QJsonObject>().value(QStringLiteral("code")).toString(),
-           QStringLiteral("apply_failed"));
+  const QJsonObject failedMetadata = errorSpy.at(1).at(2).value<QJsonObject>();
+  QCOMPARE(failedMetadata.value(QStringLiteral("code")).toString(), QStringLiteral("apply_failed"));
+  QCOMPARE(failedMetadata.value(QStringLiteral("applyStatus")).toString(), QStringLiteral("failed"));
+  QCOMPARE(failedMetadata.value(QStringLiteral("changedGroups")).toArray().size(), 0);
+  QVERIFY(!failedMetadata.value(QStringLiteral("message")).toString().isEmpty());
 }
 
 void TstTransport::configureWhileClosedStoresOnlyAndIsAppliedByTheNextOpen()
@@ -779,11 +805,15 @@ void TstTransport::ptyCarriesEveryByteValueInBothDirections()
   for ( int value = 0; value <= 0xFF; ++value )
     allBytes.append(char(value));
 
-  // TX: the peer receives exactly these bytes, and the observations cover them.
+  // TX: the peer receives exactly these bytes, and the observations cover them -
+  // each one non-empty and with a non-negative source time (SPEC-M8 13).
   QCOMPARE(serial.writeBytes(allBytes), qint64(allBytes.size()));
   QByteArray observedTx;
-  for ( int i = 0; i < writtenSpy.size(); ++i )
+  for ( int i = 0; i < writtenSpy.size(); ++i ) {
+    QVERIFY(!writtenSpy.at(i).at(1).value<QByteArray>().isEmpty());
+    QVERIFY(writtenSpy.at(i).at(2).value<qint64>() >= 0);
     observedTx += writtenSpy.at(i).at(1).value<QByteArray>();
+  }
   QCOMPARE(observedTx, allBytes);
   QCOMPARE(sentSpy.size(), allBytes.size());   // e.g. the hex monitor's view
 
@@ -791,12 +821,16 @@ void TstTransport::ptyCarriesEveryByteValueInBothDirections()
   QTRY_VERIFY_WITH_TIMEOUT(readIntoFromFd(masterFd, &atPeer, allBytes.size()) == allBytes.size(), 5000);
   QCOMPARE(atPeer, allBytes);
 
-  // RX: the same bytes coming back are observed byte for byte.
+  // RX: the same bytes coming back are observed byte for byte, no event is empty,
+  // and every event carries a non-negative source time (SPEC-M8 13).
   QCOMPARE(::write(masterFd, allBytes.constData(), allBytes.size()), qint64(allBytes.size()));
   QTRY_VERIFY_WITH_TIMEOUT(receivedSpy.size() >= 1, 5000);
   QByteArray observedRx;
-  for ( int i = 0; i < receivedSpy.size(); ++i )
+  for ( int i = 0; i < receivedSpy.size(); ++i ) {
+    QVERIFY(!receivedSpy.at(i).at(1).value<QByteArray>().isEmpty());
+    QVERIFY(receivedSpy.at(i).at(2).value<qint64>() >= 0);
     observedRx += receivedSpy.at(i).at(1).value<QByteArray>();
+  }
   QCOMPARE(observedRx, allBytes);
 }
 
@@ -815,36 +849,60 @@ void TstTransport::portErrorDuringApplyStaysWithinTheObservationBudget()
   QSignalSpy errorSpy(&serial, &KomportSerial::transportError);
   QSignalSpy failedSpy(&serial, &KomportSerial::settingsFailed);
 
-  // A port error raised by the port while the settings are being applied belongs
-  // to the transaction: it must not become a third observation (SPEC-M8 6.2 caps
-  // a transaction at two).
+  // The two observations of a failed-with-change transaction have a defined order,
+  // so they are recorded across both signals (SPEC-M8 6.2).
+  QStringList failedOrder;
+  QObject::connect(&serial, &KomportSerial::configurationChanged,
+                   [&failedOrder](quint64, qint64, const QJsonObject &) {
+                     failedOrder.append(QStringLiteral("configurationChanged"));
+                   });
+  QObject::connect(&serial, &KomportSerial::transportError,
+                   [&failedOrder](quint64, qint64, const QJsonObject &) {
+                     failedOrder.append(QStringLiteral("transportError"));
+                   });
+
+  // A port error raised by the port while the settings are being applied means the
+  // whole attempt failed: the transaction is `failed`, and because some settings
+  // went through it has a changed effective state, which SPEC-M8 6.2 maps like
+  // `partial` - one configurationChanged, then one Error, so the two-observation
+  // maximum holds. That is the "failed with a changed effective state" row, tested
+  // here against the real transport rather than only through scripted metadata.
   serial.injectPortErrorDuringApply = true;
   serial.rejectBaudRate = true;
-  TransportConfiguration partial = serial.requestedConfiguration();
-  partial.baudRate = QStringLiteral("19200");   // rejected
-  partial.parity = QStringLiteral("EVEN");      // accepted
-  serial.applyConfiguration(partial);
+  TransportConfiguration failedWithChange = serial.requestedConfiguration();
+  failedWithChange.baudRate = QStringLiteral("19200");   // rejected field
+  failedWithChange.parity = QStringLiteral("EVEN");      // accepted field
+  const ConfigurationResult withChangeResult = serial.applyConfiguration(failedWithChange);
+  QCOMPARE(applyStatusOfResult(withChangeResult), QStringLiteral("failed"));
+  QVERIFY(!withChangeResult.changedGroups.isEmpty());    // ... with a changed state
   QCOMPARE(configSpy.size(), 1);
+  QCOMPARE(applyStatusOf(configSpy, 0), QStringLiteral("failed"));
   QCOMPARE(errorSpy.size(), 1);                 // the transaction's own error
   QCOMPARE(kindOf(errorSpy, 0), QStringLiteral("apply"));
   QCOMPARE(errorSpy.at(0).at(2).value<QJsonObject>().value(QStringLiteral("code")).toString(),
-           QStringLiteral("apply_partial"));
+           QStringLiteral("apply_failed"));
   QVERIFY(failedSpy.size() >= 1);                // legacy path still informed
 
-  // An apply that succeeds although the port raised an error still records it:
-  // the failure reaches the session record as this transaction's own apply error
-  // (SPEC-M8 section 9), never as a second runtime event.
+  // An apply whose settings were all accepted still records the port error the same
+  // way: `failed` with a changed effective state (SPEC-M8 section 9), never as a
+  // second runtime event.
   configSpy.clear();
   errorSpy.clear();
   serial.rejectBaudRate = false;
   TransportConfiguration full = serial.requestedConfiguration();
   full.parity = QStringLiteral("ODD");
-  serial.applyConfiguration(full);
+  const ConfigurationResult withErrorResult = serial.applyConfiguration(full);
+  QCOMPARE(applyStatusOfResult(withErrorResult), QStringLiteral("failed"));
+  QVERIFY(!withErrorResult.changedGroups.isEmpty());
   QCOMPARE(configSpy.size(), 1);
+  QCOMPARE(applyStatusOf(configSpy, 0), QStringLiteral("failed"));
   QCOMPARE(errorSpy.size(), 1);
   QCOMPARE(kindOf(errorSpy, 0), QStringLiteral("apply"));
   QCOMPARE(errorSpy.at(0).at(2).value<QJsonObject>().value(QStringLiteral("code")).toString(),
-           QStringLiteral("apply_partial"));   // changed, but not cleanly
+           QStringLiteral("apply_failed"));
+  // ... in the order the mapping prescribes, for both transactions of this test.
+  QCOMPARE(failedOrder.join(QLatin1Char(',')),
+           QStringLiteral("configurationChanged,transportError,configurationChanged,transportError"));
 }
 
 void TstTransport::observationsRequireALiveActivation()
@@ -882,6 +940,98 @@ void TstTransport::observationsRequireALiveActivation()
                                           QSerialPort::SerialPortError::ResourceError)));
   QCOMPARE(errorSpy.size(), 0);
   QVERIFY(failedSpy.size() > failedBefore);
+}
+
+void TstTransport::failedOpenKeepsTheSynchronousLegacyNotification()
+{
+  // No pty here: the endpoint cannot be opened at all, which is the failed-open
+  // case of SPEC-M8 7 and 9.
+  KomportSerial serial;
+  serial.setDeviceName(QStringLiteral("/dev/komport-m8-no-such-device"));
+  QSignalSpy failedSpy(&serial, &KomportSerial::settingsFailed);
+  QSignalSpy errorSpy(&serial, &KomportSerial::transportError);
+
+  const bool opened = serial.open();
+
+  // SPEC-M8 7 and 14: the legacy failure notification is synchronous - it has
+  // happened before open() returns, which is exactly what the application's
+  // mSerialErrorPending handling depends on - and the attempt yields exactly one
+  // Error(kind "open"). Whichever way QSerialPort delivers its own error for this
+  // attempt (during the call or later), it must not add a second notification.
+  QCOMPARE(opened, false);
+  QCOMPARE(failedSpy.size(), 1);
+  QCOMPARE(errorSpy.size(), 1);
+  QCOMPARE(errorSpy.at(0).at(2).value<QJsonObject>().value(QStringLiteral("kind")).toString(),
+           QStringLiteral("open"));
+  QCOMPARE(serial.isOpen(), false);
+}
+
+void TstTransport::legacySettersFollowTheOperationTableForEveryField()
+{
+  int firstMaster = -1;
+  int secondMaster = -1;
+  const QString first = makePty(&firstMaster);
+  const QString second = makePty(&secondMaster);
+  if ( first.isEmpty() || second.isEmpty() )
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&firstMaster, &secondMaster]() {
+    if (firstMaster >= 0) ::close(firstMaster);
+    if (secondMaster >= 0) ::close(secondMaster);
+  });
+
+  ScriptedSerial serial;
+  QSignalSpy changedSpy(&serial, &KomportSerial::settingsChanged);
+  QSignalSpy configSpy(&serial, &KomportSerial::configurationChanged);
+  QSignalSpy openedSpy(&serial, &KomportSerial::opened);
+  QSignalSpy closedSpy(&serial, &KomportSerial::closed);
+
+  // Closed port: every setter stores its value and produces nothing - no
+  // observation, no hardware application, no notification.
+  serial.setDeviceName(first);
+  serial.setRxQueue(2048);
+  serial.setFlushRate(120);
+  QCOMPARE(configSpy.size(), 0);
+  QCOMPARE(changedSpy.size(), 0);
+  QCOMPARE(serial.requestedConfiguration().endpoint, first);
+  QCOMPARE(serial.requestedConfiguration().rxQueue, 2048);
+  QCOMPARE(serial.requestedConfiguration().flushRate, 120);
+  QCOMPARE(serial.flushRate(), 120);
+
+  // Open port: the buffering setters produce exactly one transaction each, in
+  // their own group, without touching hardware.
+  QVERIFY(serial.open());
+  const int appliesAfterOpen = serial.applyCalls;
+  configSpy.clear();
+  serial.setRxQueue(4096);
+  QCOMPARE(configSpy.size(), 1);
+  compareGroups(changedGroupsOf(configSpy, 0), QStringList{ QStringLiteral("localBuffering") });
+  QCOMPARE(serial.applyCalls, appliesAfterOpen);
+  configSpy.clear();
+  serial.setFlushRate(200);
+  QCOMPARE(configSpy.size(), 1);
+  compareGroups(changedGroupsOf(configSpy, 0), QStringList{ QStringLiteral("localBuffering") });
+  QCOMPARE(serial.applyCalls, appliesAfterOpen);
+
+  // An unchanged device is not an activation boundary ...
+  configSpy.clear();
+  serial.setDeviceName(first);
+  QCOMPARE(configSpy.size(), 0);
+  QCOMPARE(openedSpy.size(), 1);            // only the original open()
+  QCOMPARE(closedSpy.size(), 0);
+
+  // ... while a changed one is: close, open, and one configuration transaction.
+  serial.setDeviceName(second);
+  QCOMPARE(closedSpy.size(), 1);
+  QCOMPARE(openedSpy.size(), 2);
+  QCOMPARE(configSpy.size(), 1);
+  compareGroups(changedGroupsOf(configSpy, 0), QStringList{ QStringLiteral("hardware") });
+  QCOMPARE(serial.requestedConfiguration().endpoint, second);
+  QVERIFY(serial.isOpen());
+
+  // setBaudRate() keeps the notification it already had before M8.
+  const int changedBeforeBaud = changedSpy.size();
+  serial.setBaudRate(qint32(19200));
+  QCOMPARE(changedSpy.size(), changedBeforeBaud + 1);
 }
 
 void TstTransport::reentrantLegacyReceiverKeepsTheTransactionBudget()

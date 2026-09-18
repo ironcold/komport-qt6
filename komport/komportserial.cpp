@@ -189,6 +189,13 @@ bool KomportSerial::open(){
     const QString reason = mPort.errorString();
     emit transportError( attempt, monotonicNowNs(),
                          errorMetadata( QStringLiteral("open"), QStringLiteral("open_failed"), reason ) );
+    // The legacy notification is emitted here, synchronously, instead of relying on
+    // when QSerialPort delivers errorOccurred() for this attempt: the application
+    // reads its mSerialErrorPending flag directly after applyConfiguration()/open()
+    // returned, so the notification has to have happened by then. slotPortError()
+    // skips its own emission for this attempt, which keeps the pre-M8 behaviour of
+    // exactly one settingsFailed() per failed open on every platform.
+    emit settingsFailed( reason );
     emit settingsChanged();
     return false;
   }
@@ -510,14 +517,21 @@ void KomportSerial::slotPortError(QSerialPort::SerialPortError error){
     return;
 
   qWarning() << "KomportSerial:" << mPort.errorString();
-  // Legacy user-facing path, unchanged (tests/tst_profileerror.cpp depends on
-  // this arriving synchronously from a failed open).
-  emit settingsFailed( mPort.errorString() );
 
-  // The event path reports a failure once. The asynchronous error of an open
+  // The legacy user-facing path keeps its pre-M8 shape: exactly one
+  // settingsFailed() per reported error. A failed open emits it synchronously in
+  // open() itself (so the application can read its flag right after the call
+  // returned), and this slot then only reports errors it owns - a runtime error of
+  // a live port, or an error of an open attempt that the transport has already
+  // reported.
+  const bool failedOpenAlreadyReported = ( mFailedAttemptReported != 0 && !mPort.isOpen() );
+  if ( !failedOpenAlreadyReported )
+    emit settingsFailed( mPort.errorString() );
+
+  // The event path reports a failure once: the asynchronous error of an open
   // attempt whose result the transport already reported is suppressed by the
   // in-progress/result guard of that attempt (ADR-003), never by comparing text.
-  if ( mFailedAttemptReported != 0 && !mPort.isOpen() ) {
+  if ( failedOpenAlreadyReported ) {
     mFailedAttemptReported = 0;
     return;
   }
@@ -774,10 +788,13 @@ ConfigurationResult KomportSerial::applyConfigurationInternal(const TransportCon
     result.message = result.message.isEmpty()
         ? portErrorNote
         : result.message + QLatin1Char(' ') + portErrorNote;
-    if ( result.applyStatus == ConfigurationApplyStatus::Full ) {
-      result.applyStatus = result.changedGroups.isEmpty() ? ConfigurationApplyStatus::Failed
-                                                          : ConfigurationApplyStatus::Partial;
-    }
+    // A port error means the whole *attempt* failed, not merely individual fields:
+    // the transaction is `failed` even when some settings went through before the
+    // error. That is the "failed with a changed effective state" row of SPEC-M8
+    // 6.2, which is mapped like `partial` (one configurationChanged, then one
+    // Error); with no change at all it is the "failed with no change" row, which
+    // yields the Error alone.
+    result.applyStatus = ConfigurationApplyStatus::Failed;
   }
 
   // A dropped baud rate is reported rather than silently ignored: the caller

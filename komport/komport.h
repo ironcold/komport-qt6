@@ -270,10 +270,9 @@ class KomportApp : public QMainWindow
      *  profile ..."/"Ready." status message doesn't immediately overwrite
      *  a serial error that was just reported while applying the new
      *  settings. KomportSerial::applyConfiguration() and open() are called
-     *  from those two methods; the configuration transaction reports its
-     *  failure synchronously, while a failed open reaches settingsFailed()
-     *  through QSerialPort::errorOccurred() and may therefore arrive
-     *  synchronously or asynchronously. */
+     *  from those two methods; a failed open emits settingsFailed() directly
+     *  and synchronously before open() returns, while the QSerialPort error of
+     *  that same attempt is suppressed as its duplicate. */
     bool mSerialErrorPending = false;
 
     // Actions

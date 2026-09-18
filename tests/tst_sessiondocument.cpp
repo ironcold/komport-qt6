@@ -107,9 +107,23 @@ void TstSessionDocument::theDocumentOwnerControllerObservesTheDocumentTransport(
   QByteArray observed;
   for ( int i = 2; i < events.size(); ++i ) {
     QCOMPARE(events.at(i).direction == SessionDirection::Rx, true);
+    QVERIFY(!events.at(i).payload.isEmpty());   // no event is empty (SPEC-M8 13)
     observed += events.at(i).payload;
   }
   QCOMPARE(observed, payload);
+
+  // TX through the same session: byte-exact, non-empty TX events, in order.
+  const int eventsBeforeTx = events.size();
+  const QByteArray outgoing("TX\0data", 7);
+  QCOMPARE(document.getSerial()->writeBytes(outgoing), qint64(outgoing.size()));
+  QTRY_VERIFY_WITH_TIMEOUT(events.size() > eventsBeforeTx, 5000);
+  QByteArray observedTx;
+  for ( int i = eventsBeforeTx; i < events.size(); ++i ) {
+    QCOMPARE(events.at(i).direction == SessionDirection::Tx, true);
+    QVERIFY(!events.at(i).payload.isEmpty());
+    observedTx += events.at(i).payload;
+  }
+  QCOMPARE(observedTx, outgoing);
 
   document.getSerial()->close();
   QTRY_VERIFY_WITH_TIMEOUT(events.last().type == SessionEventType::TransportClosed, true);
