@@ -634,7 +634,7 @@ dokumentierte Entscheidungen, keine übersehenen Lücken. Nachtrag
 möglich, siehe Abschnitt 1. Review-Funde und Fixes in `TODO-ARCHIVE.md`
 Abschnitt 23 (23.1 für den Custom-Charset-Nachtrag).
 
-### Meilenstein 8 — Session-/Transport-Fundament — geplant
+### Meilenstein 8 — Session-/Transport-Fundament — Gate geschlossen, Implementierung als nächster Schritt
 
 Die nach dem `v1.0.0`-Release ergänzte Produktvision (verlustfreie Sessions,
 offline Analyse, passive Wiedergabe, spätere Decoder, Simulation und Netzwerk)
@@ -651,9 +651,13 @@ additiven Übergang des bestehenden lokalen Serial-Pfads auf bytegenaue
 Ereignisse und Tests. Kein Dateiformat, kein Replay, kein Decoder, keine
 aktive Übertragung.
 
-**Voraussetzung vor Code:** ADR-002 bis ADR-009 und der M8-Spec müssen nach
-dem neuen Governance-Prozess reviewt und akzeptiert sein. Die darauf folgende
-Reihenfolge bleibt: M9 Recorder/`.kpsession`, M10 Loader und passive Replay,
+**Voraussetzung vor Code — erfüllt (2026-09-18):** ADR-002 bis ADR-009 und der
+M8-Spec sind nach dem neuen Governance-Prozess reviewt und akzeptiert; der
+komplette Review-Verlauf (Pre-Review, fünf unabhängige Codex-Runden, konsolidiertes
+Amendment-Paket und Anwendungs-Verifikation) liegt in `docs/reviews/`, die
+Statuszeilen stehen auf `Accepted`. Der nächste Schritt ist die Umsetzung nach
+`SPEC-M8` Abschnitt 17, Schritte 2–7 (Code, Tests, Selbst- und Fremdreview). Die
+darauf folgende Reihenfolge bleibt: M9 Recorder/`.kpsession`, M10 Loader und passive Replay,
 M11 Decoder, M12 aktive Wiedergabe/exakte Simulation, M13 bedarfsgetriebene
 Bibliotheks-Extraktion plus Analyzer-Start, M14 Mehrquellen-Capture und
 Sniffer-Ansichten im Analyzer, M15 TCP/Remote-Agent.
