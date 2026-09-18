@@ -1,0 +1,24 @@
+## Round 1 review — M9 step 2
+
+**Finding**
+
+- **LOW — TEST GAP:** The new “second activation” test does not traverse the specified close/reopen lifecycle. It calls `scriptOpened(2, ...)` while activation 1 is still live, so it verifies stability across a newer `opened` observation but not across the `TransportClosed → Idle → TransportOpened → Live` transition required by SPEC-M8 §7. [tst_sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessioncontroller.cpp:997)
+
+  Minimal fix: insert `transport.scriptClosed(1, ...)` between the RX on activation 1 and `scriptOpened(2, ...)`, and assert that the reference remains valid with source time `1000` after close and after the subsequent open. The existing expected final timestamp of `4500` should remain valid.
+
+No blocker, high, or medium findings.
+
+The implementation otherwise conforms:
+
+- The global `SessionClockDomainReference` exactly matches ADR-010 D8: `valid`, `sourceTimestampNs`, `sessionTimestampNs`, all with the prescribed defaults; `clockDomainReference() const` returns it by value with no parameters. The added comments do not extend the API. [sessioncontroller.h](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.h:51), [sessioncontroller.h](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.h:106)
+- `valid` mirrors the controller’s existing reference-set state. The reference is set only by `mapSourceTime()` when an accepted observation is delivered; dropped observations never enqueue or map. The failed-open error is accepted and therefore anchors the domain. [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:108), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:200), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:295)
+- Returning `sessionTimestampNs = 0` as a literal is the honest v1 implementation, not hidden divergence: ADR-005 defines the reference session time as exactly zero, and the same mapping sets the anchor’s emitted session time and last-emitted value to zero. Storing a duplicate always-zero member would add avoidable state. [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:91), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:301)
+- The reference never resets on close or later open; only the first mapping can set it. [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:147), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:295)
+- The accessor is side-effect-free: it reads two controller fields into a local value and touches neither FIFO nor delivery state. Calling it from an `eventObserved` handler cannot alter ordering or create reentrancy. [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:87), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:241)
+- No includes were added. The type belongs beside `SessionController`: it is controller-owned clock-domain metadata, not part of an individual `SessionEvent`. The existing Core-only proof already compiles both this header and implementation against `Qt6::Core`; an explicit accessor call is unnecessary for widget-freedom, though the normal controller tests do compile and call it. [tests/CMakeLists.txt](/home/max/Development/misc/komport-qt6/tests/CMakeLists.txt:48)
+- The dropped activation-7 warning is expected: RX 7 is rejected because no activation is live, and the controller emits exactly the SPEC-M8 §7 Qt warning diagnostic—not an event or an unexpected error path. [tst_sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessioncontroller.cpp:980), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:205), [sessioncontroller.cpp](/home/max/Development/misc/komport-qt6/komport/sessioncontroller.cpp:220)
+- The diff is restricted to the three stated files; it adds no recorder, I/O, or application wiring.
+
+**Commit decision:** Yes. This is suitable as one step-2 commit under the workflow: no unresolved blocker/high finding exists. I recommend folding the low test correction into that commit.
+
+**Not independently verified:** I could not build or run the tests in the read-only environment, so the claimed warning-free `-Wall -Wextra` build, `ctest` 14/14 result, and actual recorded warning output remain author-provided evidence. Static inspection did confirm the warning’s documented code path.
