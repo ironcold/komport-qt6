@@ -632,18 +632,27 @@ void KomportApp::applyConnectionSettings()
   // balloon its memory use.
   view->setScrollBuffer( qBound( 0, strScrollBuffer.toInt(), 4096 ) );
   KomportSerial* serial = view->getSerial();
-  // Cleanly disconnect first: a profile switch commonly means switching to
-  // a completely different device, so always close/reapply/reopen rather
-  // than relying on setDeviceName()'s "only reconnect if it actually
-  // changed" shortcut (that one's still used by slotShowPreferences() for
-  // in-place tweaks, where preserving the connection is nicer).
+  // One complete configuration request through the single entry point
+  // (SPEC-M8 6.2). A profile switch commonly means switching to a completely
+  // different device, so disconnect first instead of relying on the in-place
+  // update of a live port (that behaviour is what slotShowPreferences() needs);
+  // the request is stored while the port is closed and, if the open() below
+  // succeeds, that open applies it exactly once as its open-and-configure
+  // transaction. The former per-setter application - and with it the duplicate
+  // hardware write caused by the removed settingsChanged() self-connection - is
+  // gone.
   serial->close();
-  serial->setDeviceName( strDevice );
-  serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
-  serial->setFlowControl( strFlowControl );
-  serial->setBaudRate( strBaudRate );
-  serial->setRxQueue( strRxQueue.toInt() );
-  serial->setFlushRate( strFlushRate.toInt() );
+  TransportConfiguration request;
+  request.endpoint = strDevice;
+  request.baudRate = strBaudRate;
+  request.dataBits = strDataBits;
+  request.stopBits = strStopBits;
+  request.parity = strParity;
+  request.flowControl = strFlowControl;
+  request.startBits = strStartBits;
+  request.rxQueue = strRxQueue.toInt();
+  request.flushRate = strFlushRate.toInt();
+  serial->applyConfiguration( request );
   serial->open();
 
   updateConnectionStatusLabel();
@@ -1247,33 +1256,36 @@ void KomportApp::slotShowPreferences()
 
       view->setScrollBuffer( strScrollBuffer.toInt() );
       KomportSerial* serial = view->getSerial();
-      serial->setDeviceName( strDevice );
-      serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
-      serial->setFlowControl( strFlowControl );
-      // Each of the setters above (setDeviceName()'s internal reopen
-      // included) re-applies the *entire current* field combination to an
-      // already-open port immediately - so setFraming()/setFlowControl()
-      // above can transiently fail on a still-partially-updated
-      // combination (new data bits with the still-old flow control, say),
-      // a false alarm that has nothing to do with the combination the
-      // user actually asked for. setBaudRate() is the last call that
-      // touches the port's settings before open() below, so by the time
-      // it runs every field already has its final value - resetting the
-      // flag immediately before it means only *this* call's result (the
-      // true, fully-applied combination) is what's left standing
-      // afterwards, discarding the earlier calls' transient noise instead
-      // of trusting a weaker proxy like serial->isOpen() (a rejected
-      // setting does not necessarily close an already-open port).
+      // One complete request through the single entry point (SPEC-M8 6.2): a live
+      // port is reconfigured in exactly one transaction with the whole new
+      // combination - unless the request changes the endpoint and that reopen
+      // fails, in which case the transaction reports the failed attempt and leaves
+      // the port closed instead of applying settings. The former per-setter
+      // applications are gone, and with them the transient partially-updated
+      // states (new data bits with the still-old flow control, say) whose false
+      // alarms this code used to discard by resetting mSerialErrorPending
+      // immediately before the last setter.
+      TransportConfiguration request;
+      request.endpoint = strDevice;
+      request.baudRate = strBaudRate;
+      request.dataBits = strDataBits;
+      request.stopBits = strStopBits;
+      request.parity = strParity;
+      request.flowControl = strFlowControl;
+      request.startBits = strStartBits;
+      request.rxQueue = strRxQueue.toInt();
+      request.flushRate = strFlushRate.toInt();
       mSerialErrorPending = false; // see slotSerialSettingsFailed()
-      serial->setBaudRate( strBaudRate );
-      serial->setRxQueue( strRxQueue.toInt() );
-      serial->setFlushRate( strFlushRate.toInt() );
-      // If the port wasn't open at all (nothing above actually applied
-      // anything, since every setter's re-apply is itself gated on
-      // isOpen()), this open() call is what performs the one and only
-      // real application attempt, and its own settingsFailed() (via
-      // slotPortError()) is what will have the final say on the flag.
-      if ( !serial->isOpen() ) serial->open();
+      const ConfigurationResult result = serial->applyConfiguration( request );
+      // If the port wasn't open at all (the transaction above stored the request
+      // without applying anything), this open() call is what performs the one and
+      // only real application attempt, and its own settingsFailed() (via
+      // slotPortError()) is what will have the final say on the flag. The
+      // `storedOnly` condition matters: a *live* endpoint change that fails to
+      // reopen already consumed its attempt inside the transaction (and reported
+      // it), so retrying here would produce a second attempt and a second error
+      // for one user action.
+      if ( !serial->isOpen() && result.storedOnly ) serial->open();
 
       // Milestone 5: font/colors apply live, independent of the serial
       // settings above (no port re-open, no mSerialErrorPending interplay -

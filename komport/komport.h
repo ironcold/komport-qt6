@@ -268,10 +268,12 @@ class KomportApp : public QMainWindow
     /** set by slotSerialSettingsFailed(), checked (and reset) by
      *  loadProfile()/slotShowPreferences() so their own trailing "Loaded
      *  profile ..."/"Ready." status message doesn't immediately overwrite
-     *  a serial error that was just reported synchronously while applying
-     *  the new settings (KomportSerial::open()/applyPortSettings() can
-     *  emit settingsFailed() from inside setDeviceName()/setFraming()/.../
-     *  open(), all called from within those two methods). */
+     *  a serial error that was just reported while applying the new
+     *  settings. KomportSerial::applyConfiguration() and open() are called
+     *  from those two methods; the configuration transaction reports its
+     *  failure synchronously, while a failed open reaches settingsFailed()
+     *  through QSerialPort::errorOccurred() and may therefore arrive
+     *  synchronously or asynchronously. */
     bool mSerialErrorPending = false;
 
     // Actions

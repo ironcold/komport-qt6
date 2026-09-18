@@ -60,6 +60,7 @@ class TstSessionDocument : public QObject
 private slots:
   void theDocumentOwnerControllerObservesTheDocumentTransport();
   void destroyingTheDocumentEndsTheSessionWithoutEvents();
+  void aFailedLiveEndpointChangeIsNotRetried();
 };
 
 void TstSessionDocument::theDocumentOwnerControllerObservesTheDocumentTransport()
@@ -140,6 +141,55 @@ void TstSessionDocument::destroyingTheDocumentEndsTheSessionWithoutEvents()
   const int eventsBeforeDestruction = events;
   document.reset();
   QCOMPARE(events, eventsBeforeDestruction);
+}
+
+void TstSessionDocument::aFailedLiveEndpointChangeIsNotRetried()
+{
+  // Regression for the preferences path (KomportApp::slotShowPreferences): its
+  // trailing "open if the port is closed" must not become a second attempt when a
+  // *live* endpoint change already consumed one and failed. The GUI method itself
+  // cannot be driven from a unit test (it runs a modal dialog), so this test
+  // replays its exact sequence and guard against the real document, transport and
+  // controller - the property under test is the one the guard depends on.
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+
+  std::unique_ptr<KomportDoc> document = std::make_unique<KomportDoc>(nullptr);
+  KomportSerial *serial = document->getSerial();
+  serial->setDeviceName(slaveName);
+  QVERIFY(serial->open());
+  QVERIFY(serial->isOpen());
+
+  int failedOpenEvents = 0;
+  QObject::connect(document->getSessionController(), &SessionController::eventObserved,
+                   [&failedOpenEvents](const SessionEvent &_event) {
+                     if (_event.type == SessionEventType::Error
+                         && _event.metadata.value(QStringLiteral("kind")).toString()
+                                == QStringLiteral("open")) {
+                       ++failedOpenEvents;
+                     }
+                   });
+
+  // The one request of the dialog, with an endpoint that cannot be opened: the
+  // transaction closes the live activation, consumes one attempt and reports it.
+  TransportConfiguration request = serial->requestedConfiguration();
+  request.endpoint = QStringLiteral("/dev/komport-m8-endpoint-does-not-exist");
+  const ConfigurationResult result = serial->applyConfiguration(request);
+
+  QCOMPARE(serial->isOpen(), false);
+  QVERIFY(!result.storedOnly);   // the attempt happened - this was not a store-only call
+  QCOMPARE(failedOpenEvents, 1);
+
+  // The application's guard, verbatim: open only when the request was stored on a
+  // closed port. With this result it must not start another attempt.
+  if (!serial->isOpen() && result.storedOnly)
+    serial->open();
+  QCOMPARE(failedOpenEvents, 1);   // exactly one attempt and one error per action
+  QCOMPARE(serial->isOpen(), false);
+  QCOMPARE(document->getSessionController()->state() == SessionController::State::Idle, true);
 }
 
 QTEST_MAIN(TstSessionDocument)
