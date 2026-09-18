@@ -40,9 +40,13 @@ thread, a future remote adapter at the remote agent. `ITransport` neither
 stores sessions nor decodes bytes.
 
 `SessionController` is the sole adapter from transport signals to
-`SessionEvent`: it assigns sequence numbers, maps the transport-relative clock
-to its session-relative clock, and emits events to recorder/UI/decoders. A v1
-session has one active transport source.
+`SessionEvent`: it assigns sequence numbers, associates the controller-owned
+source descriptor/ID, maps the transport-relative clock to its session-relative
+clock, and emits events to recorder/UI/decoders. `ITransport` deliberately has
+no semantic source role: a passive sniffer source may emit only generic `Rx`
+while its controller-owned descriptor says `controller_to_device`. M8 has one
+active transport source; this is an implementation boundary, not an implicit
+constraint of `SessionEvent` or `.kpsession` v1 (ADR-008).
 
 `KomportSerial` is migrated incrementally into the local serial
 implementation and may keep its legacy character methods/signals during the
@@ -54,6 +58,8 @@ transition. No new feature may bypass `ITransport` or `SessionController`.
 - Replay and future TCP/remote transports can feed the same controller.
 - Existing UI migration can be staged through compatibility adapters rather
   than a flag-day rewrite.
+- A future multi-source controller can attach additional transports without
+  making source identity a transport-specific or direction-specific concept.
 
 ## Non-goals
 

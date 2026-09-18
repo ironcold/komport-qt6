@@ -27,6 +27,8 @@ enum class SessionEventType : quint16 {
 };
 struct SessionEvent {
     quint64 sequence;
+    quint32 sourceId;
+    qint64 sourceTimestampNs;
     qint64 timestampNs;
     SessionEventType type;
     SessionDirection direction;
@@ -36,7 +38,13 @@ struct SessionEvent {
 ```
 
 `sequence` is strictly increasing within one session and begins at one.
-`timestampNs` is non-negative and relative to that session's monotonic origin.
+`sourceId` identifies the configured capture source and is independent of
+`direction`; physical capture sources use non-zero IDs, while zero is reserved
+for future session-wide non-data events. `sourceTimestampNs` is the original,
+non-negative monotonic observation time in that source's clock domain.
+`timestampNs` is the non-negative session-timeline time derived from the source
+time; for M8's sole local source both values use the same common monotonic
+clock. Future alignment must never overwrite `sourceTimestampNs`.
 For `Data`, direction is exactly `Tx` or `Rx`; `payload` is the non-empty,
 unmodified binary byte chunk observed by the transport. Non-data events
 use `None` and an empty payload. Metadata is structured JSON-compatible data;
@@ -53,6 +61,9 @@ must not modify the event or use derived data as its replacement.
   of recorder truth.
 - The session layer must preserve chunks and order even when terminal display
   continues to consume individual characters.
+- A source can be described and persisted independently of its generic TX/RX
+  direction, allowing passive dual-RX sniffing and later multi-source capture
+  without redefining the event model.
 
 ## Alternatives considered
 
@@ -68,3 +79,4 @@ must not modify the event or use derived data as its replacement.
 
 - `docs/komport-session-replay-simulation-architecture.md`, sections 5–8
 - `docs/komport-engineering-governance-spec-review-workflow.md`, sections 16.1–16.2
+- ADR-008

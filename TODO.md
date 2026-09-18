@@ -640,24 +640,76 @@ Die nach dem `v1.0.0`-Release ergänzte Produktvision (verlustfreie Sessions,
 offline Analyse, passive Wiedergabe, spätere Decoder, Simulation und Netzwerk)
 beginnt bewusst nicht mit einem UI-Feature. Zuerst wird die gemeinsame,
 transportneutrale Grundlage aus `SessionEvent`, `ITransport` und einem
-`SessionController` gebaut. Der erste Code-Schnitt ist
+`SessionController` gebaut. Das Eventmodell enthält von Anfang an eine stabile
+Quellidentität, getrennt von TX/RX, sowie unveränderte Quellzeit und abgeleitete
+Sitzungszeit (ADR-008); der erste Code-Schnitt bleibt dennoch genau eine lokale
+Quelle. Die neuen Wert- und Transportverträge bleiben Widget- und
+Frontend-neutral (ADR-009), ohne dafür jetzt Bibliotheken oder weitere Binaries
+aus dem bestehenden Terminal herauszulösen. Er ist
 `docs/specs/SPEC-M8-session-transport-foundation.md`; er umfasst nur den
 additiven Übergang des bestehenden lokalen Serial-Pfads auf bytegenaue
 Ereignisse und Tests. Kein Dateiformat, kein Replay, kein Decoder, keine
 aktive Übertragung.
 
-**Voraussetzung vor Code:** ADR-002 bis ADR-007 und der M8-Spec müssen nach
+**Voraussetzung vor Code:** ADR-002 bis ADR-009 und der M8-Spec müssen nach
 dem neuen Governance-Prozess reviewt und akzeptiert sein. Die darauf folgende
 Reihenfolge bleibt: M9 Recorder/`.kpsession`, M10 Loader und passive Replay,
-M11 Decoder, M12 aktive Wiedergabe/exakte Simulation, erst danach
-TCP/Remote-Agent.
+M11 Decoder, M12 aktive Wiedergabe/exakte Simulation, M13 bedarfsgetriebene
+Bibliotheks-Extraktion plus Analyzer-Start, M14 Mehrquellen-Capture und
+Sniffer-Ansichten im Analyzer, M15 TCP/Remote-Agent.
+
+### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
+
+Quelle: `docs/komport-multi-executable-product-architecture.md` und ADR-009.
+Erst wenn Analyzer- oder Agent-Code tatsächlich ansteht, werden die bis dahin
+bewährten, logisch bereits separaten Verträge schrittweise in gemeinsame
+Bibliotheken überführt. Zielprodukte sind das vorhandene schlanke Terminal
+`komport-qt6`, ein `komport-analyzer` für Analyse/Replay/Simulation und ein
+headless-fähiger `komport-agent` für physische Remote-Transporte.
+
+Das ist ausdrücklich **kein** vorgezogener Umbau: keine Analyzer-/Agent-Skelette,
+keine neue Paketstruktur und keine pauschale Aufteilung aller Klassen. Jede
+Extraktion beginnt mit einem akzeptierten Spec, Tests um das betroffene
+Verhalten und einer kleinen, rückwärtskompatiblen Schnittstelle. Apps dürfen
+gemeinsame Bibliotheken nutzen; Bibliotheken und Apps dürfen niemals von
+Frontend-Interna oder voneinander abhängen.
+
+### Meilenstein 14 — Mehrquellen-Capture / Multi-Port-Sniffer — Backlog
+
+Quelle: `docs/komport-multiport-sniffer-time-alignment.md`. Der spätere
+`komport-analyzer` soll zwei
+oder mehr passiv beobachtete Kommunikationskanäle als **eine** bytegenaue
+Session erfassen und daraus Interleaved-, Split-, Hex-, Text-, Decoder- und
+Timeline-Ansichten ableiten. Die Ansichten besitzen keine eigenen
+Empfangspuffer; sie konsumieren denselben sortierten `SessionEvent`-Strom.
+
+Der erste Schnitt ist lokal: mehrere Ports eines Prozesses bzw. eines Remote
+Agents teilen eine monotone Uhr und können deshalb direkt auf einer Timeline
+geordnet werden. Quell-ID, generische TX/RX-Richtung und die semantische Rolle
+einer Sniffer-Quelle bleiben getrennt. Bei passiver Beobachtung sind beide
+Ports technisch RX; die Rolle (etwa `controller_to_device`) gehört in die
+Quellbeschreibung, nicht in die Richtung.
+
+Capture über mehrere unabhängige Hosts ist ein nachgelagerter Teil dieses
+Meilensteins. Er erhält pro Quelle die rohe monotone Zeit und leitet eine
+gemeinsame Sitzungszeit nur über versionierte Clock-Mappings (Offset, Drift/
+Skalierung, Unsicherheit) ab. Ohne belastbares Mapping muss die UI die
+Zeitqualität als unsynchronisiert bzw. geschätzt ausweisen; sie darf keine
+scheinpräzise Reihenfolge behaupten. Physikalisch bitgenaue Reihenfolge ist
+nicht das Ziel — dafür bleibt ein Logic Analyzer zuständig.
+
+**Voraussetzung vor Code:** ADR-008 und eine separate, reviewte
+Implementierungsspezifikation. M8 wird dadurch nicht zu einem Multi-Port-
+Projekt aufgeweitet.
 
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 
 Architektonischer Leitfaden für später, explizit **nicht** für den aktuellen
 1.x-Sprint gedacht — nur als Hinweis, die bestehende Modularität
-(`KomportSerial`, `KomportEmulation`) so zu belassen, dass sie später
-wiederverwendbar bleibt:
+(`KomportSerial`, `KomportEmulation`) so zu belassen, dass sie später nach
+ADR-009 in gemeinsame Bibliotheken überführt werden kann. Der hier ältere
+Begriff `komport-daemon` bezeichnet dabei den späteren `komport-agent`, nicht
+einen zusätzlichen Bestandteil des Terminal-Programms:
 
 - **Modus A — abgesetzter Dienst (Serial-over-TCP / RFC 2217):** ein neues,
   leichtgewichtiges Headless-`komport-daemon`-Target (systemd-Dienst auf

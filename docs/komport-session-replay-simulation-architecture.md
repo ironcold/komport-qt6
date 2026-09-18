@@ -217,6 +217,8 @@ enum class SessionEventType {
 
 struct SessionEvent {
     quint64 sequence;
+    quint32 sourceId;
+    qint64 sourceTimestampNs;
     qint64 timestampNs;
     SessionEventType type;
     SessionDirection direction;
@@ -225,7 +227,16 @@ struct SessionEvent {
 };
 ```
 
-`timestampNs` should be relative to the session start.
+`sourceId` identifies a configured capture source and is independent of
+direction. `sourceTimestampNs` is the immutable monotonic observation time in
+that source's clock domain. `timestampNs` is the derived time on the common
+session timeline; with a single local source it can use the same clock.
+
+Source descriptors (name, transport/configuration and optional semantic role)
+belong in the session header. A passive dual-port sniffer can therefore retain
+`Rx` for both physical receive ports while labeling their roles as
+controller-to-device and device-to-controller. Do not encode those roles by
+redefining TX/RX.
 
 A separate wall-clock timestamp should be stored in the session header.
 
@@ -352,17 +363,21 @@ Example:
     "name": "Komport",
     "version": "6.x"
   },
-  "transport": {
-    "type": "serial",
-    "endpoint": "/dev/ttyUSB0",
-    "settings": {
-      "baud": 9600,
-      "dataBits": 8,
-      "parity": "none",
-      "stopBits": 1,
-      "flowControl": "none"
+  "sources": [{
+    "id": 1,
+    "name": "local serial",
+    "transport": {
+      "type": "serial",
+      "endpoint": "/dev/ttyUSB0",
+      "settings": {
+        "baud": 9600,
+        "dataBits": 8,
+        "parity": "none",
+        "stopBits": 1,
+        "flowControl": "none"
+      }
     }
-  },
+  }],
   "capture": {
     "clock": "monotonic",
     "timestampResolution": "ns"
@@ -391,7 +406,9 @@ record length
 event type
 direction
 sequence
-relative timestamp
+source ID
+source-local timestamp
+aligned session timestamp
 metadata length
 metadata JSON
 payload length
@@ -407,6 +424,8 @@ struct EventRecordHeaderV1 {
     quint8 direction;
     quint8 flags;
     quint64 sequence;
+    quint32 sourceId;
+    qint64 sourceTimestampNs;
     qint64 timestampNs;
     quint32 metadataLength;
     quint32 payloadLength;
@@ -927,6 +946,12 @@ requiresTiming
 
 The planned network capability affects the architecture, but it should NOT be implemented before the local event model is clean.
 
+The focused terminal, future analyzer and future headless agent are peer
+frontends over application-neutral contracts (ADR-009). This is a logical
+boundary first: it does not require an immediate CMake or directory rewrite.
+The analyzer owns advanced multi-source/timeline workflows; the agent owns
+remote physical transports. Neither may depend on terminal UI internals.
+
 Recommended order:
 
 ## Phase 1 – Transport-neutral event model
@@ -1181,7 +1206,11 @@ The agent sends already-timestamped events.
 
 The session remains an ordered event stream.
 
-If multiple remote sources are recorded simultaneously later, clock synchronization becomes a separate problem.
+For a later multi-source session, retain each source-local timestamp and map it
+to session time through explicit offset/scale/uncertainty metadata. Sources on
+one capture host/agent should share one monotonic clock and can be directly
+ordered. Independent hosts require a separate clock-synchronization design;
+the UI must expose uncertainty rather than invent an exact cross-host order.
 
 For a single remote serial endpoint, relative timestamps from the agent are sufficient.
 
@@ -1551,10 +1580,13 @@ Strong recommendation:
 11. Modbus RTU decoder
 12. Active TX replay
 13. Sequential exact-match device simulator
-14. TCP transport
-15. Remote Komport agent protocol
-16. Decoder-aware simulation
-17. Parameter editing / fault injection
+14. Focused shared-library extraction and analyzer skeleton, when first needed
+15. Multi-source recording and local dual-port sniffer event merge in analyzer
+16. Interleaved/split/timeline analyzer views
+17. TCP transport and remote Komport-agent protocol
+18. Cross-host clock alignment with visible uncertainty, when needed
+19. Decoder-aware simulation
+20. Parameter editing / fault injection
 ```
 
 The network layer should therefore NOT be implemented first.
@@ -1569,6 +1601,10 @@ Specifically:
 - session events must be serializable
 - binary data must remain binary
 - direction semantics must be globally fixed
+- source identity must remain separate from direction and raw source time must
+  remain available alongside any aligned session time
+- public shared contracts must not depend on terminal, analyzer or agent UI
+  code; physical library extraction is incremental and demand-driven
 
 If these rules are followed, network support becomes an additional transport instead of an architectural rewrite.
 

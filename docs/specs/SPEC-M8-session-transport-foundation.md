@@ -16,7 +16,8 @@ bytes.
 
 Included:
 
-- `SessionEvent`, direction and event-type value types from ADR-002/004/005.
+- `SessionEvent`, source-ID, direction and event-type value types from
+  ADR-002/004/005/008.
 - `ITransport` v1 from ADR-003.
 - Migration of `KomportSerial` into the local `ITransport` implementation
   while preserving its existing character-oriented public API as a temporary
@@ -31,6 +32,10 @@ Included:
 - No `.kpsession` reader/writer, load/save UI or replacement of the current
   text logger.
 - No replay, simulation, TCP, remote agent, decoder framework or UI timeline.
+- No multi-source controller, clock synchronization, offset/drift estimation,
+  time-alignment persistence or alignment UI.
+- No analyzer/agent executable, shared-library extraction, CMake target split
+  or migration of existing terminal UI classes.
 - No change to serial settings, charset translation, macros or file transfer
   semantics.
 - No removal of legacy `receivedChar`/`sentChar` signals in M8.
@@ -41,7 +46,7 @@ Included:
   20–23, 39 and 42.
 - `docs/komport-engineering-governance-spec-review-workflow.md`, sections
   7–10 and 16.
-- ADR-002 through ADR-007.
+- ADR-002 through ADR-009.
 
 ## 5. Current State
 
@@ -58,10 +63,13 @@ represented.
 ### 6.1 New components
 
 - `sessionevent.h`: `SessionEvent`, `SessionDirection`, `SessionEventType`.
+  Its public value types use QtCore only and no QWidget, `KomportApp` or other
+  executable-specific type.
 - `itransport.h`: `ITransport` and its binary chunk notifications.
 - `sessioncontroller.h/.cpp`: binds one `ITransport` to one live session;
-  assigns `sequence`, normalizes the monotonic source timestamp to the
-  session origin, emits `SessionEvent`.
+  assigns `sequence` and physical `sourceId` 1, preserves the monotonic source
+  timestamp and derives the session timestamp in the same local clock domain,
+  then emits `SessionEvent`. It introduces no runtime clock-alignment object.
 
 ### 6.2 Existing components
 
@@ -82,8 +90,12 @@ and never credentials. Modem-line events are part of the frozen `ITransport`
 surface but remain unimplemented until a transport actually exposes them.
 
 `KomportDoc` owns the transport and `SessionController`; it exposes only the
-controller's read-only event signal to new consumers. No Qt widget gains a
-`QSerialPort` dependency.
+controller's read-only event signal to new consumers. It configures source ID
+1 and its serial descriptor. No Qt widget gains a `QSerialPort` dependency.
+The transport owns no semantic source role: future passive sniffing can retain
+generic Rx and attach its communication role to the source descriptor.
+This ownership is an incremental adapter in the current terminal, not a claim
+that `KomportDoc` is the future analyzer/agent base class (ADR-009).
 
 ### 6.3 Data flow
 
@@ -107,7 +119,7 @@ M8 does not replace terminal rendering with SessionEvent delivery.
 
 - construction: `Idle`
 - transport opened: begin a new one-source live session, reset sequence to one
-  and capture the transport-origin offset: `Live`
+  and establish the source-time to session-time mapping: `Live`
 - observations in `Live`: emit ordered events
 - transport closed or destruction: emit closing event once, then `Closed`
 
@@ -121,6 +133,8 @@ A failed open produces an error observation but does not enter `Live`.
   splits it.
 - `sequence` strictly increases; equal timestamps are still ordered by
   sequence.
+- Every event has source ID 1, preserves its source timestamp, and has a
+  session timestamp derived from the same local common monotonic clock.
 - RX and TX use ADR-004 semantics.
 - No live event is created from terminal-decoded text or charset-converted
   data.
@@ -146,10 +160,19 @@ thread; no queue, lock, worker or cross-thread lifetime rule is introduced.
 ## 11. Persistence, replay and network impact
 
 M8 introduces no persistence and no replay. Its events satisfy ADR-006's
-future writer input. One active local transport is deliberate; remote adapters
-will supply the same observation contract with source-side timestamps. Passive
-replay later feeds `SessionEvent` into the same downstream consumer interface,
-but is not a transport or writer in this milestone.
+future writer input, including source identity and raw source timing. One
+active local transport is deliberate; it is not a format limitation. Remote
+adapters will supply the same observation contract with source-side timestamps.
+Multi-source capture and all clock-alignment behavior are explicitly deferred
+to the ADR-008 backlog; M8 has neither synchronization protocol nor mapping
+estimation/persistence. Passive replay later feeds `SessionEvent` into the same
+downstream consumer interface, but is not a transport or writer in this
+milestone.
+
+The physical build remains one existing executable and object library. M8
+creates only logical seams: its new public session/transport contracts must not
+depend on widgets or terminal application internals. A later accepted M13 spec
+decides whether and how those seams are extracted into shared library targets.
 
 ## 12. Safety
 
@@ -163,7 +186,8 @@ Unit tests:
 
 - value semantics for every event type/direction invariant;
 - sequence reset on a new live session and strict increment thereafter;
-- timestamp normalization and non-decreasing clamp.
+- source ID assignment, source-time preservation, timestamp normalization and
+  non-decreasing aligned-time clamp.
 
 PTY integration tests:
 
@@ -186,6 +210,10 @@ Regression tests:
 - [ ] Current serial I/O exposes binary chunk observations without changing
   legacy public calls/signals.
 - [ ] A document-owned controller emits ordered, byte-exact live events.
+- [ ] Every M8 event carries source ID 1 and preserves source-local timing
+  separately from its derived session time.
+- [ ] New public session/transport value contracts have no QWidget or
+  executable-specific type dependency.
 - [ ] Open, close, error and effective serial configuration are observable as
   non-data events without changing their existing UI behavior.
 - [ ] NUL/all-byte PTY tests pass.
@@ -203,12 +231,12 @@ Regression tests:
 
 ## 16. Decision required
 
-None. The decisions needed for M8 are proposed in ADR-002 through ADR-007.
+None. The decisions needed for M8 are proposed in ADR-002 through ADR-009.
 They must be reviewed and accepted before implementation begins.
 
 ## 17. Implementation plan
 
-1. Review and accept ADR-002 through ADR-007 and this spec.
+1. Review and accept ADR-002 through ADR-009 and this spec.
 2. Add core value/interface types and CMake entries.
 3. Implement additive raw-chunk observations in `KomportSerial`.
 4. Implement document-owned `SessionController`.

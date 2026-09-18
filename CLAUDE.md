@@ -76,11 +76,29 @@ Netzwerktransporten ist in diesen Dokumenten festgelegt:
   empfohlene Reihenfolge.
 - `docs/komport-engineering-governance-spec-review-workflow.md` — verbindlich:
   reviewed spec before production code.
-- `docs/architecture-decisions/ADR-002` bis `ADR-007` — vorgeschlagene
+- `docs/architecture-decisions/ADR-002` bis `ADR-009` — vorgeschlagene
   Foundation-Verträge für Event, Transport, Richtung, Zeit, Dateiformat und
-  Replay-Sicherheit.
+  Replay-Sicherheit sowie Quellzeit und Produktgrenzen.
 - `docs/specs/SPEC-M8-session-transport-foundation.md` — erster, bewusst
   schmaler Implementierungsschnitt.
+- `docs/komport-multi-executable-product-architecture.md` — Zielbild für
+  schlankes Terminal, späteren Analyzer und Headless-Agent auf gemeinsamen
+  Bibliotheken.
+
+Der Multi-Port-Sniffer ist als eigenes späteres Backlog in
+`docs/komport-multiport-sniffer-time-alignment.md` beschrieben. Bereits das
+Session-Fundament muss deshalb Quellidentität von der lokalen TX/RX-Richtung
+trennen und die beobachtete Quellzeit neben einer abgeleiteten Sitzungszeit
+erhalten. M8 implementiert dennoch nur eine lokale Quelle; Mehrquellen-Capture,
+Sniffer-Ansichten und Clock-Alignment bleiben explizit spätere, spezifizierte
+Meilensteine (ADR-008).
+
+Das heutige `komport-qt6` bleibt das Terminal. `komport-analyzer` und
+`komport-agent` sind keine M8-Artefakte und lösen keinen Sofort-Umbau aus.
+Neue Session-/Transport-Verträge werden jedoch Widget- und Frontend-neutral
+gehalten, damit eine spätere, bedarfsgetriebene Bibliotheks-Extraktion ohne
+Abhängigkeit eines Programms von den Interna eines anderen möglich bleibt
+(ADR-009).
 
 Die bisherigen Einzelzeichen-Signale und der Text-Logger sind keine
 verlustfreie Session-Architektur. Neuer Recorder-/Decoder-/Replay-Code darf

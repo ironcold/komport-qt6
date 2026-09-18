@@ -32,6 +32,8 @@ u16 eventType
 u8  direction
 u8  flags (must be zero in v1)
 u64 sequence
+u32 sourceId
+i64 sourceTimestampNs
 i64 timestampNs
 u32 metadataLength
 u32 payloadLength
@@ -46,9 +48,14 @@ complete record fails loading. A truncated final record is ignored and reported
 as recovered, never treated as a valid complete event.
 
 The JSON header contains format/version, wall-clock creation time, application
-version, transport descriptor/configuration snapshot, capture clock metadata,
-optional decoder hints and notes. It must never contain decoded output as
-authoritative data.
+version, an array of source descriptors/configuration snapshots, capture clock
+domains, optional decoder hints and notes. A one-source M9 file writes an
+array with exactly one physical source. Each descriptor carries its non-zero
+`sourceId`; its semantic role is metadata and does not redefine the event's
+generic TX/RX direction. No M9 alignment mapping is written or interpreted.
+A later, separately specified extension may add versioned derived mapping
+metadata; it must never replace the raw per-event `sourceTimestampNs`. The
+header must never contain decoded output as authoritative data.
 
 ## Consequences
 
@@ -56,8 +63,11 @@ authoritative data.
 - Future versions can add flag-gated fields or new event types while v1 readers
   reject unsupported critical versions rather than misread them.
 - CRCs, indexes, compression and simulation overlays remain later extensions.
+- Sessions captured by one source remain straightforward, while a later
+  multi-source recorder need not invent an incompatible second format.
 
 ## References
 
 - `docs/komport-session-replay-simulation-architecture.md`, section 7
 - ADR-002, ADR-004, ADR-005
+- ADR-008
