@@ -35,6 +35,9 @@ komport_add_test(tst_sessioncontroller)
 # M8: document ownership of the controller against the real transport (pty).
 komport_add_test(tst_sessiondocument)
 target_link_libraries(tst_sessiondocument PRIVATE util)
+# M9: the `.kpsession` v1 byte assembly (header block, record prefix, limits).
+# Pure byte-level work, no file I/O and no pty, so no libutil.
+komport_add_test(tst_sessionrecordcodec)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
@@ -54,6 +57,7 @@ add_library(komport_session_contract_check OBJECT
   ${CMAKE_SOURCE_DIR}/komport/itransport.cpp
   ${CMAKE_SOURCE_DIR}/komport/transportconfiguration.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessioncontroller.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessionrecordcodec.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
 target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)
