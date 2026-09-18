@@ -689,8 +689,22 @@ begrenzt), Fehlversuch/Grenzen als `Damaged`, explizite Nutzeraktion
 File-Sink- und Scheduler-Seam. Zwei Amendments an akzeptierten Dokumenten gehören
 dazu: das normative v1-Writer-Profil in `ADR-006` (Member-Namen, Typen und die
 verschachtelte Konfigurationsform des Headers) und der read-only
-Clock-Domain-Reference-Accessor in `SPEC-M8` §6.2 (ADR-010 D8). Implementierung
-nach `SPEC-M9` §11, Schritt 1; vorher kein Produktivcode.
+Clock-Domain-Reference-Accessor in `SPEC-M8` §6.2 (ADR-010 D8). Implementierung **abgeschlossen (2026-09-18):** `SPEC-M9` §11 Schritte 1–7 sind
+umgesetzt und einzeln reviewt — `SessionRecordCodec`, der D8-Accessor am
+`SessionController`, `SessionRecorder` (Streaming, Start-Flush, Ein-Sekunden-Timer,
+`Damaged`-Pfade), Dokument-Eigentum mit `KomportDoc::closeSession()`, der read-only
+Snapshot-Accessor (ADR-010 D7), die App-Verdrahtung (`Record Live Session...`,
+dauerhafter Statusindikator, Report über den Übersetzungsmechanismus) und der
+PTY-Ende-zu-Ende-Test. Der Abschluss-Review hat M9 nach vier Runden geschlossen
+(`docs/reviews/2026-09-18-M9-final-implementation-review*.md`), Selbstreview und
+Kriterien-Abbildung liegen in `docs/reviews/2026-09-18-M9-implementation-selfreview.md`.
+Die Abnahmezeile `SPEC-M9` §8 ist bis auf das offen bleibende Kriterium „echter
+Qt-6.3-Build" abgehakt (keine CI, lokal Qt 6.11.1). Offen und dokumentiert: der
+Legacy-RX-Puffer-Flush aus M8, die nicht gemessene (nur statisch hergeleitete)
+Speicherzusage des Recorders, und der noch ungebaute Reader/Replay-Player. Der Merge
+nach `master` ist eine eigene, noch offene Entscheidung. Nächster Schritt: **M10**
+(Loader und passive Replay-Sicht) — der erste und einzige Produktivkonsument des
+Formats.
 
 ### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
 
