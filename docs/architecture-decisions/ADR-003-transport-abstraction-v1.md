@@ -18,6 +18,9 @@ Introduce a `QObject`-based `ITransport` v1. It owns byte movement only:
 class ITransport : public QObject {
     Q_OBJECT
 public:
+    // The contract is a QObject so an implementation can be parented in the
+    // owning object's tree; it still owns byte movement only, never a session.
+    explicit ITransport(QObject *parent = nullptr);
     virtual ~ITransport() = default;
     virtual bool open() = 0;
     virtual void close() = 0;

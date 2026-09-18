@@ -152,10 +152,11 @@ public slots: // Public slots
   void setBaudRate(qint32 _baud);
   /** Set the baud rate, parsed from a string (as used by the settings dialog / config file). */
   void setBaudRate(const QString &_baud);
-  /** put a character. Returns false if the port isn't open or the
-   *  underlying write failed (nothing was sent) - callers that need to
-   *  know whether a byte actually made it out (e.g. file transfers) can
-   *  check this instead of assuming success. */
+  /** put a character. Returns false if the port isn't open or the transport
+   *  refused (part of) the bytes. "Accepted" means accepted by the transport
+   *  API - never physically delivered (ADR-003); callers that need to know
+   *  whether the bytes were accepted (e.g. file transfers) can check this
+   *  instead of assuming success. */
   bool putChar(char _ch);
   /** transmit a null-terminated string. Returns false if the port isn't
    *  open or the write was partial/failed (logged via qWarning() either
@@ -189,7 +190,7 @@ signals: // Signals
   void settingsFailed(const QString &_reason);
   /** received a char */
   void receivedChar(char _ch);
-  /** a char was actually written to the port (for e.g. the hex monitor) */
+  /** a char of an accepted write, in order (for e.g. the hex monitor) */
   void sentChar(char _ch);
 private: // Private attributes
   /** the underlying Qt serial port */

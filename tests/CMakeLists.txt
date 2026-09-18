@@ -43,13 +43,16 @@ komport_add_test(tst_charset)
 komport_add_test(tst_i18n)
 
 # M8 (SPEC-M8 section 14, ADR-009): the new public session and transport
-# contracts must not depend on widgets. This object target compiles them (and one
-# implementation unit) against Qt6::Core alone - no komport_core, no Qt6::Widgets,
-# no Qt6::Test - so a widget or executable-specific type creeping into
-# sessionevent.h / itransport.h / transportconfiguration.h breaks the build.
+# contracts must not depend on widgets. This object target compiles every
+# implementation unit of that public surface against Qt6::Core alone - no
+# komport_core, no Qt6::Widgets, no Qt6::Test - so a widget or
+# executable-specific type creeping into sessionevent.h / itransport.h /
+# transportconfiguration.h / sessioncontroller.h breaks the build. The assertion
+# is about the units, not only about including the headers.
 add_library(komport_session_contract_check OBJECT
   session_contract_compile.cpp
   ${CMAKE_SOURCE_DIR}/komport/itransport.cpp
+  ${CMAKE_SOURCE_DIR}/komport/transportconfiguration.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessioncontroller.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
