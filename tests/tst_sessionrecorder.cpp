@@ -301,6 +301,7 @@ private slots:
   void theReportedDurationComesFromTheMonotonicClock();
   void startAfterADamagedRecordingFinalisesItAndStartsANewFile();
   void aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile();
+  void aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile();
   void anEventThatCannotBeEncodedReportsItsSequenceAndSizes();
   void aShortWriteReportsEveryAcceptedByte();
   void anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal();
@@ -752,6 +753,29 @@ void TstSessionRecorder::anEventThatCannotBeEncodedReportsItsSequenceAndSizes()
   QVERIFY(ended.at(0).reason.contains(QStringLiteral("metadata bytes")));
   QCOMPARE(static_cast<int>(fixture.recorder.state()), static_cast<int>(SessionRecorder::State::Damaged));
   QCOMPARE(fixture.recorder.stop().records, quint64(0));
+}
+
+/** A flush that fails before the recording became live is a refused start, not a
+  *  damage: there is no recording to damage (ADR-010 8, clarified). */
+void TstSessionRecorder::aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile()
+{
+  Fixture fixture;
+  fixture.goLive(1000);
+  fixture.sink.failFlushCall = 1;               // the start flush itself
+
+  const SessionRecordingStart start =
+      fixture.recorder.start(recordingRequest(QStringLiteral("/tmp/u.kpsession")));
+  QCOMPARE(start.ok, false);
+  QVERIFY(start.reason.contains(QStringLiteral("flushed")));
+  QCOMPARE(fixture.sink.isOpen(), false);
+  QCOMPARE(static_cast<int>(fixture.recorder.state()), static_cast<int>(SessionRecorder::State::Stopped));
+  // A failed flush destroys nothing: the bytes the sink accepted form a complete
+  // header. What failed is their durability, which the scripted sink cannot show -
+  // and that is the reason the start is refused rather than reported as damaged.
+  QCOMPARE(readSessionRecordFile(fixture.sink.acceptedBytes()).loadable, true);
+
+  // Nothing is damaged, only refused: a new recording starts right afterwards.
+  QVERIFY(fixture.recorder.start(recordingRequest(QStringLiteral("/tmp/v.kpsession"))).ok);
 }
 
 /** The report counts every byte the sink accepted, including a partial tail, so

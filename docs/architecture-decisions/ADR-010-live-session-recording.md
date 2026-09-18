@@ -169,7 +169,10 @@ no durable-storage bound at all. Stated honestly:
   written *and flushed* - that is, after the start flush of §4, which is what puts
   the header on disk instead of in the process buffer.
 - A flush failure is a damaged-state transition: the recording stops and is
-  reported like a write failure.
+  reported like a write failure. This applies to a *running* recording. A flush
+  that fails while the start block is being written - before the recording became
+  `Live` - is not a damage: there is no recording yet, so the start is refused with
+  a reason, and the reason names the possibly incomplete file.
 
 The flush policy is a **periodic** flush on the session thread, not a check that
 only happens when something else moves: as soon as a write leaves unflushed data
@@ -183,7 +186,10 @@ writer's own buffer; it is not a durability guarantee, and v1 makes none.
 ### 9. Finalisation
 
 Stopping closes the file after a final flush and reports the outcome: path,
-complete record count, bytes written, session duration, and any error. Stopping
+complete record count, bytes written, session duration, and any error. The count
+reaches the user through Qt's numerus API, which takes an `int`: a count above
+`INT_MAX` (at least ~94 GB of records) cannot be rendered in a status message,
+while the recorder itself places no limit on it. Stopping
 the application follows the ordering of §1, and it reports through the log rather
 than the status bar: the window is closing, so a visible message would not be read.
 A damaged close is logged with the same facts the visible report would carry (path,

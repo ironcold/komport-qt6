@@ -1518,14 +1518,18 @@ void KomportApp::updateRecordingUi()
 QString KomportApp::recordingSummary(const SessionRecordingReport &_report) const
 {
   const QString seconds = QString::number( double(_report.durationNs) / 1e9, 'f', 1 );
+  // Qt's numerus API takes an int, so the count is narrowed here deliberately: each
+  // record costs at least 44 bytes plus payload, so a count beyond INT_MAX would mean
+  // at least ~94 GB of records. It is a status-message bound, not a recording limit
+  // (ADR-010 6), and the counter itself stays a quint64.
+  const int pluralCount = int( _report.records );
   if ( _report.damaged )
     return tr("Recording ended damaged: %n complete record(s), %2 bytes written in %3 s, into %4: %5",
-              nullptr, int(_report.records))
+              nullptr, pluralCount)
         .arg( _report.bytes ).arg( seconds ).arg( _report.path ).arg( _report.reason );
   if ( _report.records == 0 )
     return tr("Recording stopped: no session data recorded, into %1").arg( _report.path );
-  return tr("Recording stopped: %n complete record(s), %2 bytes in %3 s, into %4",
-            nullptr, int(_report.records))
+  return tr("Recording stopped: %n complete record(s), %2 bytes in %3 s, into %4", nullptr, pluralCount)
       .arg( _report.bytes ).arg( seconds ).arg( _report.path );
 }
 
