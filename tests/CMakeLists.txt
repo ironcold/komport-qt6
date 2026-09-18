@@ -38,6 +38,10 @@ target_link_libraries(tst_sessiondocument PRIVATE util)
 # M9: the `.kpsession` v1 byte assembly (header block, record prefix, limits).
 # Pure byte-level work, no file I/O and no pty, so no libutil.
 komport_add_test(tst_sessionrecordcodec)
+# M9: the live recorder (streaming, start-flush, periodic flush, damage paths).
+# Uses the scripted sink and the manual flush scheduler, so no disk and no
+# wall-clock time - and no pty, hence no libutil.
+komport_add_test(tst_sessionrecorder)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
@@ -58,6 +62,7 @@ add_library(komport_session_contract_check OBJECT
   ${CMAKE_SOURCE_DIR}/komport/transportconfiguration.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessioncontroller.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionrecordcodec.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessionrecorder.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
 target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)

@@ -90,6 +90,9 @@ add_library(komport_core OBJECT
   komport/sessioncontroller.h
   komport/sessionrecordcodec.cpp
   komport/sessionrecordcodec.h
+  komport/sessionrecorder.cpp
+  komport/sessionrecorder.h
+  komport/sessionrecorderseams.h
   komport/komport.qrc
 )
 
