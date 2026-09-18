@@ -37,6 +37,23 @@
 #include <QQueue>
 #include <QString>
 
+/** The clock domain's anchor reference pair (ADR-010, decision D8).
+  *
+  * The anchor is the domain's first accepted event: its raw source time is the
+  * reference every session timestamp is measured against, and its session time
+  * is exactly 0 (ADR-005, ADR-006). A consumer that starts observing a session
+  * mid-flight - the recorder of M9 - needs this pair to describe the session
+  * truthfully, because the event it happens to see first is not the anchor.
+  *
+  * This is a read-only view of state the controller already keeps; it does not
+  * extend the event surface.
+  */
+struct SessionClockDomainReference {
+  bool valid = false;                ///< false until the domain's first event was accepted
+  qint64 sourceTimestampNs = 0;      ///< the anchor event's raw source time
+  qint64 sessionTimestampNs = 0;     ///< exactly 0 when `valid` (v1: one anchor per domain)
+};
+
 /** Binds one transport to one session (SPEC-M8 6.1).
   *
   * The controller is the only place that assigns a session `sequence` and a
@@ -79,6 +96,14 @@ public:
   quint64 currentActivationId() const { return mCurrentActivationId; }
   /** Sequence of the last emitted event; 0 before the first one (SPEC-M8 8). */
   quint64 lastEmittedSequence() const { return mLastSequence; }
+  /** The clock domain's anchor reference pair (ADR-010 decision D8, recorded as
+    * an M9 addition in SPEC-M8 6.2).
+    *
+    * Read-only: `valid` is false until the domain's first event was accepted, and
+    * once valid the pair never changes - the anchor of a domain is its first
+    * accepted event, whatever a consumer starts observing later.
+    */
+  SessionClockDomainReference clockDomainReference() const;
 
 signals:
   /** One ordered session event: the read-only surface of the session, named by

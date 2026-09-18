@@ -84,6 +84,21 @@ SessionController::~SessionController()
   mFifo.clear();
 }
 
+SessionClockDomainReference SessionController::clockDomainReference() const
+{
+  SessionClockDomainReference reference;
+  reference.valid = mReferenceSet;
+  if (mReferenceSet) {
+    // The anchor's raw source time is the reference ADR-005 measures against, and
+    // its session time is 0 by construction: the mapping subtracts exactly this
+    // value. Both stay fixed for the lifetime of the domain, so a consumer that
+    // starts observing mid-session reads the same pair as one that saw the anchor.
+    reference.sourceTimestampNs = mReferenceSourceTimestampNs;
+    reference.sessionTimestampNs = 0;
+  }
+  return reference;
+}
+
 void SessionController::onBytesReceived(quint64 _activationId, const QByteArray &_bytes,
                                         qint64 _sourceTimestampNs)
 {

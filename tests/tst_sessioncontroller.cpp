@@ -269,6 +269,8 @@ private slots:
   void lateClosedAndRepeatedOpenedAreFiltered();
   void staleAndZeroActivationIdsAreRejectedByTheWatermark();
   void operationTableRowsCrossTheControllerUnchanged();
+  void clockDomainReferenceStartsInvalidAndCarriesTheAnchor();
+  void clockDomainReferenceUsesAFailedOpenAsTheAnchor();
 };
 
 void TstSessionController::oneObservationProducesExactlyOneEvent()
@@ -961,6 +963,76 @@ void TstSessionController::operationTableRowsCrossTheControllerUnchanged()
   // No transaction in this whole sequence leaves a gap in the sequence numbers.
   for ( int i = 0; i < collector.events().size(); ++i )
     QCOMPARE(collector.events().at(i).sequence, quint64(i + 1));
+}
+
+/** The anchor reference of ADR-010 (decision D8): invalid until the domain's
+  *  first event was accepted, then fixed at the anchor's raw source time with
+  *  session time 0 - the pair a recorder writes into a header when it starts
+  *  observing a session that is already running. */
+void TstSessionController::clockDomainReferenceStartsInvalidAndCarriesTheAnchor()
+{
+  ScriptedTransport transport;
+  SessionController controller(&transport);
+  EventCollector collector(&controller, &transport);
+
+  QVERIFY(!controller.clockDomainReference().valid);
+
+  // An observation of an unknown activation is dropped and creates no anchor.
+  transport.scriptRx(7, QByteArrayLiteral("stray"), 500);
+  QVERIFY(!controller.clockDomainReference().valid);
+  QCOMPARE(collector.events().size(), 0);
+
+  // The first accepted event is the anchor.
+  transport.scriptOpened(1, 1000);
+  const SessionClockDomainReference reference = controller.clockDomainReference();
+  QVERIFY(reference.valid);
+  QCOMPARE(reference.sourceTimestampNs, qint64(1000));
+  QCOMPARE(reference.sessionTimestampNs, qint64(0));
+  QCOMPARE(collector.events().at(0).sourceTimestampNs, qint64(1000));
+  QCOMPARE(collector.events().at(0).timestampNs, qint64(0));
+
+  // It stays fixed while the session timeline advances: a consumer that starts
+  // mid-session reads the same pair as one that saw the anchor, and the events it
+  // then observes already carry session times well above zero. The full
+  // close/reopen lifecycle of SPEC-M8 7 must not move it either.
+  transport.scriptRx(1, QByteArrayLiteral("later"), 4500);
+  transport.scriptClosed(1, 4800);
+  QCOMPARE(static_cast<int>(controller.state()), static_cast<int>(SessionController::State::Idle));
+  const SessionClockDomainReference afterClose = controller.clockDomainReference();
+  QVERIFY(afterClose.valid);
+  QCOMPARE(afterClose.sourceTimestampNs, qint64(1000));
+  QCOMPARE(afterClose.sessionTimestampNs, qint64(0));
+
+  transport.scriptOpened(2, 5000);          // a second activation of the same session
+  QVERIFY(controller.clockDomainReference().valid);
+  QCOMPARE(controller.clockDomainReference().sourceTimestampNs, qint64(1000));
+  transport.scriptTx(2, QByteArrayLiteral("z"), 5500);
+
+  const SessionClockDomainReference later = controller.clockDomainReference();
+  QVERIFY(later.valid);
+  QCOMPARE(later.sourceTimestampNs, qint64(1000));
+  QCOMPARE(later.sessionTimestampNs, qint64(0));
+  QCOMPARE(collector.events().last().timestampNs, qint64(4500));
+}
+
+/** A failed open is a legitimate anchor (ADR-005): the reference reports it even
+  *  though the session stays idle, and a later activation does not move it. */
+void TstSessionController::clockDomainReferenceUsesAFailedOpenAsTheAnchor()
+{
+  ScriptedTransport transport;
+  SessionController controller(&transport);
+  EventCollector collector(&controller, &transport);
+
+  transport.scriptError(1, 100000, openErrorMetadata());
+  const SessionClockDomainReference reference = controller.clockDomainReference();
+  QVERIFY(reference.valid);
+  QCOMPARE(reference.sourceTimestampNs, qint64(100000));
+  QCOMPARE(reference.sessionTimestampNs, qint64(0));
+  QCOMPARE(static_cast<int>(controller.state()), static_cast<int>(SessionController::State::Idle));
+
+  transport.scriptOpened(2, 100500);
+  QCOMPARE(controller.clockDomainReference().sourceTimestampNs, qint64(100000));
+  QCOMPARE(collector.events().at(1).timestampNs, qint64(500));
 }
 
 QTEST_MAIN(TstSessionController)
