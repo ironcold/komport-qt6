@@ -301,7 +301,7 @@ private slots:
   void theReportedDurationComesFromTheMonotonicClock();
   void startAfterADamagedRecordingFinalisesItAndStartsANewFile();
   void aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile();
-  void aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile();
+  void aFailedStartFlushRefusesTheStartAndClosesTheSink();
   void anEventThatCannotBeEncodedReportsItsSequenceAndSizes();
   void aShortWriteReportsEveryAcceptedByte();
   void anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal();
@@ -757,7 +757,7 @@ void TstSessionRecorder::anEventThatCannotBeEncodedReportsItsSequenceAndSizes()
 
 /** A flush that fails before the recording became live is a refused start, not a
   *  damage: there is no recording to damage (ADR-010 8, clarified). */
-void TstSessionRecorder::aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile()
+void TstSessionRecorder::aFailedStartFlushRefusesTheStartAndClosesTheSink()
 {
   Fixture fixture;
   fixture.goLive(1000);
@@ -766,8 +766,8 @@ void TstSessionRecorder::aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile
   const SessionRecordingStart start =
       fixture.recorder.start(recordingRequest(QStringLiteral("/tmp/u.kpsession")));
   QCOMPARE(start.ok, false);
-  QVERIFY(start.reason.contains(QStringLiteral("flushed")));
-  QVERIFY(start.reason.contains(QStringLiteral("incomplete")));
+  // The reason is the exact refusal text, not merely a word from it.
+  QCOMPARE(start.reason, QStringLiteral("the header could not be flushed; the file may be incomplete"));
   QCOMPARE(fixture.sink.isOpen(), false);
   QCOMPARE(static_cast<int>(fixture.recorder.state()), static_cast<int>(SessionRecorder::State::Stopped));
   // A failed flush destroys nothing: the bytes the sink accepted form a complete

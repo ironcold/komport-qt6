@@ -196,7 +196,7 @@ with zero records (ADR-010 D1).
 | stop with no event recorded | report "no session data recorded"; the file with its complete header remains a valid v1 file with zero records |
 | application close | the application's close path calls `KomportDoc::closeSession()`, which closes the transport first (while controller and recorder are live) and then finalises a running recorder, returning its report; that path reports through the log instead of the status bar, because the window is closing (§5.7) |
 | short or failed write | stop as damaged, report with the byte counts; the complete prefix stays valid |
-| flush failure | damaged transition, reported like a write failure |
+| flush failure (during a `Live` recording) | damaged transition, reported like a write failure; a flush that fails while the start block is written refuses the start instead (§5.8, ADR-010 §8) |
 | invalid event, oversized event | damaged transition; the event is not written, its sequence number and sizes are reported |
 | the transport closes or reopens during recording | no special case: `closed`, `opened` and the resulting configuration event are ordinary records; one recording covers as many activations as the session has |
 | the process or host dies | a process crash loses the not-yet-flushed records (bounded by the flush cadence) and can leave the final record truncated; a host or power failure can additionally lose already-flushed records; a failure inside the header write at start can leave a file with an incomplete header, which does not load - all bounds are stated in ADR-010 §8 and covered by §7's recovery tests |
@@ -383,7 +383,7 @@ self-review holds the full mapping. All of them pass.
 - [x] Failure paths stop the recording and report; a damaged file keeps its complete
   prefix; the crash bounds of ADR-010 §8 are stated and tested -
   `aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile`,
-  `aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile`,
+  `aFailedStartFlushRefusesTheStartAndClosesTheSink`,
   `aShortWriteEndsTheRecordingAsDamagedAndKeepsTheCompletePrefix`,
   `aShortWriteReportsEveryAcceptedByte`, `aFailedFlushEndsTheRecordingAsDamaged`,
   `anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal`, and the reader's

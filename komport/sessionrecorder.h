@@ -35,10 +35,12 @@
 //   - The process buffer is bounded: a one-second timer armed by the first
 //     unflushed write flushes no later than one second after it, even if the
 //     line then goes quiet and no further event arrives (ADR-010 8, D2).
-//   - A write, flush or encoding failure ends the recording as *damaged*: the
-//     complete prefix stays valid data, the file is not deleted, the event that
-//     could not be written is reported with its sequence number and sizes, and
-//     the outcome reaches the application (SPEC-M9 5.5/5.6).
+//   - A write, flush or encoding failure during a *live* recording ends it as
+//     *damaged*: the complete prefix stays valid data, the file is not deleted,
+//     the event that could not be written is reported with its sequence number and
+//     sizes, and the outcome reaches the application (SPEC-M9 5.5/5.6). A flush
+//     failing while the start block is written refuses the start instead: there is
+//     no recording to damage yet (ADR-010 8).
 //   - The reported duration is wall-clock time on the monotonic clock from the
 //     start flush to the finalisation, never a session timestamp (SPEC-M9 5.6).
 //   - No `fsync`: the flush bounds this process's buffer only, never durable
