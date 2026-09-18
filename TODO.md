@@ -702,7 +702,9 @@ Die Abnahmezeile `SPEC-M9` §8 ist bis auf das offen bleibende Kriterium „echt
 Qt-6.3-Build" abgehakt (keine CI, lokal Qt 6.11.1). Offen und dokumentiert: der
 Legacy-RX-Puffer-Flush aus M8, die nicht gemessene (nur statisch hergeleitete)
 Speicherzusage des Recorders, und der noch ungebaute Reader/Replay-Player. Der Merge
-nach `master` ist eine eigene, noch offene Entscheidung. Nächster Schritt: **M10**
+nach `master` ist erfolgt (2026-09-18, Merge-Commit mit `--no-ff`); damit sind
+Sitzungsplattform und Aufzeichnung im Hauptzweig, der Sockel bleibt über den neuen
+Meilensteinzweig weiterentwickelbar. Nächster Schritt: **M10**
 (Loader und passive Replay-Sicht) — der erste und einzige Produktivkonsument des
 Formats.
 
