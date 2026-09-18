@@ -41,7 +41,7 @@ and §8 now says so explicitly. The mapping, criterion by criterion:
 | no session-sized state in the recorder | `theProcessBufferIsBoundedByOneTimerPerBurst`, `aRecordedPtySessionIsByteExactAndChunked`. **Weakest row in this table**: the 64 KiB test exercises `KomportSerial` with a counter, not the recorder, and nothing measures the recorder's memory. The property rests on the class having no container member and on the append-only design (static inspection), not on a measurement - see gap 4. |
 | start only while live; header from the start with the true anchor | `startWritesACompleteHeaderAndNeedsALiveSession`, `midSessionStartWritesTheTrueAnchorReference`, `clockDomainReferenceStartsInvalidAndCarriesTheAnchor`, `clockDomainReferenceUsesAFailedOpenAsTheAnchor` |
 | bounded writer buffer, one flush per second at most | `theProcessBufferIsBoundedByOneTimerPerBurst` (the three planned flush checks are consolidated into it), `aClockThatStartsAtZeroReportsTheRealDuration` |
-| failure paths stop and report; damaged prefix stays valid; crash bounds | `aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile`, `aShortWriteEndsTheRecordingAsDamagedAndKeepsTheCompletePrefix`, `aShortWriteReportsEveryAcceptedByte`, `aFailedFlushEndsTheRecordingAsDamaged`, `anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal`, `theReaderRejectsMalformedWriterOutput` (truncated final record recovered) |
+| failure paths stop and report; damaged prefix stays valid; crash bounds | `aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile`, `aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile`, `aShortWriteEndsTheRecordingAsDamagedAndKeepsTheCompletePrefix`, `aShortWriteReportsEveryAcceptedByte`, `aFailedFlushEndsTheRecordingAsDamaged`, `anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal`, `theReaderRejectsMalformedWriterOutput` (truncated final record recovered) |
 | no unit can exceed the limits; offending event refused with sequence and sizes | `oversizedHeaderIsRejected`, `oversizedRecordIsRejected`, `lengthArithmeticIsChecked`, `headerLimitBoundaryIsExact`, `largeAsciiMetadataIsAcceptedWhenItFits`, `anEventThatCannotBeEncodedReportsItsSequenceAndSizes` |
 | explicit separate action, logger unchanged, recorder never calls the transport | `anIdleSessionRefusesTheRecordingStart`, `aRecordingShowsItsIndicatorAndStopsWithAReport`, `theRecorderNeverCallsIntoTheTransport`, `aRecordedPtySessionIsByteExactAndChunked` (records per chunk, not per character) |
 | full suite passes, warning-free under `-Wall -Wextra` | see §6 |
@@ -51,7 +51,7 @@ and §8 now says so explicitly. The mapping, criterion by criterion:
 | File | Methods | Covers |
 |---|---|---|
 | `tst_sessionrecordcodec.cpp` | 18 | the container bytes and the profile, without file I/O |
-| `tst_sessionrecorder.cpp` | 20 | lifecycle, flush policy, damage paths, reporting, the seams |
+| `tst_sessionrecorder.cpp` | 21 | lifecycle, flush policy, damage paths, reporting, the seams |
 | `tst_sessiondocument.cpp` | 5 (+3 M8) | ownership, close ordering over a pty |
 | `tst_sessionrecordingui.cpp` | 2 | the action, the indicator and the reporting, offscreen |
 | `tst_sessionrecordingendtoend.cpp` | 1 | the pty end-to-end proof |

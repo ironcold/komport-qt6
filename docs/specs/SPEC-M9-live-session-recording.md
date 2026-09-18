@@ -191,7 +191,7 @@ with zero records (ADR-010 D1).
 | --- | --- |
 | start (user action, session live) | the recorder records the target path and the configuration snapshot the application supplies, creates the file, writes the magic and the complete header in one call and flushes it before declaring the recording `Live`; state `Live` |
 | each event | one record appended immediately |
-| flush | a one-second timer on the session thread, armed by the first unflushed write of a live recording and firing at most once per second per burst; the final flush happens on stop (ADR-010 D2/§8). Retention is therefore bounded even when the line goes idle and no further event arrives |
+| flush | a one-second timer on the session thread, armed by the first unflushed write of a live recording and firing at most once per second per burst; the final flush happens on stop (ADR-010 D2/§8). Retention is therefore bounded even when the line goes idle and no further event arrives. A flush that fails while the start block is written - before the recording is `Live` - refuses the start and leaves the recorder `Stopped`: there is no recording to damage yet (ADR-010 §8) |
 | stop (user action) | final flush, close, report path, record count, bytes, duration, state |
 | stop with no event recorded | report "no session data recorded"; the file with its complete header remains a valid v1 file with zero records |
 | application close | the application's close path calls `KomportDoc::closeSession()`, which closes the transport first (while controller and recorder are live) and then finalises a running recorder, returning its report; that path reports through the log instead of the status bar, because the window is closing (§5.7) |
@@ -359,8 +359,10 @@ self-review holds the full mapping. All of them pass.
   `oneRecordPerAcceptedEventWithByteExactPayloads`, `metadataIsWrittenVerbatim`,
   `sixtyFourBitJsonValuesAreCanonicalDecimalStrings`,
   `jsonSizeCounterIsExactForEveryValueShape`.
-- [x] The recorder holds no session-sized state; a 64 KiB byte-wise upload keeps
-  memory flat and produces one observation per accepted write -
+- [x] The recorder holds no session-sized state; a 64 KiB byte-wise upload produces
+  one observation per accepted write. The no-session-sized-state half rests on
+  static inspection - the class has no container member and appends each record - not
+  on a memory measurement (self-review gap 4) -
   `theProcessBufferIsBoundedByOneTimerPerBurst`,
   `byteWiseSixtyFourKiBUploadKeepsOneObservationPerAcceptedWrite`, and the pty volume
   proof `aRecordedPtySessionIsByteExactAndChunked`.
@@ -381,6 +383,7 @@ self-review holds the full mapping. All of them pass.
 - [x] Failure paths stop the recording and report; a damaged file keeps its complete
   prefix; the crash bounds of ADR-010 §8 are stated and tested -
   `aShortHeaderWriteRefusesTheStartAndLeavesNoLoadableFile`,
+  `aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile`,
   `aShortWriteEndsTheRecordingAsDamagedAndKeepsTheCompletePrefix`,
   `aShortWriteReportsEveryAcceptedByte`, `aFailedFlushEndsTheRecordingAsDamaged`,
   `anExplicitStopWhoseFinalFlushFailsReportsItWithoutASignal`, and the reader's

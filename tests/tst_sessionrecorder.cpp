@@ -767,6 +767,7 @@ void TstSessionRecorder::aFailedStartFlushRefusesTheStartAndLeavesNoLoadableFile
       fixture.recorder.start(recordingRequest(QStringLiteral("/tmp/u.kpsession")));
   QCOMPARE(start.ok, false);
   QVERIFY(start.reason.contains(QStringLiteral("flushed")));
+  QVERIFY(start.reason.contains(QStringLiteral("incomplete")));
   QCOMPARE(fixture.sink.isOpen(), false);
   QCOMPARE(static_cast<int>(fixture.recorder.state()), static_cast<int>(SessionRecorder::State::Stopped));
   // A failed flush destroys nothing: the bytes the sink accepted form a complete
