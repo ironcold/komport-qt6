@@ -122,6 +122,9 @@ struct SessionEvent {
 };
 ```
 
+*Superseded by ADR-002: the in-memory metadata representation is `QJsonObject`,
+with lossless 64-bit encoding per ADR-006.*
+
 Possible source metadata:
 
 ```text
@@ -147,6 +150,9 @@ Source 3:
 ```
 
 Therefore:
+
+*Superseded by ADR-002/ADR-008: physical sources use non-zero ids and zero is
+reserved; the concept of this example is retained, only the numbering changes.*
 
 > `SessionEvent v1` and the session format should support multiple independently configured sources.
 
@@ -325,6 +331,11 @@ Source 1 semanticDirection = device_to_controller
 ```
 
 This avoids abusing the generic TX/RX meaning.
+
+*Superseded by ADR-002/ADR-008 for the numbering and for the encoding of the
+role: physical sources use non-zero ids (zero is reserved) and the semantic role
+is source-descriptor metadata, never a direction. The concept of this example is
+retained.*
 
 ---
 
@@ -1117,6 +1128,9 @@ struct SessionSource {
     QVariantMap metadata;
 };
 ```
+
+*Superseded by ADR-002: the in-memory metadata representation is `QJsonObject`,
+with lossless 64-bit encoding per ADR-006.*
 
 Examples:
 

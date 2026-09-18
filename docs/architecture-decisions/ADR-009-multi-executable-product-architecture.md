@@ -1,6 +1,6 @@
 # ADR-009: Multi-executable product architecture and shared-library boundaries
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-18
 
 ## Context

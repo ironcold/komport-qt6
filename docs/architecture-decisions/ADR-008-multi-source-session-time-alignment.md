@@ -1,6 +1,6 @@
 # ADR-008: Source identity and time alignment for future multi-source sessions
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-18
 
 ## Context
@@ -25,13 +25,17 @@ Every event preserves `sourceTimestampNs`, the source-local monotonic capture
 time. `timestampNs` is a derived session-timeline time. A source-to-session
 mapping may use a source/session reference point, offset, scale and an explicit
 uncertainty. It is versioned metadata, never a destructive rewrite of source
-time.
+time. Because a mapping's reference points, offsets, scales and uncertainties are
+nanosecond-scale integer values, they are encoded losslessly (ADR-006): never as
+JSON numbers.
 
 The preparation is deliberately limited to `sourceId`, `sourceTimestampNs`,
 `timestampNs` and source descriptors. No synchronization algorithm, clock
-probe, offset/drift estimator, `TimeMapping` runtime object, persisted mapping
+probe, offset/drift estimator, `TimeMapping` runtime object, cross-domain mapping
 or alignment UI is introduced by this ADR, M8 or M9. Those are separate future
-work, started only when the multi-host use case is actually needed.
+work, started only when the multi-host use case is actually needed. The
+per-domain origin reference of ADR-006 is mandatory capture metadata for this
+file's own timeline and is not such a mapping.
 
 M8 deliberately instantiates one local source only, using the process's common
 monotonic clock. It does not add multi-port UI, a multi-transport controller,

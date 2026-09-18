@@ -571,6 +571,9 @@ struct SessionEvent {
 };
 ```
 
+*Superseded by ADR-002: the in-memory metadata representation is `QJsonObject`,
+with lossless 64-bit encoding per ADR-006.*
+
 This supports:
 
 ```text

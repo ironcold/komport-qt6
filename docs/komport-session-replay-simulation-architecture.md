@@ -227,6 +227,9 @@ struct SessionEvent {
 };
 ```
 
+*Superseded by ADR-002: the in-memory metadata representation is `QJsonObject`,
+with lossless 64-bit encoding per ADR-006.*
+
 `sourceId` identifies a configured capture source and is independent of
 direction. `sourceTimestampNs` is the immutable monotonic observation time in
 that source's clock domain. `timestampNs` is the derived time on the common
@@ -329,6 +332,8 @@ Suggested magic:
 ```text
 KOMPORTSESSION
 ```
+
+*Superseded by ADR-006: the v1 magic is `KPSN 0x1A CR LF NUL`.*
 
 ### File layout
 

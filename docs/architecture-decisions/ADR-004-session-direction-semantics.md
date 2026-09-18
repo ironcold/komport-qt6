@@ -1,6 +1,6 @@
 # ADR-004: Stable TX/RX semantics
 
-Status: Proposed
+Status: Accepted
 Date: 2026-09-17
 
 ## Decision
