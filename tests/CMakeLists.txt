@@ -46,6 +46,10 @@ komport_add_test(tst_sessionrecorder)
 # Builds a real KomportApp offscreen and uses a pty, so it links libutil.
 komport_add_test(tst_sessionrecordingui)
 target_link_libraries(tst_sessionrecordingui PRIVATE util)
+# M9: the end-to-end proof over a real pty - byte-exact RX/TX in a recording and
+# the chunking property (one record per accepted unit, not per character).
+komport_add_test(tst_sessionrecordingendtoend)
+target_link_libraries(tst_sessionrecordingendtoend PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
