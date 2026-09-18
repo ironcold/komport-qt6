@@ -1,0 +1,20 @@
+Findings:
+
+- **LOW — DOCUMENTATION / frozen API:** `ITransport` exposes a public constructor not present in the normative declaration. [itransport.h:61](/home/max/Development/misc/komport-qt6/komport/itransport.h:61) declares `explicit ITransport(QObject *parent = nullptr);`; ADR-003’s declaration block has no constructor. [ADR-003:18](/home/max/Development/misc/komport-qt6/docs/architecture-decisions/ADR-003-transport-abstraction-v1.md:18)  
+  Minimal fix: amend the one normative contract document to include that exact constructor declaration (preferred, if public parent ownership is intentional), or reduce its visibility. Until then, it is undocumented frozen API.
+
+- **LOW — TEST GAP:** The Core-only object proof does not cover every public-contract implementation unit. It compiles `itransport.cpp` and `sessioncontroller.cpp`, but not `transportconfiguration.cpp`. [tests/CMakeLists.txt:50](/home/max/Development/misc/komport-qt6/tests/CMakeLists.txt:50) The latter is separately compiled by a Core+Test target, which is useful evidence but is not the stated dedicated Core-only proof. The target comments also still omit `sessioncontroller.h` despite directly including and compiling it. [session_contract_compile.cpp:25](/home/max/Development/misc/komport-qt6/tests/session_contract_compile.cpp:25)  
+  Minimal fix: add `transportconfiguration.cpp` to `komport_session_contract_check` and update the target comments/inventory.
+
+- **COSMETIC — DOCUMENTATION:** The legacy comments overstate successful-write semantics. [komportserial.h:155](/home/max/Development/misc/komport-qt6/komport/komportserial.h:155) says callers can know a byte “actually made it out,” and [komportserial.h:192](/home/max/Development/misc/komport-qt6/komport/komportserial.h:192) says it was “actually written to the port.” The code observes `QSerialPort::write()` acceptance only, [komportserial.cpp:406](/home/max/Development/misc/komport-qt6/komport/komportserial.cpp:406) and ADR-003 expressly excludes a delivery guarantee. [ADR-003:119](/home/max/Development/misc/komport-qt6/docs/architecture-decisions/ADR-003-transport-abstraction-v1.md:119)  
+  Minimal fix: say “accepted by the transport API” / “accepted prefix,” without implying peer or electrical delivery.
+
+The declaration cross-check otherwise found no mismatch: all seven observations have the ADR-003 names, parameter order and types; each includes `quint64 activationId`; timestamps are `qint64`; metadata is `const QJsonObject &`. The four virtuals also match. The implementation emits each implemented observation on its specified path; `lineStateChanged` is explicitly frozen-but-unimplemented. The public `KomportSerial` write entries route to the single private observed primitive, with no public byte-writing bypass found.
+
+`komportserial.h` should **not** be added to the Core-only contract proof. It is the local `QSerialPort` implementation, not the application-neutral `ITransport`/session contract; its absence is correct scoping, not a gap. It happens not to expose widgets, but requiring QtCore-only compilation would incorrectly pull the concrete serial implementation across ADR-003’s boundary.
+
+For M9’s recorder, the frozen observation set is sufficient; no addition is needed or proposed.
+
+Verdict: the interface should not be declared unchanged/finally frozen until the undocumented public constructor is resolved in the normative contract. The proof-target gap should also be corrected before relying on its “all contract units” claim.
+
+I could not execute a build or tests in this read-only environment. The recorded, unverified evidence is the Qt 6.11.1 warning-free build and 13/13 passing tests in [the self-review §6](/home/max/Development/misc/komport-qt6/docs/reviews/2026-09-18-M8-implementation-selfreview.md:148). Qt 6.3 and device/platform-specific serial timing remain unverified here.
