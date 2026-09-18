@@ -25,6 +25,10 @@ komport_add_test(tst_serial)
 # round 3) lives in libutil on glibc - link it only for this one test, no
 # other target needs it.
 target_link_libraries(tst_serial PRIVATE util)
+# M8: local transport contract (observations, activation identity, accepted
+# prefix). Uses the same openpty() pair, hence the same libutil link.
+komport_add_test(tst_transport)
+target_link_libraries(tst_transport PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)

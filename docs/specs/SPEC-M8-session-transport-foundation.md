@@ -183,6 +183,21 @@ rate, data bits, parity, stop bits, flow control as accepted by `QSerialPort`),
 the local buffering settings, the stored compatibility field `startBits`,
 `changedGroups` and `applyStatus` ∈ {`full`, `partial`, `failed`}.
 
+The `open()` rows of the operation table always perform the open-and-configure
+transaction, and that transaction applies the hardware settings even when the
+requested values equal the last effective snapshot, because a freshly opened port
+carries no settings. Its result therefore includes `"hardware"` in `changedGroups`,
+even where a configure-level comparison would find no value difference. This is an
+explicit exception for an open-and-configure transaction; the documented no-op row
+applies only to `configure(request)` on a live port with an unchanged endpoint.
+
+The value returned to the caller additionally carries `storedOnly`. It is true
+only when `configure(request)` is called while the port is closed and the request
+is stored without a transaction. It is a return-value flag, never event metadata,
+and such an operation emits no observation. It is false for a live endpoint-change
+request that fails to reopen; that path reports its open failure through the
+single `Error(kind: "open")` observation and returns a failed result.
+
 `startBits` is stored and reported for UI and configuration compatibility only: a
 UART always transmits a single start bit and `QSerialPort` exposes no such
 setting, so the field is never applied to the hardware (this matches the current
@@ -195,8 +210,13 @@ transaction.
 
 **Legacy setters and signals.** The legacy setters keep their signatures and
 behavior as compatibility adapters: each one stores its value and, when the port
-is open, applies through the same transaction routine once, then emits its
-compatibility signal. The self-connection `settingsChanged()` →
+is open, applies through the same transaction routine once, and then emits
+`settingsChanged()` exactly when that setter emitted it before M8. The pre-M8
+sources of `settingsChanged()` were `open()` (including the reopen
+`setDeviceName()` performs on a live port when the device changes) and
+`setBaudRate()`; `setFraming()`, `setFlowControl()`, `setRxQueue()` and
+`setFlushRate()` never emitted a signal and still do not. The self-connection
+`settingsChanged()` →
 `slotSettingsChanged()` is removed as part of exception (a) of §3, because it
 *is* the duplicate application: after this change `settingsChanged()` and
 `settingsFailed()` are pure notifications for existing consumers and never cause a

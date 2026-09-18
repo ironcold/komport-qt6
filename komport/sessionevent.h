@@ -93,7 +93,26 @@ inline bool isValidSessionEvent(const SessionEvent &event, QString *reason = nul
     return false;
   };
 
-  const bool isData = (event.type == SessionEventType::Data);
+  // ADR-002: `type` must be one of the declared enumerators. A cast from an
+  // arbitrary integer is not a valid event, so every declared type is listed
+  // explicitly and the default case is a rejection.
+  bool isData = false;
+  switch (event.type) {
+    case SessionEventType::Data:
+      isData = true;
+      break;
+    case SessionEventType::TransportOpened:
+    case SessionEventType::TransportClosed:
+    case SessionEventType::TransportConfigChanged:
+    case SessionEventType::LineStateChanged:
+    case SessionEventType::Error:
+    case SessionEventType::Annotation:
+    case SessionEventType::Bookmark:
+      break;
+    default:
+      return fail(QStringLiteral("type is not a declared SessionEventType enumerator"));
+  }
+
   if (isData) {
     if (event.direction != SessionDirection::Tx && event.direction != SessionDirection::Rx)
       return fail(QStringLiteral("a Data event needs direction Tx or Rx"));

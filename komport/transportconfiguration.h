@@ -103,6 +103,14 @@ struct ConfigurationResult {
   QStringList changedGroups;         ///< same order as changedGroupsComparedTo()
   ConfigurationApplyStatus applyStatus = ConfigurationApplyStatus::Full;
   QString message;                   ///< human-readable detail, empty on success
+  /** True when `configure()` was called while the port was closed: the values
+    * were stored and no transaction ran, so no observation was emitted and the
+    * next `open()` performs the configuration (SPEC-M8 6.2, row "configure(request)
+    * | port closed"). It is a return-value flag and never appears in the metadata.
+    * It is false for a live endpoint-change request whose reopen failed: that path
+    * reports its open failure as the single `Error(kind "open")` observation and
+    * returns a failed result. */
+  bool storedOnly = false;
 
   /** Machine-readable status name ("full", "partial", "failed"). */
   QString applyStatusName() const;

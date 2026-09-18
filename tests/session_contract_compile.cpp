@@ -38,10 +38,10 @@ class ContractProbeTransport : public ITransport
 public:
   using ITransport::ITransport;
 
-  bool open() override { return true; }
-  void close() override {}
-  bool isOpen() const override { return false; }
-  qint64 writeBytes(const QByteArray &bytes) override { return bytes.size(); }
+  bool open() override { mOpen = true; return true; }
+  void close() override { mOpen = false; }
+  bool isOpen() const override { return mOpen; }
+  qint64 writeBytes(const QByteArray &bytes) override { return mOpen ? bytes.size() : -1; }
 
   /** Touch every signal's signature so a change to the frozen surface would
     * break this target's compilation. */
@@ -57,6 +57,9 @@ public:
     emit lineStateChanged(1, 0, metadata);
     emit transportError(1, 0, metadata);
   }
+
+private:
+  bool mOpen = false;
 };
 
 } // namespace
@@ -92,12 +95,15 @@ int komportSessionContractCompileProof()
 
   ContractProbeTransport transport;
   transport.exerciseSignals();
+  const bool opened = transport.open();
   const qint64 accepted = transport.writeBytes(QByteArrayLiteral("abc"));
 
   const bool ok = structurallyValid
       && losslessRoundTrip
       && !changedGroups.isEmpty()
       && !metadata.isEmpty()
+      && opened
+      && transport.isOpen()
       && accepted == 3;
   return ok ? 0 : 1;
 }

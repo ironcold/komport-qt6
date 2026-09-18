@@ -51,6 +51,7 @@ private slots:
   void rejectsMalformedDataEvents();
   void rejectsMalformedNonDataEvents();
   void rejectsReservedSourceIdAndNegativeTimes();
+  void rejectsUndeclaredEventTypes();
   void roundTrips64BitJsonIntegersLosslessly();
   void rejectsInexactJsonIntegers();
   void reportsChangedConfigurationGroupsInFixedOrder();
@@ -118,6 +119,44 @@ void TstSessionContract::rejectsReservedSourceIdAndNegativeTimes()
   SessionEvent negativeSession = rxDataEvent();
   negativeSession.timestampNs = -1;
   QVERIFY(!isValidSessionEvent(negativeSession));
+}
+
+void TstSessionContract::rejectsUndeclaredEventTypes()
+{
+  // ADR-002: `type` must be a declared enumerator - a cast from an arbitrary
+  // integer is not an event, even when direction and payload look consistent.
+  SessionEvent undeclared = rxDataEvent();
+  undeclared.type = static_cast<SessionEventType>(999);
+  undeclared.direction = SessionDirection::None;
+  undeclared.payload.clear();
+  QString reason;
+  QVERIFY(!isValidSessionEvent(undeclared, &reason));
+  QVERIFY(reason.contains(QStringLiteral("enumerator")));
+
+  SessionEvent zero = rxDataEvent();
+  zero.type = static_cast<SessionEventType>(0);
+  zero.direction = SessionDirection::None;
+  zero.payload.clear();
+  QVERIFY(!isValidSessionEvent(zero));
+
+  // Every declared non-data type is still accepted.
+  const SessionEventType declared[] = {
+    SessionEventType::TransportOpened,
+    SessionEventType::TransportClosed,
+    SessionEventType::TransportConfigChanged,
+    SessionEventType::LineStateChanged,
+    SessionEventType::Error,
+    SessionEventType::Annotation,
+    SessionEventType::Bookmark,
+  };
+  for (const SessionEventType type : declared) {
+    SessionEvent event = rxDataEvent();
+    event.type = type;
+    event.direction = SessionDirection::None;
+    event.payload.clear();
+    QString declaredReason;
+    QVERIFY2(isValidSessionEvent(event, &declaredReason), qPrintable(declaredReason));
+  }
 }
 
 void TstSessionContract::roundTrips64BitJsonIntegersLosslessly()
@@ -225,8 +264,8 @@ void TstSessionContract::carriesTheFullResultMetadata()
 
   ConfigurationResult result;
   result.requested = requested;
-  result.effective = QJsonObject{ { QStringLiteral("portName"), QStringLiteral("/dev/ttyS0") },
-                                 { QStringLiteral("baudRate"), 9600 } };
+  result.effective = QJsonObject{ { QStringLiteral("endpoint"), QStringLiteral("/dev/ttyS0") },
+                                 { QStringLiteral("baudRate"), QStringLiteral("9600") } };
   result.changedGroups = QStringList{ QStringLiteral("hardware") };
   result.applyStatus = ConfigurationApplyStatus::Partial;
   result.message = QStringLiteral("flow control rejected");
@@ -236,8 +275,10 @@ void TstSessionContract::carriesTheFullResultMetadata()
   const QJsonObject metadata = result.toMetadata();
   QCOMPARE(metadata.value(QStringLiteral("requested")).toObject().value(QStringLiteral("endpoint")).toString(),
            QStringLiteral("/dev/ttyS0"));
-  QCOMPARE(metadata.value(QStringLiteral("effective")).toObject().value(QStringLiteral("baudRate")).toInt(),
-           9600);
+  const QJsonObject effective = metadata.value(QStringLiteral("effective")).toObject();
+  QCOMPARE(effective.value(QStringLiteral("endpoint")).toString(), QStringLiteral("/dev/ttyS0"));
+  QVERIFY(!effective.contains(QStringLiteral("portName")));
+  QCOMPARE(effective.value(QStringLiteral("baudRate")).toString(), QStringLiteral("9600"));
   const QJsonObject buffering = metadata.value(QStringLiteral("localBuffering")).toObject();
   QCOMPARE(buffering.value(QStringLiteral("rxQueue")).toInt(), 2048);
   QCOMPARE(buffering.value(QStringLiteral("flushRate")).toInt(), 100);
