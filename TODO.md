@@ -678,6 +678,20 @@ Qt-6.3-Build" (keine CI im Repository, lokal Qt 6.11.1). Bewusst noch offen aus
 M8: es gibt keinen Produktivkonsumenten der Ereignisse — der Recorder kommt mit
 M9.
 
+**M9 (Recorder/`.kpsession`) — Gate geschlossen (2026-09-18):** `ADR-010` (Live
+Session Recording, Writer Design) und `SPEC-M9` (Live Session Recording) sind nach
+fünf unabhängigen Reviewrunden `Accepted`; die Akten liegen unter
+`docs/reviews/2026-09-18-M9-gate-review*.md`. Tragende Entscheidungen: Streaming
+ohne Event-Vektor, Aufnahmestart nur im Live-Zustand mit sofort geschriebenem und
+geflushtem Header, periodischer Ein-Sekunden-Flush (damit auch bei stiller Leitung
+begrenzt), Fehlversuch/Grenzen als `Damaged`, explizite Nutzeraktion
+`Record Live Session...` neben dem unveränderten Textlogger, testbarer
+File-Sink- und Scheduler-Seam. Zwei Amendments an akzeptierten Dokumenten gehören
+dazu: das normative v1-Writer-Profil in `ADR-006` (Member-Namen, Typen und die
+verschachtelte Konfigurationsform des Headers) und der read-only
+Clock-Domain-Reference-Accessor in `SPEC-M8` §6.2 (ADR-010 D8). Implementierung
+nach `SPEC-M9` §11, Schritt 1; vorher kein Produktivcode.
+
 ### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
 
 Quelle: `docs/komport-multi-executable-product-architecture.md` und ADR-009.

@@ -95,6 +95,85 @@ derived mapping metadata; it must never replace the raw per-event
 `sourceTimestampNs`. The header must never contain decoded output as
 authoritative data.
 
+### v1 writer profile (normative)
+
+The member names and value shapes a v1 writer produces are fixed here, so that no
+two writers can produce two dialects of the same format:
+
+```json
+{
+  "format": "komport-session",
+  "version": 1,
+  "created": "<ISO-8601 date and time in UTC>",
+  "application": { "name": "Komport", "version": "<application version>" },
+  "sources": [
+    {
+      "sourceId": 1,
+      "clockDomainId": "local-process-monotonic-v1",
+      "name": "local serial",
+      "transport": "serial",
+      "configuration": {
+        "requested": {
+          "endpoint": "<string>",
+          "baudRate": "<string>",
+          "dataBits": "<string>",
+          "stopBits": "<string>",
+          "parity": "<string>",
+          "flowControl": "<string>"
+        },
+        "effective": {
+          "endpoint": "<string>",
+          "baudRate": "<string>",
+          "dataBits": "<string>",
+          "stopBits": "<string>",
+          "parity": "<string>",
+          "flowControl": "<string>"
+        },
+        "localBuffering": { "rxQueue": 0, "flushRate": 0 },
+        "compatibility": { "startBits": "<string>" }
+      }
+    }
+  ],
+  "clockDomains": [
+    {
+      "id": "local-process-monotonic-v1",
+      "kind": "process-monotonic",
+      "reference": {
+        "sourceTimestampNs": "<canonical decimal i64>",
+        "sessionTimestampNs": "0"
+      }
+    }
+  ]
+}
+```
+
+- `version` is the JSON number `1` and matches the binary format version.
+- `created` is an ISO-8601 UTC string; its precision is not normative, because
+  `sourceTimestampNs` stays authoritative (ADR-005).
+- `application.name` and `application.version` are informational strings naming
+  the writing application.
+- The local profile values are fixed: clock-domain id `local-process-monotonic-v1`,
+  `kind` `"process-monotonic"`, source name `local serial`, `transport` `serial`.
+- `configuration` carries the applied configuration snapshot: the requested
+  hardware settings, the read-back effective hardware settings, the local
+  buffering settings and the compatibility field. The nested members are fixed and
+  exhaustive, so that two writers cannot persist two dialects:
+  - `requested` and `effective` each carry exactly `endpoint`, `baudRate`,
+    `dataBits`, `stopBits`, `parity` and `flowControl`, all as JSON strings.
+  - `localBuffering` carries exactly `rxQueue` and `flushRate` as JSON numbers.
+  - `compatibility` carries exactly `startBits` as a JSON string.
+  - None of these objects carries an additional member, and a writer adds none.
+  These are the field names of the live configuration metadata (SPEC-M8 §6.2) and
+  of the transport's configuration type, so live events and the header agree. A
+  device endpoint is part of the applied configuration and is written as it is: a
+  device path is not a credential, and the prohibition on credentials in metadata
+  does not require redacting it. Fields that describe a single configuration
+  transaction (`applyStatus`, `changedGroups`, a message) are not part of a
+  snapshot and are not written.
+- 64-bit quantities are canonical decimal strings (see above), 32-bit quantities
+  are JSON numbers, and `sessionTimestampNs` is the decimal string `"0"`.
+- A v1 writer writes exactly these members and adds no private ones.
+
 ## Consequences
 
 - The format has no dependency on `QDataStream` or Qt private serialization.

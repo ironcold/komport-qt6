@@ -240,6 +240,15 @@ generic Rx and attach its communication role to the source descriptor.
 This ownership is an incremental adapter in the current terminal, not a claim
 that `KomportDoc` is the future analyzer/agent base class (ADR-009).
 
+One read-only addition to the controller belongs to M9 and is recorded here so
+that the frozen surface stays complete: `SessionController` gains an accessor
+that returns the clock domain's anchor reference pair (a `valid` flag plus
+`sourceTimestampNs` and `sessionTimestampNs`), because a recorder started while
+the session is already live must write the domain's true anchor rather than
+derive one from the first event it happens to see (ADR-010, decision D8). It is a
+read-only view of state the controller already keeps, it is QtCore-only, and it
+does not extend the event surface this section fixes.
+
 The controller is destroyed before the transport, and its destructor neither
 emits events nor calls into the transport (ADR-003). Concrete layout: the
 controller is owned through a
