@@ -662,6 +662,22 @@ M11 Decoder, M12 aktive Wiedergabe/exakte Simulation, M13 bedarfsgetriebene
 Bibliotheks-Extraktion plus Analyzer-Start, M14 Mehrquellen-Capture und
 Sniffer-Ansichten im Analyzer, M15 TCP/Remote-Agent.
 
+**Umsetzung — abgeschlossen (2026-09-18):** Die Schritte 2–7 aus `SPEC-M8`
+Abschnitt 17 sind implementiert, unabhängig reviewt und committet. Umgesetzt sind
+die neuen Wert- und Transportverträge (`komport/sessionevent.h`,
+`komport/itransport.h`, `komport/transportconfiguration.h`), `KomportSerial` als
+lokale Transportimplementierung mit einer beobachteten Schreibprimitive und genau
+einer Konfigurationstransaktion, der `SessionController` (Zustandsmodell,
+Aktivierungsfilter, FIFO-Zustellung, ADR-005-Abbildung) im Eigentum des
+`KomportDoc` und die Migration beider App-Aufrufstellen auf den einen
+Einstiegspunkt. Belege: `docs/reviews/2026-09-18-M8-implementation-selfreview.md`
+sowie der unabhängige Abschluss-Review
+`docs/reviews/2026-09-18-M8-final-implementation-review*.md` (Runde 3: Freigabe);
+§14 der Spec trägt die Abnahme bis auf das offen bleibende Kriterium „echter
+Qt-6.3-Build" (keine CI im Repository, lokal Qt 6.11.1). Bewusst noch offen aus
+M8: es gibt keinen Produktivkonsumenten der Ereignisse — der Recorder kommt mit
+M9.
+
 ### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
 
 Quelle: `docs/komport-multi-executable-product-architecture.md` und ADR-009.

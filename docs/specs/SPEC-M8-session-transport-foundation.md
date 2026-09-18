@@ -466,29 +466,37 @@ depends on the collector.
   Qt 6 and are documented against the declared floor of Qt 6.3; "compiles with Qt
   6.3" counts as an acceptance criterion only once a Qt 6.3 build is actually run
   (CI job or release gate — the repository currently has no CI workflow).
-- [ ] A dedicated compile/object target containing only the public session and
+- [x] A dedicated compile/object target containing only the public session and
   transport headers and linking `Qt6::Core` (not the existing test targets, which
   link `komport_core` and therefore Widgets) builds, proving the new public
   contracts have no widget dependency.
-- [ ] Current serial I/O exposes binary chunk observations without changing
+- [x] Current serial I/O exposes binary chunk observations without changing
   legacy public calls/signals.
-- [ ] A document-owned controller emits ordered, byte-exact live events.
-- [ ] Every M8 event carries source ID 1, including a failed-open
+- [x] A document-owned controller emits ordered, byte-exact live events.
+- [x] Every M8 event carries source ID 1, including a failed-open
   `Error(kind: "open")`; zero is reserved by ADR-002 and unused in M8, and every
   event preserves its source-local timing separately from its derived session
   time (ADR-005).
-- [ ] New public session/transport value contracts have no QWidget or
+- [x] New public session/transport value contracts have no QWidget or
   executable-specific type dependency.
-- [ ] Open, close, error and effective serial configuration are observable as
+- [x] Open, close, error and effective serial configuration are observable as
   non-data events. Compatibility expectations for the authorised orchestration
   change of §3: the settings vocabulary, their persistence and the settings
   dialog's presentation are unchanged; one user action from the settings dialog
   or a profile load produces exactly one configuration transaction and its
   result(s); the synchronous legacy `settingsFailed()` notification on a failed
   open is preserved.
-- [ ] NUL/all-byte PTY tests pass.
-- [ ] Existing full `ctest` suite passes.
-- [ ] No file format, replay UI, decoder or active transmission is introduced.
+- [x] NUL/all-byte PTY tests pass.
+- [x] Existing full `ctest` suite passes.
+- [x] No file format, replay UI, decoder or active transmission is introduced.
+
+Abnahme (2026-09-18): the ticked criteria were verified by the implementation
+self-review under `docs/reviews/2026-09-18-M8-implementation-selfreview.md`,
+including the recorded build and test evidence, and released by the independent
+final review in `docs/reviews/2026-09-18-M8-final-implementation-review*.md`
+(round 3: "M8 may be declared complete"). The first criterion stays **open**: no
+genuine Qt 6.3 build has been run — the repository has no CI workflow and the
+local toolchain is Qt 6.11.1.
 
 ## 15. Risks
 
