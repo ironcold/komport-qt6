@@ -31,3 +31,26 @@ komport_add_test(tst_selection)
 komport_add_test(tst_appearance)
 komport_add_test(tst_charset)
 komport_add_test(tst_i18n)
+
+# M8 (SPEC-M8 section 14, ADR-009): the new public session and transport
+# contracts must not depend on widgets. This object target compiles them (and one
+# implementation unit) against Qt6::Core alone - no komport_core, no Qt6::Widgets,
+# no Qt6::Test - so a widget or executable-specific type creeping into
+# sessionevent.h / itransport.h / transportconfiguration.h breaks the build.
+add_library(komport_session_contract_check OBJECT
+  session_contract_compile.cpp
+  ${CMAKE_SOURCE_DIR}/komport/itransport.cpp
+)
+target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
+target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)
+
+# Behavioural tests for the same value contracts (Qt Core + Test only). The
+# value-type implementation unit is compiled in directly instead of linking
+# komport_core, so this target stays free of the widget dependency as well.
+add_executable(tst_sessioncontract
+  tst_sessioncontract.cpp
+  ${CMAKE_SOURCE_DIR}/komport/transportconfiguration.cpp
+)
+target_include_directories(tst_sessioncontract PRIVATE ${CMAKE_SOURCE_DIR}/komport)
+target_link_libraries(tst_sessioncontract PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME tst_sessioncontract COMMAND tst_sessioncontract)
