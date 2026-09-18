@@ -229,8 +229,12 @@ the existing serial tests plus one new test asserting one transaction result per
 open. Metadata contains no credentials.
 
 `KomportDoc` owns the transport and `SessionController`; it exposes only the
-controller's read-only event signal to new consumers. It configures source ID
-1 and its serial descriptor. No Qt widget gains a `QSerialPort` dependency.
+controller's read-only event signal to new consumers. `KomportDoc` configures
+source ID 1. M8 defines no runtime source-descriptor type. Source descriptors are
+session-header data defined by ADR-006, with their multi-source semantics defined
+by ADR-008. The local serial descriptor is therefore deferred; M8 fixes one local
+source with source ID 1, using the single process-monotonic clock domain required
+by ADR-003 and ADR-005. No Qt widget gains a `QSerialPort` dependency.
 The transport owns no semantic source role: future passive sniffing can retain
 generic Rx and attach its communication role to the source descriptor.
 This ownership is an incremental adapter in the current terminal, not a claim
@@ -282,7 +286,8 @@ not replace the serial object) and not a transport activation.
 - failed open: the transport reports the failure itself, because it knows its own
   attempt, exactly once (ADR-003). The controller emits exactly one `Error` with
   `kind: "open"`, does not emit `TransportOpened` for that attempt, does not enter
-  `Live`, and does not consume an activation. The legacy `settingsFailed()` signal
+  `Live`, and creates no live activation — its attempt id is consumed all the same
+  and is never reused (ADR-003). The legacy `settingsFailed()` signal
   keeps its present synchronous behavior for existing consumers.
 - destruction: no events and no calls into the transport (§6.2).
 - activation filter: the controller stores `currentActivationId` (set on
@@ -291,7 +296,13 @@ not replace the serial object) and not a transport activation.
   dropped with exactly one diagnostic and produces no event. An `Error` whose
   activation id is unknown and was never preceded by an `opened` for that id is
   the failed-open case above; any further observation carrying the same id is
-  suppressed. Arrival order is never trusted — only the id (ADR-003).
+  suppressed. Arrival order is never trusted — only the id (ADR-003). The
+  diagnostic of a rejected observation is exactly one Qt warning message emitted
+  by the controller, naming the rejected activation id and the reason; it is not an
+  event, and no signal, counter or accessor is added for it. Its purpose is to make
+  a filter rejection visible without extending the frozen session surface: a
+  consumer-facing channel for it would be new public API that this specification
+  does not define.
 
 ## 8. Invariants
 

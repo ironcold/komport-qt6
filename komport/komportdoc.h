@@ -25,7 +25,10 @@
 #include <QList>
 #include <QUrl>
 
+#include <memory>
+
 #include "komportserial.h"
+#include "sessioncontroller.h"
 
 // forward declaration of the Komport classes
 class KomportView;
@@ -93,6 +96,10 @@ class KomportDoc : public QObject
     QString fileName() const;
   /** get the serial port */
   KomportSerial* getSerial();
+  /** the document-owned session controller bound to the serial transport
+    * (SPEC-M8 6.2). It is created with the document, lives as long as it does,
+    * and is destroyed before the transport. */
+  SessionController* getSessionController();
 
   public slots:
     /** calls repaint() on all views connected to the document object and is called by the view by which the document has been changed.
@@ -112,6 +119,10 @@ class KomportDoc : public QObject
     QUrl doc_url;
   /** serial port */
   KomportSerial mSerial;
+  /** the session controller (SPEC-M8 6.2). Declared after mSerial and destroyed
+    * explicitly first: a QObject-child arrangement is not acceptable, because
+    * mSerial is a by-value member and would already be destroyed. */
+  std::unique_ptr<SessionController> mSessionController;
 signals: // Signals
   /** Document has changed. */
   void documentModified();

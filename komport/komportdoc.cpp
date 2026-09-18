@@ -36,6 +36,12 @@ KomportDoc::KomportDoc(QObject *parent) : QObject(parent)
   {
     pViewList = new QList<KomportView*>();
   }
+  // SPEC-M8 6.2/6.3: the document owns the session controller that binds the
+  // serial transport to a session. The session starts with the document and ends
+  // with it - newDocument() does not replace the transport or the controller.
+  // The controller observes the transport through its signals only; it neither
+  // owns nor calls it, and it is destroyed before the transport below.
+  mSessionController = std::make_unique<SessionController>(&mSerial);
   // Note: unlike the original Qt3 QPtrList, this list does not own/delete
   // the views it tracks - it is only used to broadcast repaints across all
   // open windows (see slotUpdateAllViews()). Views are owned as normal
@@ -44,6 +50,11 @@ KomportDoc::KomportDoc(QObject *parent) : QObject(parent)
 
 KomportDoc::~KomportDoc()
 {
+  // SPEC-M8 6.2: the controller is destroyed before the transport, and its
+  // destruction neither emits an event nor calls into the transport. Resetting
+  // it here (rather than relying on member or QObject-child order) is what makes
+  // that ordering explicit, because mSerial is a by-value member of this object.
+  mSessionController.reset();
 }
 
 void KomportDoc::addView(KomportView *view)
@@ -202,6 +213,10 @@ void KomportDoc::setModified(bool _m)
 /** get the serial port */
 KomportSerial* KomportDoc::getSerial(){
   return &mSerial;
+}
+/** the document-owned session controller (SPEC-M8 6.2) */
+SessionController* KomportDoc::getSessionController(){
+  return mSessionController.get();
 }
 /** No descriptions */
 void KomportDoc::slotViewModified(KomportView* _v){

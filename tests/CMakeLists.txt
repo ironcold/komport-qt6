@@ -29,6 +29,12 @@ target_link_libraries(tst_serial PRIVATE util)
 # prefix). Uses the same openpty() pair, hence the same libutil link.
 komport_add_test(tst_transport)
 target_link_libraries(tst_transport PRIVATE util)
+# M8: session controller (FIFO delivery, activation filter, ADR-005 mapping).
+# No libutil: it uses the deterministic transport double, not a pty.
+komport_add_test(tst_sessioncontroller)
+# M8: document ownership of the controller against the real transport (pty).
+komport_add_test(tst_sessiondocument)
+target_link_libraries(tst_sessiondocument PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
@@ -44,6 +50,7 @@ komport_add_test(tst_i18n)
 add_library(komport_session_contract_check OBJECT
   session_contract_compile.cpp
   ${CMAKE_SOURCE_DIR}/komport/itransport.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessioncontroller.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
 target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)

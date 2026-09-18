@@ -86,6 +86,8 @@ add_library(komport_core OBJECT
   komport/sessionevent.h
   komport/transportconfiguration.cpp
   komport/transportconfiguration.h
+  komport/sessioncontroller.cpp
+  komport/sessioncontroller.h
   komport/komport.qrc
 )
 

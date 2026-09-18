@@ -23,11 +23,21 @@
 // ADR-009's application-neutral contract rule.
 
 #include "itransport.h"
+#include "sessioncontroller.h"
 #include "sessionevent.h"
 #include "transportconfiguration.h"
 
 #include <QJsonObject>
 #include <QStringList>
+
+#include <type_traits>
+
+// SPEC-M8 section 14: the public session/transport contracts must have no widget
+// or executable-specific dependency. The controller is part of that surface, so
+// its header - and, in the object target, its implementation unit - is compiled
+// here against Qt6::Core alone.
+static_assert(sizeof(SessionController) > 0,
+              "sessioncontroller.h must stay compilable against Qt6::Core (ADR-009)");
 
 namespace {
 
