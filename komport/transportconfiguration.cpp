@@ -78,24 +78,31 @@ QString ConfigurationResult::applyStatusName() const
   return QStringLiteral("failed");
 }
 
-QJsonObject ConfigurationResult::toMetadata() const
+QJsonObject appliedConfigurationSections(const TransportConfiguration &_requested,
+                                         const QJsonObject &_effective)
 {
-  QJsonObject metadata;
-
   // Requested hardware settings, the transport-supplied read-back values, the
   // local buffering settings and the compatibility field. 32-bit values stay
   // JSON numbers (ADR-002); no credentials are ever added.
-  metadata.insert(QStringLiteral("requested"), requested.hardwareToJson());
-  metadata.insert(QStringLiteral("effective"), effective);
+  QJsonObject sections;
+  sections.insert(QStringLiteral("requested"), _requested.hardwareToJson());
+  sections.insert(QStringLiteral("effective"), _effective);
 
   QJsonObject buffering;
-  buffering.insert(QStringLiteral("rxQueue"), requested.rxQueue);
-  buffering.insert(QStringLiteral("flushRate"), requested.flushRate);
-  metadata.insert(QStringLiteral("localBuffering"), buffering);
+  buffering.insert(QStringLiteral("rxQueue"), _requested.rxQueue);
+  buffering.insert(QStringLiteral("flushRate"), _requested.flushRate);
+  sections.insert(QStringLiteral("localBuffering"), buffering);
 
   QJsonObject compatibility;
-  compatibility.insert(QStringLiteral("startBits"), requested.startBits);
-  metadata.insert(QStringLiteral("compatibility"), compatibility);
+  compatibility.insert(QStringLiteral("startBits"), _requested.startBits);
+  sections.insert(QStringLiteral("compatibility"), compatibility);
+
+  return sections;
+}
+
+QJsonObject ConfigurationResult::toMetadata() const
+{
+  QJsonObject metadata = appliedConfigurationSections(requested, effective);
 
   QJsonArray groups;
   for (const QString &group : changedGroups)

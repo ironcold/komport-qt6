@@ -58,28 +58,16 @@ QString makePty(int *masterFd)
   return QString::fromLocal8Bit(slaveName);
 }
 
-/** The applied-configuration snapshot a recording header carries (ADR-006's four
-  * sections, ADR-010 D7): the live configuration metadata *without* the
-  * per-transaction members, which are properties of one transaction and not part
-  * of a snapshot. The codec validates the result, so this also checks that M8's
-  * metadata shape and ADR-006's profile agree. */
-QJsonObject sessionSnapshot(const ConfigurationResult &_result)
-{
-  QJsonObject snapshot = _result.toMetadata();
-  snapshot.remove(QStringLiteral("applyStatus"));
-  snapshot.remove(QStringLiteral("changedGroups"));
-  snapshot.remove(QStringLiteral("message"));
-  return snapshot;
-}
-
-/** A recording request for @p path, with the snapshot of @p serial's session. */
+/** A recording request for @p path whose configuration snapshot comes from its
+  * production source (ADR-010 D7): the transport's read-only accessor, not a
+  * shape assembled here and not a filtered transaction result. */
 SessionRecordingRequest recordingRequest(const QString &_path, KomportSerial *_serial)
 {
   SessionRecordingRequest request;
   request.path = _path;
   request.applicationName = QStringLiteral("Komport");
   request.applicationVersion = QStringLiteral("test");
-  request.configuration = sessionSnapshot(_serial->applyConfiguration(_serial->requestedConfiguration()));
+  request.configuration = _serial->appliedConfigurationSnapshot();
   return request;
 }
 

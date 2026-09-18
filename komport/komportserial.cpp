@@ -905,3 +905,14 @@ QJsonObject KomportSerial::readBackHardwareJson() const
   json.insert( QStringLiteral("flowControl"), effective.flowControl );
   return json;
 }
+
+QJsonObject KomportSerial::appliedConfigurationSnapshot() const
+{
+  // The read-back values come from the transport itself while it is open, and
+  // from the effective configuration in force when it is closed (its own
+  // documented fallback, SPEC-M8 6.2), so a mid-session recording describes the
+  // configuration actually applied rather than a stale transaction. The four
+  // sections are built by the helper the live configuration metadata uses, so the
+  // recorded snapshot cannot become a second dialect of the same shape.
+  return appliedConfigurationSections( mRequested, readBackHardwareJson() );
+}

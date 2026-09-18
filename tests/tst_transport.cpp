@@ -28,6 +28,7 @@
 #include "komportserial.h"
 
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTest>
@@ -167,6 +168,7 @@ private slots:
   void reentrantLegacyReceiverKeepsTheTransactionBudget();
   void observationsRequireALiveActivation();
   void byteWiseSixtyFourKiBUploadKeepsOneObservationPerAcceptedWrite();
+  void theAppliedConfigurationSnapshotIsTheFourSectionsOnly();
 };
 
 /** The applyStatus of a returned result, as the metadata reports it. */
@@ -1139,6 +1141,89 @@ void TstTransport::byteWiseSixtyFourKiBUploadKeepsOneObservationPerAcceptedWrite
   QByteArray atPeer;
   QTRY_VERIFY_WITH_TIMEOUT(readIntoFromFd(masterFd, &atPeer, totalBytes) == totalBytes, 20000);
   QCOMPARE(atPeer, expected);
+}
+
+/** The applied-configuration snapshot (ADR-010 D7, SPEC-M8 6.2) consists of
+  *  exactly the four sections the profile fixes - no per-transaction member and no
+  *  second shape - it agrees section for section with the live configuration
+  *  metadata, and reading it neither configures nor emits anything. */
+void TstTransport::theAppliedConfigurationSnapshotIsTheFourSectionsOnly()
+{
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+
+  ScriptedSerial serial;
+  serial.setDeviceName(slaveName);
+  serial.setBaudRate(qint32(19200));
+  QVERIFY(serial.open());
+
+  QSignalSpy configurationObservations(&serial, &ITransport::configurationChanged);
+  QSignalSpy errorObservations(&serial, &ITransport::transportError);
+
+  const QJsonObject snapshot = serial.appliedConfigurationSnapshot();
+
+  // Reading the snapshot is not a configuration transaction (ADR-010 D7).
+  QCOMPARE(configurationObservations.count(), 0);
+  QCOMPARE(errorObservations.count(), 0);
+
+  QCOMPARE(snapshot.keys().size(), 4);
+  for (const QString &section : { QStringLiteral("requested"), QStringLiteral("effective"),
+                                  QStringLiteral("localBuffering"), QStringLiteral("compatibility") })
+    QVERIFY2(snapshot.contains(section), qPrintable(section));
+  // Nothing that describes a single transaction belongs in a snapshot.
+  for (const QString &forbidden : { QStringLiteral("applyStatus"), QStringLiteral("changedGroups"),
+                                    QStringLiteral("message") })
+    QVERIFY(!snapshot.contains(forbidden));
+
+  const QJsonObject requested = snapshot.value(QStringLiteral("requested")).toObject();
+  const QJsonObject effective = snapshot.value(QStringLiteral("effective")).toObject();
+  // The six hardware members ADR-006's profile fixes, exactly - object keys come
+  // back sorted, so this is an exact set and name comparison, and every value is a
+  // string (the profile keeps 64-bit JSON out of this object).
+  const QStringList hardwareMembers{ QStringLiteral("baudRate"), QStringLiteral("dataBits"),
+                                     QStringLiteral("endpoint"), QStringLiteral("flowControl"),
+                                     QStringLiteral("parity"), QStringLiteral("stopBits") };
+  QCOMPARE(requested.keys(), hardwareMembers);
+  QCOMPARE(effective.keys(), hardwareMembers);
+  for (const QString &member : hardwareMembers) {
+    QVERIFY2(requested.value(member).isString(), qPrintable(member));
+    QVERIFY2(effective.value(member).isString(), qPrintable(member));
+  }
+  QCOMPARE(requested.value(QStringLiteral("endpoint")).toString(), slaveName);
+  QCOMPARE(requested.value(QStringLiteral("baudRate")).toString(), QString::number(19200));
+  QCOMPARE(effective.value(QStringLiteral("endpoint")).toString(), slaveName);
+  // The effective values are the *read-back* values, not the request: this fixture
+  // scripts the hardware seam, so a requested baud rate is not what the port
+  // reports back. That is the point of having a separate section.
+  QVERIFY(!effective.value(QStringLiteral("baudRate")).toString().isEmpty());
+
+  const QJsonObject buffering = snapshot.value(QStringLiteral("localBuffering")).toObject();
+  QCOMPARE(buffering.keys().size(), 2);
+  QVERIFY(buffering.value(QStringLiteral("rxQueue")).isDouble());
+  QVERIFY(buffering.value(QStringLiteral("flushRate")).isDouble());
+
+  const QJsonObject compatibility = snapshot.value(QStringLiteral("compatibility")).toObject();
+  QCOMPARE(compatibility.keys().size(), 1);
+  QVERIFY(compatibility.value(QStringLiteral("startBits")).isString());
+
+  // The four sections are exactly what the live metadata carries: the two are
+  // built by one helper, so they cannot become two definitions of the same shape.
+  const ConfigurationResult result = serial.applyConfiguration(serial.requestedConfiguration());
+  const QJsonObject metadata = result.toMetadata();
+  for (const QString &section : { QStringLiteral("requested"), QStringLiteral("effective"),
+                                  QStringLiteral("localBuffering"), QStringLiteral("compatibility") })
+    QCOMPARE(snapshot.value(section), metadata.value(section));
+
+  // With the port closed the snapshot keeps its four complete sections: the
+  // effective values are then the configuration in force.
+  serial.close();
+  const QJsonObject closedSnapshot = serial.appliedConfigurationSnapshot();
+  QCOMPARE(closedSnapshot.keys().size(), 4);
+  QCOMPARE(closedSnapshot.value(QStringLiteral("effective")).toObject().keys().size(), 6);
+  QCOMPARE(closedSnapshot.value(QStringLiteral("requested")), requested);
 }
 
 QTEST_MAIN(TstTransport)

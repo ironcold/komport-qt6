@@ -123,4 +123,17 @@ struct ConfigurationResult {
   QJsonObject toMetadata() const;
 };
 
+/** The four sections of an applied-configuration snapshot (ADR-006's v1 writer
+  * profile): the `requested` hardware settings, the transport-supplied
+  * `effective` read-back values, the `localBuffering` settings and the
+  * `compatibility` field - and nothing else. A snapshot carries no
+  * per-transaction member (`applyStatus`, `changedGroups`, a message), because
+  * those describe one transaction rather than a configuration.
+  *
+  * Shared by `ConfigurationResult::toMetadata()` and
+  * `KomportSerial::appliedConfigurationSnapshot()` (ADR-010 D7) so that the live
+  * metadata and the recorded snapshot cannot drift into two dialects. */
+QJsonObject appliedConfigurationSections(const TransportConfiguration &_requested,
+                                         const QJsonObject &_effective);
+
 #endif // TRANSPORTCONFIGURATION_H

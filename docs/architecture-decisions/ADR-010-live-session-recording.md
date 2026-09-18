@@ -237,8 +237,25 @@ that final flush and emits nothing.
   action `Record Live Session...`, whose checked state is the indicator, with
   start/stop/failure outcomes reported through the existing translated status
   mechanism.
-- **D7 configuration snapshot: supplied by the application by value at start**,
-  valid only because start requires the live state (§4).
+- **D7 configuration snapshot: supplied by the transport, passed to the recorder
+  by value at start**, valid only because start requires the live state (§4). The
+  snapshot's source is a read-only `KomportSerial` accessor (recorded in SPEC-M8
+  section 6.2), which returns the four sections `requested`, `effective`,
+  `localBuffering` and `compatibility`:
+
+  ```cpp
+  QJsonObject appliedConfigurationSnapshot() const;
+  ```
+
+  It is built by the same helper that produces the live configuration metadata, so
+  the recorded snapshot and the live metadata cannot drift into two dialects; it
+  carries no per-transaction member. While the port is open the `effective` values
+  are read back from it; with the port closed, `effective` is the configuration
+  that was last in force and `requested` may be a stored request that was never
+  applied. A snapshot assembled by the application, or derived by removing members
+  from `ConfigurationResult::toMetadata()`, is not acceptable: the former
+  duplicates the shape, the latter starts from metadata that describes one
+  transaction.
 - **D8 anchor reference: a read-only controller accessor.** `SessionController`
   gains
 

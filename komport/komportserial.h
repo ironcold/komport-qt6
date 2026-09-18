@@ -115,6 +115,14 @@ public:
     * values the port actually accepted (requested value for every accepted
     * field, the previous value for every rejected one). */
   TransportConfiguration effectiveConfiguration() const { return mEffective; }
+  /** The applied-configuration snapshot a recording header carries (ADR-010 D7,
+    *  ADR-006's v1 writer profile): the four sections `requested`, `effective`,
+    *  `localBuffering` and `compatibility`, and nothing else. Read-only: it
+    *  neither configures nor emits anything, and while the port is open the
+    *  `effective` values are read back freshly, so the snapshot describes the
+    *  applied configuration rather than a stale transaction. The sections are
+    *  built by the same helper the live configuration metadata uses. */
+  QJsonObject appliedConfigurationSnapshot() const;
 
 protected:
   // --- test seams (SPEC-M8 section 13) -------------------------------------

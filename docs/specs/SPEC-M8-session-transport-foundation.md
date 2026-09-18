@@ -249,6 +249,26 @@ derive one from the first event it happens to see (ADR-010, decision D8). It is 
 read-only view of state the controller already keeps, it is QtCore-only, and it
 does not extend the event surface this section fixes.
 
+A second M9 addition belongs to the transport and is recorded here for the same
+reason: `KomportSerial` gains the read-only accessor
+
+```cpp
+QJsonObject appliedConfigurationSnapshot() const;
+```
+
+which returns the applied configuration as the four sections `requested`,
+`effective`, `localBuffering` and `compatibility` - the same sections, built by
+the same helper, that the live configuration metadata carries, with no
+per-transaction member (`applyStatus`, `changedGroups`, a message). A recording
+header carries that snapshot (ADR-010, decision D7), and the alternative - an
+application assembling the shape itself, or filtering the transaction metadata -
+would create a second definition of the same object. The accessor neither
+configures nor emits anything; while the port is open it reads the effective
+values back, and with the port closed `effective` is the configuration that was
+last in force, while `requested` may be a stored request that was never applied
+(a recording is live-only, so a header is always written with the port open, and
+that distinction exists for callers that read the snapshot at another time).
+
 The controller is destroyed before the transport, and its destructor neither
 emits events nor calls into the transport (ADR-003). Concrete layout: the
 controller is owned through a
