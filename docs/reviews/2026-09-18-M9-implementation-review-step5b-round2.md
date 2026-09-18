@@ -1,0 +1,11 @@
+Decision: changes requested; do not commit yet.
+
+- (a) Pass. `updateRecordingUi()` now uses `State::Live`, and it is the only UI state derivation. On an asynchronous damage signal, the UI is reset before the report; a damaged-then-started recording is finalised synchronously and ends with the UI matching the new `Live` state. `KomportDoc::closeSession()`’s `Stopped` check is lifecycle logic, not UI. [komport.cpp](/home/max/Development/misc/komport-qt6/komport/komport.cpp:1505)
+
+- (b) Pass for active-window failures and an explicit stop of a damaged recorder. The text includes complete-record count, accepted bytes (without durability claim), monotonic duration, path, and reason. Reusing it after explicit stop is correct. [komport.cpp](/home/max/Development/misc/komport-qt6/komport/komport.cpp:1517)
+
+  One residual spec issue: the application-close path does not use this translated status summary. It discards clean reports and emits only an untranslated `qWarning` for damaged reports, omitting count/bytes/duration. That conflicts with SPEC-M9’s required outcome reporting unless the accepted spec is explicitly amended to exempt a closing window. [komport.cpp](/home/max/Development/misc/komport-qt6/komport/komport.cpp:953) [SPEC-M9](/home/max/Development/misc/komport-qt6/docs/specs/SPEC-M9-live-session-recording.md:204)
+
+- (c) The status label is the right observable surface, but the new assertions remain too weak to establish the reporting requirement. The idle test asserts only the prefix, not the refusal reason. The clean-stop test asserts the words “complete records,” not the numeric record count, byte count, or duration. Strengthen it to assert the reason and the full structured summary (including numeric count, bytes, duration, and path). [tst_sessionrecordingui.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessionrecordingui.cpp:111)
+
+Repair claim: confirmed. `komport.cpp` is `99` additions / `0` deletions against HEAD; all its diff hunks are additive. `slotLineEndingChanged()` is byte-identical to HEAD (matching SHA-256), and I found no truncation artifact or other hand-repair damage in that file. I could not independently run the build, tests, or QM check in this read-only review.

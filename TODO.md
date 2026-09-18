@@ -634,12 +634,132 @@ dokumentierte Entscheidungen, keine übersehenen Lücken. Nachtrag
 möglich, siehe Abschnitt 1. Review-Funde und Fixes in `TODO-ARCHIVE.md`
 Abschnitt 23 (23.1 für den Custom-Charset-Nachtrag).
 
+### Meilenstein 8 — Session-/Transport-Fundament — Gate geschlossen, Implementierung als nächster Schritt
+
+Die nach dem `v1.0.0`-Release ergänzte Produktvision (verlustfreie Sessions,
+offline Analyse, passive Wiedergabe, spätere Decoder, Simulation und Netzwerk)
+beginnt bewusst nicht mit einem UI-Feature. Zuerst wird die gemeinsame,
+transportneutrale Grundlage aus `SessionEvent`, `ITransport` und einem
+`SessionController` gebaut. Das Eventmodell enthält von Anfang an eine stabile
+Quellidentität, getrennt von TX/RX, sowie unveränderte Quellzeit und abgeleitete
+Sitzungszeit (ADR-008); der erste Code-Schnitt bleibt dennoch genau eine lokale
+Quelle. Die neuen Wert- und Transportverträge bleiben Widget- und
+Frontend-neutral (ADR-009), ohne dafür jetzt Bibliotheken oder weitere Binaries
+aus dem bestehenden Terminal herauszulösen. Er ist
+`docs/specs/SPEC-M8-session-transport-foundation.md`; er umfasst nur den
+additiven Übergang des bestehenden lokalen Serial-Pfads auf bytegenaue
+Ereignisse und Tests. Kein Dateiformat, kein Replay, kein Decoder, keine
+aktive Übertragung.
+
+**Voraussetzung vor Code — erfüllt (2026-09-18):** ADR-002 bis ADR-009 und der
+M8-Spec sind nach dem neuen Governance-Prozess reviewt und akzeptiert; der
+komplette Review-Verlauf (Pre-Review, fünf unabhängige Codex-Runden, konsolidiertes
+Amendment-Paket und Anwendungs-Verifikation) liegt in `docs/reviews/`, die
+Statuszeilen stehen auf `Accepted`. Der nächste Schritt ist die Umsetzung nach
+`SPEC-M8` Abschnitt 17, Schritte 2–7 (Code, Tests, Selbst- und Fremdreview). Die
+darauf folgende Reihenfolge bleibt: M9 Recorder/`.kpsession`, M10 Loader und passive Replay,
+M11 Decoder, M12 aktive Wiedergabe/exakte Simulation, M13 bedarfsgetriebene
+Bibliotheks-Extraktion plus Analyzer-Start, M14 Mehrquellen-Capture und
+Sniffer-Ansichten im Analyzer, M15 TCP/Remote-Agent.
+
+**Umsetzung — abgeschlossen (2026-09-18):** Die Schritte 2–7 aus `SPEC-M8`
+Abschnitt 17 sind implementiert, unabhängig reviewt und committet. Umgesetzt sind
+die neuen Wert- und Transportverträge (`komport/sessionevent.h`,
+`komport/itransport.h`, `komport/transportconfiguration.h`), `KomportSerial` als
+lokale Transportimplementierung mit einer beobachteten Schreibprimitive und genau
+einer Konfigurationstransaktion, der `SessionController` (Zustandsmodell,
+Aktivierungsfilter, FIFO-Zustellung, ADR-005-Abbildung) im Eigentum des
+`KomportDoc` und die Migration beider App-Aufrufstellen auf den einen
+Einstiegspunkt. Belege: `docs/reviews/2026-09-18-M8-implementation-selfreview.md`
+sowie der unabhängige Abschluss-Review
+`docs/reviews/2026-09-18-M8-final-implementation-review*.md` (Runde 3: Freigabe);
+§14 der Spec trägt die Abnahme bis auf das offen bleibende Kriterium „echter
+Qt-6.3-Build" (keine CI im Repository, lokal Qt 6.11.1). Bewusst noch offen aus
+M8: es gibt keinen Produktivkonsumenten der Ereignisse — der Recorder kommt mit
+M9.
+
+**M9 (Recorder/`.kpsession`) — Gate geschlossen (2026-09-18):** `ADR-010` (Live
+Session Recording, Writer Design) und `SPEC-M9` (Live Session Recording) sind nach
+fünf unabhängigen Reviewrunden `Accepted`; die Akten liegen unter
+`docs/reviews/2026-09-18-M9-gate-review*.md`. Tragende Entscheidungen: Streaming
+ohne Event-Vektor, Aufnahmestart nur im Live-Zustand mit sofort geschriebenem und
+geflushtem Header, periodischer Ein-Sekunden-Flush (damit auch bei stiller Leitung
+begrenzt), Fehlversuch/Grenzen als `Damaged`, explizite Nutzeraktion
+`Record Live Session...` neben dem unveränderten Textlogger, testbarer
+File-Sink- und Scheduler-Seam. Zwei Amendments an akzeptierten Dokumenten gehören
+dazu: das normative v1-Writer-Profil in `ADR-006` (Member-Namen, Typen und die
+verschachtelte Konfigurationsform des Headers) und der read-only
+Clock-Domain-Reference-Accessor in `SPEC-M8` §6.2 (ADR-010 D8). Implementierung **abgeschlossen (2026-09-18):** `SPEC-M9` §11 Schritte 1–7 sind
+umgesetzt und einzeln reviewt — `SessionRecordCodec`, der D8-Accessor am
+`SessionController`, `SessionRecorder` (Streaming, Start-Flush, Ein-Sekunden-Timer,
+`Damaged`-Pfade), Dokument-Eigentum mit `KomportDoc::closeSession()`, der read-only
+Snapshot-Accessor (ADR-010 D7), die App-Verdrahtung (`Record Live Session...`,
+dauerhafter Statusindikator, Report über den Übersetzungsmechanismus) und der
+PTY-Ende-zu-Ende-Test. Der Abschluss-Review hat M9 nach vier Runden geschlossen
+(`docs/reviews/2026-09-18-M9-final-implementation-review*.md`), Selbstreview und
+Kriterien-Abbildung liegen in `docs/reviews/2026-09-18-M9-implementation-selfreview.md`.
+Die Abnahmezeile `SPEC-M9` §8 ist bis auf das offen bleibende Kriterium „echter
+Qt-6.3-Build" abgehakt (keine CI, lokal Qt 6.11.1). Offen und dokumentiert: der
+Legacy-RX-Puffer-Flush aus M8, die nicht gemessene (nur statisch hergeleitete)
+Speicherzusage des Recorders, und der noch ungebaute Reader/Replay-Player. Der Merge
+nach `master` ist erfolgt (2026-09-18, Merge-Commit mit `--no-ff`); damit sind
+Sitzungsplattform und Aufzeichnung im Hauptzweig, der Sockel bleibt über den neuen
+Meilensteinzweig weiterentwickelbar. Nächster Schritt: **M10**
+(Loader und passive Replay-Sicht) — der erste und einzige Produktivkonsument des
+Formats.
+
+### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
+
+Quelle: `docs/komport-multi-executable-product-architecture.md` und ADR-009.
+Erst wenn Analyzer- oder Agent-Code tatsächlich ansteht, werden die bis dahin
+bewährten, logisch bereits separaten Verträge schrittweise in gemeinsame
+Bibliotheken überführt. Zielprodukte sind das vorhandene schlanke Terminal
+`komport-qt6`, ein `komport-analyzer` für Analyse/Replay/Simulation und ein
+headless-fähiger `komport-agent` für physische Remote-Transporte.
+
+Das ist ausdrücklich **kein** vorgezogener Umbau: keine Analyzer-/Agent-Skelette,
+keine neue Paketstruktur und keine pauschale Aufteilung aller Klassen. Jede
+Extraktion beginnt mit einem akzeptierten Spec, Tests um das betroffene
+Verhalten und einer kleinen, rückwärtskompatiblen Schnittstelle. Apps dürfen
+gemeinsame Bibliotheken nutzen; Bibliotheken und Apps dürfen niemals von
+Frontend-Interna oder voneinander abhängen.
+
+### Meilenstein 14 — Mehrquellen-Capture / Multi-Port-Sniffer — Backlog
+
+Quelle: `docs/komport-multiport-sniffer-time-alignment.md`. Der spätere
+`komport-analyzer` soll zwei
+oder mehr passiv beobachtete Kommunikationskanäle als **eine** bytegenaue
+Session erfassen und daraus Interleaved-, Split-, Hex-, Text-, Decoder- und
+Timeline-Ansichten ableiten. Die Ansichten besitzen keine eigenen
+Empfangspuffer; sie konsumieren denselben sortierten `SessionEvent`-Strom.
+
+Der erste Schnitt ist lokal: mehrere Ports eines Prozesses bzw. eines Remote
+Agents teilen eine monotone Uhr und können deshalb direkt auf einer Timeline
+geordnet werden. Quell-ID, generische TX/RX-Richtung und die semantische Rolle
+einer Sniffer-Quelle bleiben getrennt. Bei passiver Beobachtung sind beide
+Ports technisch RX; die Rolle (etwa `controller_to_device`) gehört in die
+Quellbeschreibung, nicht in die Richtung.
+
+Capture über mehrere unabhängige Hosts ist ein nachgelagerter Teil dieses
+Meilensteins. Er erhält pro Quelle die rohe monotone Zeit und leitet eine
+gemeinsame Sitzungszeit nur über versionierte Clock-Mappings (Offset, Drift/
+Skalierung, Unsicherheit) ab. Ohne belastbares Mapping muss die UI die
+Zeitqualität als unsynchronisiert bzw. geschätzt ausweisen; sie darf keine
+scheinpräzise Reihenfolge behaupten. Physikalisch bitgenaue Reihenfolge ist
+nicht das Ziel — dafür bleibt ein Logic Analyzer zuständig.
+
+**Voraussetzung vor Code:** ADR-008 und eine separate, reviewte
+Implementierungsspezifikation. M8 wird dadurch nicht zu einem Multi-Port-
+Projekt aufgeweitet.
+
 ### Vision (nicht 1.x-Sprint): Netzwerk-Erweiterungen
 
 Architektonischer Leitfaden für später, explizit **nicht** für den aktuellen
 1.x-Sprint gedacht — nur als Hinweis, die bestehende Modularität
-(`KomportSerial`, `KomportEmulation`) so zu belassen, dass sie später
-wiederverwendbar bleibt:
+(`KomportSerial`, `KomportEmulation`) so zu belassen, dass sie später nach
+ADR-009 in gemeinsame Bibliotheken überführt werden kann. Der hier ältere
+Begriff `komport-daemon` bezeichnet dabei den späteren `komport-agent`, nicht
+einen zusätzlichen Bestandteil des Terminal-Programms:
 
 - **Modus A — abgesetzter Dienst (Serial-over-TCP / RFC 2217):** ein neues,
   leichtgewichtiges Headless-`komport-daemon`-Target (systemd-Dienst auf

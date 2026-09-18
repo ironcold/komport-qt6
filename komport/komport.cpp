@@ -210,6 +210,16 @@ void KomportApp::initActions()
   connect( recordSession, &QAction::toggled, this, &KomportApp::slotToggleRecording );
   recordSession->setStatusTip( tr("Log the session to a file") );
 
+  // M9: the live session recording (.kpsession) is a different artefact from the
+  // text log above - raw session events with timestamps and metadata rather than
+  // displayed characters - so it gets its own action and its own icon. The logger
+  // action stays exactly as it is.
+  recordLiveSession = new QAction( QIcon::fromTheme(QStringLiteral("media-tape")), tr("Record &Live Session..."), this );
+  recordLiveSession->setObjectName( QStringLiteral("recordLiveSession") );
+  recordLiveSession->setCheckable( true );
+  connect( recordLiveSession, &QAction::toggled, this, &KomportApp::slotToggleSessionRecording );
+  recordLiveSession->setStatusTip( tr("Record the live session to a .kpsession file") );
+
   profileSave = new QAction( QIcon::fromTheme(QStringLiteral("document-save")), tr("Save Profile"), this );
   connect( profileSave, &QAction::triggered, this, &KomportApp::slotSaveProfile );
   profileSave->setStatusTip( tr("Save as this profile") );
@@ -246,6 +256,7 @@ void KomportApp::initMenus()
 
   QMenu *sessionMenu = menuBar()->addMenu( tr("&Session") );
   sessionMenu->addAction( recordSession );
+  sessionMenu->addAction( recordLiveSession );
 
   QMenu *settingsMenu = menuBar()->addMenu( tr("&Settings") );
   settingsMenu->addAction( showPreferences );
@@ -273,6 +284,7 @@ void KomportApp::initToolBar()
   mainToolBar->addSeparator();
   mainToolBar->addAction( viewHexMonitor );
   mainToolBar->addAction( recordSession );
+  mainToolBar->addAction( recordLiveSession );
   mainToolBar->addSeparator();
 
   mainToolBar->addWidget( new QLabel( tr(" Profile: "), mainToolBar ) );
@@ -362,6 +374,15 @@ void KomportApp::initStatusBar()
   // this window is only as wide as the terminal's fixed character grid.
   connectionStatusLabel = new QLabel( statusBar() );
   statusBar()->addPermanentWidget( connectionStatusLabel );
+
+  // M9: a persistent recording indicator next to it. A recording is the one state
+  // in this milestone that must not be invisible: it captures device data, so it
+  // stays on screen while it runs, whatever view or menu has focus.
+  recordingStatusLabel = new QLabel( tr("● Recording"), statusBar() );
+  recordingStatusLabel->setObjectName( QStringLiteral("recordingStatusLabel") );
+  recordingStatusLabel->setToolTip( tr("A live session recording is running") );
+  statusBar()->addPermanentWidget( recordingStatusLabel );
+  recordingStatusLabel->setVisible( false );
 }
 
 void KomportApp::initDocument()
@@ -369,6 +390,11 @@ void KomportApp::initDocument()
   doc = new KomportDoc(this);
   QObject::connect(doc,SIGNAL(documentModified()),this,SLOT(slotDocumentModified()));
   QObject::connect(doc,SIGNAL(viewModified(KomportView*)),this,SLOT(slotViewModified(KomportView*)));
+  // M9: a recording can end without the user asking for it (a write or flush
+  // failure ends it as damaged), and then the action and the indicator must not
+  // keep claiming that it runs.
+  QObject::connect(doc->getSessionRecorder(), &SessionRecorder::recordingEnded,
+                   this, &KomportApp::slotSessionRecordingEnded);
   doc->newDocument();
 }
 
@@ -632,18 +658,27 @@ void KomportApp::applyConnectionSettings()
   // balloon its memory use.
   view->setScrollBuffer( qBound( 0, strScrollBuffer.toInt(), 4096 ) );
   KomportSerial* serial = view->getSerial();
-  // Cleanly disconnect first: a profile switch commonly means switching to
-  // a completely different device, so always close/reapply/reopen rather
-  // than relying on setDeviceName()'s "only reconnect if it actually
-  // changed" shortcut (that one's still used by slotShowPreferences() for
-  // in-place tweaks, where preserving the connection is nicer).
+  // One complete configuration request through the single entry point
+  // (SPEC-M8 6.2). A profile switch commonly means switching to a completely
+  // different device, so disconnect first instead of relying on the in-place
+  // update of a live port (that behaviour is what slotShowPreferences() needs);
+  // the request is stored while the port is closed and, if the open() below
+  // succeeds, that open applies it exactly once as its open-and-configure
+  // transaction. The former per-setter application - and with it the duplicate
+  // hardware write caused by the removed settingsChanged() self-connection - is
+  // gone.
   serial->close();
-  serial->setDeviceName( strDevice );
-  serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
-  serial->setFlowControl( strFlowControl );
-  serial->setBaudRate( strBaudRate );
-  serial->setRxQueue( strRxQueue.toInt() );
-  serial->setFlushRate( strFlushRate.toInt() );
+  TransportConfiguration request;
+  request.endpoint = strDevice;
+  request.baudRate = strBaudRate;
+  request.dataBits = strDataBits;
+  request.stopBits = strStopBits;
+  request.parity = strParity;
+  request.flowControl = strFlowControl;
+  request.startBits = strStartBits;
+  request.rxQueue = strRxQueue.toInt();
+  request.flushRate = strFlushRate.toInt();
+  serial->applyConfiguration( request );
   serial->open();
 
   updateConnectionStatusLabel();
@@ -924,7 +959,15 @@ void KomportApp::closeEvent(QCloseEvent *event)
     // slotFileClose() used to close it itself before calling close(), but
     // that meant serial teardown depended on which path was used.
     // KomportSerial::close() is safe to call again regardless.
-    view->getSerial()->close();
+    // SPEC-M9 5.8: closing the session - the transport first, while the controller
+    // and the recorder are still alive, then finalising a running recording - is a
+    // document operation, so that the normative ordering is testable without a
+    // window.
+    const SessionRecordingReport report = doc->closeSession();
+    if ( report.damaged )
+      qWarning( "M9: the recording of %s ended damaged after %llu complete records and %lld bytes in %.1f s: %s",
+                qPrintable( report.path ), report.records, report.bytes,
+                double(report.durationNs) / 1e9, qPrintable( report.reason ) );
     event->accept();
   } else {
     event->ignore();
@@ -1247,33 +1290,36 @@ void KomportApp::slotShowPreferences()
 
       view->setScrollBuffer( strScrollBuffer.toInt() );
       KomportSerial* serial = view->getSerial();
-      serial->setDeviceName( strDevice );
-      serial->setFraming( strStartBits, strDataBits, strStopBits, strParity );
-      serial->setFlowControl( strFlowControl );
-      // Each of the setters above (setDeviceName()'s internal reopen
-      // included) re-applies the *entire current* field combination to an
-      // already-open port immediately - so setFraming()/setFlowControl()
-      // above can transiently fail on a still-partially-updated
-      // combination (new data bits with the still-old flow control, say),
-      // a false alarm that has nothing to do with the combination the
-      // user actually asked for. setBaudRate() is the last call that
-      // touches the port's settings before open() below, so by the time
-      // it runs every field already has its final value - resetting the
-      // flag immediately before it means only *this* call's result (the
-      // true, fully-applied combination) is what's left standing
-      // afterwards, discarding the earlier calls' transient noise instead
-      // of trusting a weaker proxy like serial->isOpen() (a rejected
-      // setting does not necessarily close an already-open port).
+      // One complete request through the single entry point (SPEC-M8 6.2): a live
+      // port is reconfigured in exactly one transaction with the whole new
+      // combination - unless the request changes the endpoint and that reopen
+      // fails, in which case the transaction reports the failed attempt and leaves
+      // the port closed instead of applying settings. The former per-setter
+      // applications are gone, and with them the transient partially-updated
+      // states (new data bits with the still-old flow control, say) whose false
+      // alarms this code used to discard by resetting mSerialErrorPending
+      // immediately before the last setter.
+      TransportConfiguration request;
+      request.endpoint = strDevice;
+      request.baudRate = strBaudRate;
+      request.dataBits = strDataBits;
+      request.stopBits = strStopBits;
+      request.parity = strParity;
+      request.flowControl = strFlowControl;
+      request.startBits = strStartBits;
+      request.rxQueue = strRxQueue.toInt();
+      request.flushRate = strFlushRate.toInt();
       mSerialErrorPending = false; // see slotSerialSettingsFailed()
-      serial->setBaudRate( strBaudRate );
-      serial->setRxQueue( strRxQueue.toInt() );
-      serial->setFlushRate( strFlushRate.toInt() );
-      // If the port wasn't open at all (nothing above actually applied
-      // anything, since every setter's re-apply is itself gated on
-      // isOpen()), this open() call is what performs the one and only
-      // real application attempt, and its own settingsFailed() (via
-      // slotPortError()) is what will have the final say on the flag.
-      if ( !serial->isOpen() ) serial->open();
+      const ConfigurationResult result = serial->applyConfiguration( request );
+      // If the port wasn't open at all (the transaction above stored the request
+      // without applying anything), this open() call is what performs the one and
+      // only real application attempt, and its own settingsFailed() (via
+      // slotPortError()) is what will have the final say on the flag. The
+      // `storedOnly` condition matters: a *live* endpoint change that fails to
+      // reopen already consumed its attempt inside the transaction (and reported
+      // it), so retrying here would produce a second attempt and a second error
+      // for one user action.
+      if ( !serial->isOpen() && result.storedOnly ) serial->open();
 
       // Milestone 5: font/colors apply live, independent of the serial
       // settings above (no port re-open, no mSerialErrorPending interplay -
@@ -1406,6 +1452,85 @@ void KomportApp::slotToggleRecording(bool checked)
     sessionLogger->stopLogging();
     slotStatusMsg( tr("Ready.") );
   }
+}
+
+void KomportApp::slotToggleSessionRecording(bool checked)
+{
+  if ( !checked ) {
+    const SessionRecordingReport report = doc->getSessionRecorder()->stop();
+    updateRecordingUi();
+    slotStatusMsg( recordingSummary(report) );
+    return;
+  }
+
+  // D5: a timestamped suggestion in the current directory; the dialog's own
+  // overwrite confirmation covers an existing file.
+  const QString suggested = QDir::currentPath() + QDir::separator()
+      + QStringLiteral("session-%1.kpsession")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+  const QString fileName = QFileDialog::getSaveFileName( this, tr("Record Live Session..."), suggested,
+                                                         tr("Komport session files (*.kpsession);;All files (*)") );
+  if ( fileName.isEmpty() ) {
+    updateRecordingUi();          // cancelled: nothing started, nothing to report
+    return;
+  }
+  if ( !startSessionRecording(fileName) )
+    updateRecordingUi();
+}
+
+bool KomportApp::startSessionRecording(const QString &_path)
+{
+  SessionRecordingRequest request;
+  request.path = _path;
+  request.applicationName = QStringLiteral("Komport");
+  request.applicationVersion = QCoreApplication::applicationVersion();
+  // D7: the snapshot comes from the transport, never assembled here.
+  request.configuration = doc->getSerial()->appliedConfigurationSnapshot();
+
+  const SessionRecordingStart started = doc->getSessionRecorder()->start(request);
+  updateRecordingUi();
+  if ( !started.ok ) {
+    slotStatusMsg( tr("Recording not started: %1").arg(started.reason) );
+    return false;
+  }
+  slotStatusMsg( tr("Recording the live session to %1").arg(_path) );
+  return true;
+}
+
+void KomportApp::slotSessionRecordingEnded(const SessionRecordingReport &_report)
+{
+  updateRecordingUi();
+  slotStatusMsg( recordingSummary(_report) );
+}
+
+void KomportApp::updateRecordingUi()
+{
+  // Live, not "not stopped": a damaged recording sits in the Damaged state and
+  // writes nothing further, so keeping the indicator lit would claim a recording
+  // that is already over - the one false positive this indicator must not have.
+  const bool recording = doc->getSessionRecorder()->state() == SessionRecorder::State::Live;
+  recordLiveSession->blockSignals( true );
+  recordLiveSession->setChecked( recording );
+  recordLiveSession->blockSignals( false );
+  recordingStatusLabel->setVisible( recording );
+}
+
+QString KomportApp::recordingSummary(const SessionRecordingReport &_report) const
+{
+  const QString seconds = QString::number( double(_report.durationNs) / 1e9, 'f', 1 );
+  // Qt's numerus API takes an int, so the count is narrowed here deliberately: each
+  // record costs at least 44 bytes plus payload, so a count beyond INT_MAX would mean
+  // at least ~94 GB of records. It is a status-message bound, not a recording limit
+  // (ADR-010 6), and the counter itself stays a quint64.
+  const int pluralCount = int( _report.records );
+  if ( _report.damaged )
+    return tr("Recording ended damaged: %n complete record(s), %2 bytes written in %3 s, into %4: %5",
+              nullptr, pluralCount)
+        .arg( _report.bytes ).arg( seconds ).arg( _report.path ).arg( _report.reason );
+  if ( _report.records == 0 )
+    return tr("Recording stopped: no session data recorded, into %1").arg( _report.path );
+  return tr("Recording stopped: %n complete record(s), %2 bytes in %3 s, into %4", nullptr, pluralCount)
+      .arg( _report.bytes ).arg( seconds ).arg( _report.path );
 }
 
 /** apply a line-ending choice ("CR"/"LF"/"CR+LF") from the toolbar dropdown */

@@ -77,6 +77,22 @@ add_library(komport_core OBJECT
   komport/komportsessionlogger.h
   komport/komportminimap.cpp
   komport/komportminimap.h
+  # M8 session/transport foundation (ADR-002/ADR-003/ADR-005, SPEC-M8). These
+  # are the public, widget-free session contracts; the same headers are also
+  # compiled on their own against Qt6::Core by tests/session_contract_compile.cpp
+  # to prove that they need no widget dependency (SPEC-M8 section 14 / ADR-009).
+  komport/itransport.cpp
+  komport/itransport.h
+  komport/sessionevent.h
+  komport/transportconfiguration.cpp
+  komport/transportconfiguration.h
+  komport/sessioncontroller.cpp
+  komport/sessioncontroller.h
+  komport/sessionrecordcodec.cpp
+  komport/sessionrecordcodec.h
+  komport/sessionrecorder.cpp
+  komport/sessionrecorder.h
+  komport/sessionrecorderseams.h
   komport/komport.qrc
 )
 

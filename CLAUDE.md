@@ -64,6 +64,47 @@ und in Gegenrichtung:
 
 KDE `KonsolePart` ist technisch interessant, aber langfristig wahrscheinlich zu schwer fuer dieses Projekt: KF6/KParts/XmlGui-Abhaengigkeiten, PTY-/Shell-Fokus und zusaetzliche Bridge-Komplexitaet passen nur schlecht zu einem schlanken, reinen Qt6-Serial-Tool. `QTermWidget` ist der sinnvollere Wiederverwendungs-Kandidat fuer einen Spike, weil es als Qt-Widget einbettbar ist und weniger KDE-Ballast mitbringt. Trotzdem gilt: Wenn Spezialfeatures wie Zeichensatz-Tabellen, Hex-Sicht, Profile oder Rohdatenkontrolle dadurch schlechter werden, bleibt die eigene Emulation die bessere Wahl.
 
+## Session-/Replay-Plattform (nach v1.0.0, noch nicht implementiert)
+
+Die produktweite Erweiterung zu verlustfreier Session-Aufzeichnung,
+offline-Analyse, passivem Replay, Decodern, Simulation und späteren
+Netzwerktransporten ist in diesen Dokumenten festgelegt:
+
+- `docs/komport-decoder-session-concept-evolution.md` — Herleitung und
+  Produktbegründung.
+- `docs/komport-session-replay-simulation-architecture.md` — Zielbild und
+  empfohlene Reihenfolge.
+- `docs/komport-engineering-governance-spec-review-workflow.md` — verbindlich:
+  reviewed spec before production code.
+- `docs/architecture-decisions/ADR-002` bis `ADR-009` — vorgeschlagene
+  Foundation-Verträge für Event, Transport, Richtung, Zeit, Dateiformat und
+  Replay-Sicherheit sowie Quellzeit und Produktgrenzen.
+- `docs/specs/SPEC-M8-session-transport-foundation.md` — erster, bewusst
+  schmaler Implementierungsschnitt.
+- `docs/komport-multi-executable-product-architecture.md` — Zielbild für
+  schlankes Terminal, späteren Analyzer und Headless-Agent auf gemeinsamen
+  Bibliotheken.
+
+Der Multi-Port-Sniffer ist als eigenes späteres Backlog in
+`docs/komport-multiport-sniffer-time-alignment.md` beschrieben. Bereits das
+Session-Fundament muss deshalb Quellidentität von der lokalen TX/RX-Richtung
+trennen und die beobachtete Quellzeit neben einer abgeleiteten Sitzungszeit
+erhalten. M8 implementiert dennoch nur eine lokale Quelle; Mehrquellen-Capture,
+Sniffer-Ansichten und Clock-Alignment bleiben explizit spätere, spezifizierte
+Meilensteine (ADR-008).
+
+Das heutige `komport-qt6` bleibt das Terminal. `komport-analyzer` und
+`komport-agent` sind keine M8-Artefakte und lösen keinen Sofort-Umbau aus.
+Neue Session-/Transport-Verträge werden jedoch Widget- und Frontend-neutral
+gehalten, damit eine spätere, bedarfsgetriebene Bibliotheks-Extraktion ohne
+Abhängigkeit eines Programms von den Interna eines anderen möglich bleibt
+(ADR-009).
+
+Die bisherigen Einzelzeichen-Signale und der Text-Logger sind keine
+verlustfreie Session-Architektur. Neuer Recorder-/Decoder-/Replay-Code darf
+sie nicht als Quelle benutzen. Vor Umsetzung von M8 müssen die ADRs und der
+Spec unabhängig geprüft und als akzeptiert markiert werden.
+
 ## Ziel dieser Migration
 
 1. **KDE-Klassen raus, Standard-Qt6-Klassen rein.** Es soll am Ende ein reines Qt6-Programm

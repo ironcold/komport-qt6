@@ -25,7 +25,11 @@
 #include <QList>
 #include <QUrl>
 
+#include <memory>
+
 #include "komportserial.h"
+#include "sessioncontroller.h"
+#include "sessionrecorder.h"
 
 // forward declaration of the Komport classes
 class KomportView;
@@ -93,6 +97,21 @@ class KomportDoc : public QObject
     QString fileName() const;
   /** get the serial port */
   KomportSerial* getSerial();
+  /** the document-owned session controller bound to the serial transport
+    * (SPEC-M8 6.2). It is created with the document, lives as long as it does,
+    * and is destroyed before the transport. */
+  SessionController* getSessionController();
+  /** The document's session recorder (SPEC-M9 5.8); never null. Recording is
+    *  started and stopped by the application, not by the document. */
+  SessionRecorder* getSessionRecorder();
+  /** Close the session: close the transport first, while the controller and the
+    *  recorder are still alive, and only then finalise a running recording
+    *  (SPEC-M9 5.8 - that ordering is normative, because it is what keeps the
+    *  terminal `TransportClosed` event in the file). Returns the recording's
+    *  report, or an empty report when nothing was being recorded. This is the
+    *  operation the application's close path performs; it is a document method so
+    *  that the ordering itself is testable without a window. */
+  SessionRecordingReport closeSession();
 
   public slots:
     /** calls repaint() on all views connected to the document object and is called by the view by which the document has been changed.
@@ -112,6 +131,16 @@ class KomportDoc : public QObject
     QUrl doc_url;
   /** serial port */
   KomportSerial mSerial;
+  /** the live session recorder (SPEC-M9 5.8). Declared after `mSerial` and
+    * before the controller, so that - members being destroyed in reverse
+    * declaration order - the controller dies first, then the recorder, then the
+    * transport, which is the order the specification fixes for the milestone. The
+    * destructor resets both explicitly as well. */
+  std::unique_ptr<SessionRecorder> mSessionRecorder;
+  /** the session controller (SPEC-M8 6.2). Declared after mSerial and destroyed
+    * explicitly first: a QObject-child arrangement is not acceptable, because
+    * mSerial is a by-value member and would already be destroyed. */
+  std::unique_ptr<SessionController> mSessionController;
 signals: // Signals
   /** Document has changed. */
   void documentModified();
