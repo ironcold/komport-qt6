@@ -194,7 +194,7 @@ with zero records (ADR-010 D1).
 | flush | a one-second timer on the session thread, armed by the first unflushed write of a live recording and firing at most once per second per burst; the final flush happens on stop (ADR-010 D2/§8). Retention is therefore bounded even when the line goes idle and no further event arrives |
 | stop (user action) | final flush, close, report path, record count, bytes, duration, state |
 | stop with no event recorded | report "no session data recorded"; the file with its complete header remains a valid v1 file with zero records |
-| application close | the application's close path calls `KomportDoc::closeSession()`, which closes the transport first (while controller and recorder are live) and then finalises a running recorder, returning its report; see §5.8 |
+| application close | the application's close path calls `KomportDoc::closeSession()`, which closes the transport first (while controller and recorder are live) and then finalises a running recorder, returning its report; that path reports through the log instead of the status bar, because the window is closing (§5.7) |
 | short or failed write | stop as damaged, report with the byte counts; the complete prefix stays valid |
 | flush failure | damaged transition, reported like a write failure |
 | invalid event, oversized event | damaged transition; the event is not written, its sequence number and sizes are reported |
@@ -212,6 +212,13 @@ with zero records (ADR-010 D1).
   existing file requires the dialog's normal confirmation.
 - Start/stop/failure outcomes are reported through the existing translated status
   mechanism (`tr()` and the status label pattern); no new notification mechanism.
+  One exemption, because the surface would not be seen: on the application-close
+  path the recording is finalised silently. A damaged close is logged as an
+  untranslated diagnostic warning that carries the same finalisation facts (path,
+  complete record count, accepted bytes, duration, reason); a clean close logs
+  nothing, and in both cases the facts are also available as the recorder's last
+  report while the recorder lives, so no fact is lost - only the visible message
+  that no one would still be reading.
 - Recording is never started automatically and no recording state is persisted
   across runs.
 

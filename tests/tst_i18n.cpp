@@ -46,6 +46,7 @@ private slots:
   void flowControlComboBoxKeepsEnglishIdentifierAsDataWhenTranslated();
   void colorSchemeNamesAreActuallyTranslated();
   void findDataStillLocatesItemsByIdentifierWhenTranslated();
+  void recordingSummaryNumerusFormsAreSelectedAtRuntime();
 
 private:
   QTranslator mTranslator;
@@ -150,6 +151,33 @@ void TstI18n::findDataStillLocatesItemsByIdentifierWhenTranslated()
   const int flowIdx = dialog.FlowControlComboBox->findData( QStringLiteral("RTS/CTS") );
   QVERIFY( flowIdx >= 0 );
   QCOMPARE( dialog.FlowControlComboBox->itemText(flowIdx), QStringLiteral("RTS/CTS") );
+}
+
+/** The recording summary's numerus forms must be *selected* at runtime, not
+  *  merely present in the catalog (M9 step 5b): Qt picks the singular for one
+  *  record and the plural for several, and the numbered placeholders survive %n.
+  *  Uses the same source strings and the same call order as recordingSummary(). */
+void TstI18n::recordingSummaryNumerusFormsAreSelectedAtRuntime()
+{
+  const auto clean = [](int records, qint64 bytes, const QString &seconds, const QString &path) {
+    return QCoreApplication::translate( "KomportApp",
+                                        "Recording stopped: %n complete record(s), %2 bytes in %3 s, into %4",
+                                        nullptr, records )
+        .arg( bytes ).arg( seconds ).arg( path );
+  };
+
+  QCOMPARE( clean( 1, 804, QStringLiteral("1.1"), QStringLiteral("/tmp/a.kpsession") ),
+            QStringLiteral("Aufzeichnung beendet: 1 vollständiger Record, 804 Bytes in 1.1 s, in /tmp/a.kpsession") );
+  QCOMPARE( clean( 2, 1204, QStringLiteral("3.5"), QStringLiteral("/tmp/b.kpsession") ),
+            QStringLiteral("Aufzeichnung beendet: 2 vollständige Records, 1204 Bytes in 3.5 s, in /tmp/b.kpsession") );
+
+  // The damaged form carries the same numerus decision plus the reason.
+  const QString damaged = QCoreApplication::translate( "KomportApp",
+      "Recording ended damaged: %n complete record(s), %2 bytes written in %3 s, into %4: %5", nullptr, 2 )
+      .arg( qint64(1204) ).arg( QStringLiteral("3.5") ).arg( QStringLiteral("/tmp/b.kpsession") )
+      .arg( QStringLiteral("the sink refused the write") );
+  QCOMPARE( damaged,
+            QStringLiteral("Aufzeichnung mit Schaden beendet: 2 vollständige Records, 1204 geschriebene Bytes in 3.5 s, in /tmp/b.kpsession: the sink refused the write") );
 }
 
 QTEST_MAIN(TstI18n)

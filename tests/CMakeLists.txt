@@ -42,6 +42,10 @@ komport_add_test(tst_sessionrecordcodec)
 # Uses the scripted sink and the manual flush scheduler, so no disk and no
 # wall-clock time - and no pty, hence no libutil.
 komport_add_test(tst_sessionrecorder)
+# M9: the application wiring of the recording (action, indicator, reporting).
+# Builds a real KomportApp offscreen and uses a pty, so it links libutil.
+komport_add_test(tst_sessionrecordingui)
+target_link_libraries(tst_sessionrecordingui PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)

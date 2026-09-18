@@ -60,7 +60,7 @@
     </message>
     <message>
         <location filename="../komport.cpp" line="157"/>
-        <location filename="../komport.cpp" line="467"/>
+        <location filename="../komport.cpp" line="493"/>
         <source>Quit</source>
         <translation>Beenden</translation>
     </message>
@@ -145,150 +145,170 @@
         <translation>Die Sitzung in eine Datei protokollieren</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="213"/>
-        <location filename="../komport.cpp" line="796"/>
-        <location filename="../komport.cpp" line="804"/>
+        <location filename="../komport.cpp" line="217"/>
+        <source>Record &amp;Live Session...</source>
+        <translation>&amp;Live-Sitzung aufzeichnen...</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="221"/>
+        <source>Record the live session to a .kpsession file</source>
+        <translation>Die laufende Sitzung in eine .kpsession-Datei aufzeichnen</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="223"/>
+        <location filename="../komport.cpp" line="831"/>
+        <location filename="../komport.cpp" line="839"/>
         <source>Save Profile</source>
         <translation>Profil speichern</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="215"/>
+        <location filename="../komport.cpp" line="225"/>
         <source>Save as this profile</source>
         <translation>Als dieses Profil speichern</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="217"/>
-        <location filename="../komport.cpp" line="816"/>
-        <location filename="../komport.cpp" line="819"/>
+        <location filename="../komport.cpp" line="227"/>
+        <location filename="../komport.cpp" line="851"/>
+        <location filename="../komport.cpp" line="854"/>
         <source>Delete Profile</source>
         <translation>Profil löschen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="219"/>
+        <location filename="../komport.cpp" line="229"/>
         <source>Delete this profile</source>
         <translation>Dieses Profil löschen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="224"/>
+        <location filename="../komport.cpp" line="234"/>
         <source>&amp;File</source>
         <translation>&amp;Datei</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="228"/>
+        <location filename="../komport.cpp" line="238"/>
         <source>Upload &amp;recent file</source>
         <translation>&amp;Zuletzt verwendete Datei hochladen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="236"/>
+        <location filename="../komport.cpp" line="246"/>
         <source>&amp;Edit</source>
         <translation>&amp;Bearbeiten</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="241"/>
+        <location filename="../komport.cpp" line="251"/>
         <source>&amp;View</source>
         <translation>&amp;Ansicht</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="247"/>
+        <location filename="../komport.cpp" line="257"/>
         <source>&amp;Session</source>
         <translation>&amp;Sitzung</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="250"/>
+        <location filename="../komport.cpp" line="261"/>
         <source>&amp;Settings</source>
         <translation>&amp;Einstellungen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="258"/>
+        <location filename="../komport.cpp" line="269"/>
         <source>Main Toolbar</source>
         <translation>Haupt-Werkzeugleiste</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="278"/>
+        <location filename="../komport.cpp" line="290"/>
         <source> Profile: </source>
         <translation> Profil: </translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="283"/>
+        <location filename="../komport.cpp" line="295"/>
         <source>Device profile: pick one to load it, or type a new
 name and click Save to create it.</source>
         <translation>Geräteprofil: eines auswählen, um es zu laden, oder einen neuen
 Namen eingeben und auf Speichern klicken, um es zu erstellen.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="297"/>
+        <location filename="../komport.cpp" line="309"/>
         <source> Enter sends: </source>
         <translation> Enter sendet: </translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="300"/>
+        <location filename="../komport.cpp" line="312"/>
         <source>What the Return key (and quick-command buttons) send at end of line - some gear only understands a bare CR, Unix hosts usually expect LF.</source>
         <translation>Was die Eingabetaste (und die Schnellbefehl-Schaltflächen) am Zeilenende senden - manche Geräte verstehen nur ein reines CR, Unix-Hosts erwarten meist LF.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="354"/>
-        <location filename="../komport.cpp" line="840"/>
-        <location filename="../komport.cpp" line="962"/>
-        <location filename="../komport.cpp" line="978"/>
-        <location filename="../komport.cpp" line="996"/>
-        <location filename="../komport.cpp" line="1016"/>
-        <location filename="../komport.cpp" line="1030"/>
-        <location filename="../komport.cpp" line="1054"/>
-        <location filename="../komport.cpp" line="1069"/>
-        <location filename="../komport.cpp" line="1084"/>
-        <location filename="../komport.cpp" line="1108"/>
-        <location filename="../komport.cpp" line="1126"/>
-        <location filename="../komport.cpp" line="1137"/>
-        <location filename="../komport.cpp" line="1144"/>
+        <location filename="../komport.cpp" line="366"/>
+        <location filename="../komport.cpp" line="875"/>
+        <location filename="../komport.cpp" line="1005"/>
+        <location filename="../komport.cpp" line="1021"/>
+        <location filename="../komport.cpp" line="1039"/>
+        <location filename="../komport.cpp" line="1059"/>
+        <location filename="../komport.cpp" line="1073"/>
+        <location filename="../komport.cpp" line="1097"/>
+        <location filename="../komport.cpp" line="1112"/>
+        <location filename="../komport.cpp" line="1127"/>
         <location filename="../komport.cpp" line="1151"/>
-        <location filename="../komport.cpp" line="1295"/>
-        <location filename="../komport.cpp" line="1407"/>
+        <location filename="../komport.cpp" line="1169"/>
+        <location filename="../komport.cpp" line="1180"/>
+        <location filename="../komport.cpp" line="1187"/>
+        <location filename="../komport.cpp" line="1194"/>
+        <location filename="../komport.cpp" line="1341"/>
+        <location filename="../komport.cpp" line="1453"/>
         <source>Ready.</source>
         <translation>Bereit.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="405"/>
+        <location filename="../komport.cpp" line="381"/>
+        <source>● Recording</source>
+        <translation>● Aufzeichnung läuft</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="383"/>
+        <source>A live session recording is running</source>
+        <translation>Eine Aufzeichnung der laufenden Sitzung ist aktiv</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="431"/>
         <source>Quick Commands</source>
         <translation>Schnellbefehle</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="443"/>
-        <location filename="../komport.cpp" line="464"/>
-        <location filename="../komport.cpp" line="479"/>
+        <location filename="../komport.cpp" line="469"/>
+        <location filename="../komport.cpp" line="490"/>
+        <location filename="../komport.cpp" line="505"/>
         <source>Show Config</source>
         <translation>Konfiguration anzeigen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="444"/>
-        <location filename="../komport.cpp" line="465"/>
-        <location filename="../komport.cpp" line="480"/>
+        <location filename="../komport.cpp" line="470"/>
+        <location filename="../komport.cpp" line="491"/>
+        <location filename="../komport.cpp" line="506"/>
         <source>Show Version</source>
         <translation>Version anzeigen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="445"/>
-        <location filename="../komport.cpp" line="481"/>
+        <location filename="../komport.cpp" line="471"/>
+        <location filename="../komport.cpp" line="507"/>
         <source>Save (wr mem)</source>
         <translation>Speichern (wr mem)</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="446"/>
-        <location filename="../komport.cpp" line="482"/>
+        <location filename="../komport.cpp" line="472"/>
+        <location filename="../komport.cpp" line="508"/>
         <source>Exit</source>
         <translation>Beenden</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="466"/>
+        <location filename="../komport.cpp" line="492"/>
         <source>Save</source>
         <translation>Speichern</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="665"/>
+        <location filename="../komport.cpp" line="700"/>
         <source>(no device)</source>
         <translation>(kein Gerät)</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="667"/>
+        <location filename="../komport.cpp" line="702"/>
         <source>Profile: %1
 Device: %2
 Baud rate: %3
@@ -303,166 +323,223 @@ Flusskontrolle: %5
 Enter sendet: %6</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="668"/>
+        <location filename="../komport.cpp" line="703"/>
         <source>(none)</source>
         <translation>(keins)</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="788"/>
+        <location filename="../komport.cpp" line="823"/>
         <source>Loaded profile &quot;%1&quot;</source>
         <translation>Profil „%1“ geladen</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="796"/>
+        <location filename="../komport.cpp" line="831"/>
         <source>Please enter a profile name first.</source>
         <translation>Bitte zuerst einen Profilnamen eingeben.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="804"/>
+        <location filename="../komport.cpp" line="839"/>
         <source>Profile names can&apos;t contain &quot;/&quot; - please remove it.</source>
         <translation>Profilnamen dürfen kein „/“ enthalten - bitte entfernen.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="809"/>
+        <location filename="../komport.cpp" line="844"/>
         <source>Saved profile &quot;%1&quot;</source>
         <translation>Profil „%1“ gespeichert</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="816"/>
+        <location filename="../komport.cpp" line="851"/>
         <source>&quot;%1&quot; is not a saved profile.</source>
         <translation>„%1“ ist kein gespeichertes Profil.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="819"/>
+        <location filename="../komport.cpp" line="854"/>
         <source>Delete profile &quot;%1&quot;? This cannot be undone.</source>
         <translation>Profil „%1“ löschen? Dies kann nicht rückgängig gemacht werden.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="831"/>
+        <location filename="../komport.cpp" line="866"/>
         <source>Deleted profile &quot;%1&quot;</source>
         <translation>Profil „%1“ gelöscht</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="836"/>
+        <location filename="../komport.cpp" line="871"/>
         <source>Opening file...</source>
         <translation>Datei wird geöffnet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="973"/>
+        <location filename="../komport.cpp" line="1016"/>
         <source>Opening a new application window...</source>
         <translation>Ein neues Anwendungsfenster wird geöffnet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="983"/>
+        <location filename="../komport.cpp" line="1026"/>
         <source>Creating new document...</source>
         <translation>Neues Dokument wird erstellt...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1001"/>
-        <location filename="../komport.cpp" line="1021"/>
+        <location filename="../komport.cpp" line="1044"/>
+        <location filename="../komport.cpp" line="1064"/>
         <source>Uploading file...</source>
         <translation>Datei wird hochgeladen...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1002"/>
+        <location filename="../komport.cpp" line="1045"/>
         <source>Upload File...</source>
         <translation>Datei hochladen...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1040"/>
+        <location filename="../komport.cpp" line="1083"/>
         <source>Downloading a file...</source>
         <translation>Eine Datei wird heruntergeladen...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1041"/>
+        <location filename="../komport.cpp" line="1084"/>
         <source>Save as...</source>
         <translation>Speichern unter...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1059"/>
+        <location filename="../komport.cpp" line="1102"/>
         <source>Closing file...</source>
         <translation>Datei wird geschlossen...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1075"/>
+        <location filename="../komport.cpp" line="1118"/>
         <source>Printing...</source>
         <translation>Wird gedruckt...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1089"/>
+        <location filename="../komport.cpp" line="1132"/>
         <source>Exiting...</source>
         <translation>Wird beendet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1106"/>
+        <location filename="../komport.cpp" line="1149"/>
         <source>Cutting selection...</source>
         <translation>Auswahl wird ausgeschnitten...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1113"/>
+        <location filename="../komport.cpp" line="1156"/>
         <source>Copying selection to clipboard...</source>
         <translation>Auswahl wird in die Zwischenablage kopiert...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1131"/>
+        <location filename="../komport.cpp" line="1174"/>
         <source>Inserting clipboard contents...</source>
         <translation>Zwischenablage-Inhalt wird eingefügt...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1142"/>
+        <location filename="../komport.cpp" line="1185"/>
         <source>Toggling toolbar...</source>
         <translation>Werkzeugleiste wird umgeschaltet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1149"/>
+        <location filename="../komport.cpp" line="1192"/>
         <source>Toggle the statusbar...</source>
         <translation>Statusleiste wird umgeschaltet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1157"/>
+        <location filename="../komport.cpp" line="1200"/>
         <source>Open settings form...</source>
         <translation>Einstellungsdialog wird geöffnet...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1336"/>
+        <location filename="../komport.cpp" line="1382"/>
         <source>Serial port error: %1</source>
         <translation>Fehler am seriellen Port: %1</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1393"/>
+        <location filename="../komport.cpp" line="1439"/>
         <source>Start Session Log...</source>
         <translation>Sitzungsprotokoll starten...</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1394"/>
+        <location filename="../komport.cpp" line="1440"/>
         <source>Text files (*.log *.txt);;All files (*)</source>
         <translation>Textdateien (*.log *.txt);;Alle Dateien (*)</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1400"/>
+        <location filename="../komport.cpp" line="1446"/>
         <source>Session Log</source>
         <translation>Sitzungsprotokoll</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1400"/>
+        <location filename="../komport.cpp" line="1446"/>
         <source>Could not open &quot;%1&quot; for writing.</source>
         <translation>„%1“ konnte nicht zum Schreiben geöffnet werden.</translation>
     </message>
     <message>
-        <location filename="../komport.cpp" line="1404"/>
+        <location filename="../komport.cpp" line="1450"/>
         <source>Recording session to %1</source>
         <translation>Sitzung wird nach %1 aufgezeichnet</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="1471"/>
+        <source>Record Live Session...</source>
+        <translation>Live-Sitzung aufzeichnen...</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="1472"/>
+        <source>Komport session files (*.kpsession);;All files (*)</source>
+        <translation>Komport-Sitzungsdateien (*.kpsession);;Alle Dateien (*)</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="1493"/>
+        <source>Recording not started: %1</source>
+        <translation>Aufzeichnung nicht gestartet: %1</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="1496"/>
+        <source>Recording the live session to %1</source>
+        <translation>Zeichne die laufende Sitzung nach %1 auf</translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../komport.cpp" line="1522"/>
+        <source>Recording ended damaged: %n complete record(s), %2 bytes written in %3 s, into %4: %5</source>
+        <translation>
+            <numerusform>Aufzeichnung mit Schaden beendet: %n vollständiger Record, %2 geschriebene Bytes in %3 s, in %4: %5</numerusform>
+            <numerusform>Aufzeichnung mit Schaden beendet: %n vollständige Records, %2 geschriebene Bytes in %3 s, in %4: %5</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../komport.cpp" line="1527"/>
+        <source>Recording stopped: %n complete record(s), %2 bytes in %3 s, into %4</source>
+        <translation>
+            <numerusform>Aufzeichnung beendet: %n vollständiger Record, %2 Bytes in %3 s, in %4</numerusform>
+            <numerusform>Aufzeichnung beendet: %n vollständige Records, %2 Bytes in %3 s, in %4</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Recording ended damaged: %1 complete records, %2 bytes written in %3 s, into %4: %5</source>
+        <translation type="vanished">Aufzeichnung mit Schaden beendet: %1 vollständige Records, %2 geschriebene Bytes in %3 s, in %4: %5</translation>
+    </message>
+    <message>
+        <source>Recording stopped: %1 complete records, %2 bytes in %3 s, into %4</source>
+        <translation type="vanished">Aufzeichnung beendet: %1 vollständige Records, %2 Bytes in %3 s, in %4</translation>
+    </message>
+    <message>
+        <source>Recording ended: %1</source>
+        <translation type="vanished">Aufzeichnung beendet: %1</translation>
+    </message>
+    <message>
+        <location filename="../komport.cpp" line="1526"/>
+        <source>Recording stopped: no session data recorded, into %1</source>
+        <translation>Aufzeichnung beendet: keine Sitzungsdaten aufgezeichnet, in %1</translation>
+    </message>
+    <message>
+        <source>Recording stopped: %1 records, %2 bytes in %3 s, into %4</source>
+        <translation type="vanished">Aufzeichnung beendet: %1 Records, %2 Bytes in %3 s, in %4</translation>
     </message>
 </context>
 <context>
     <name>KomportDoc</name>
     <message>
-        <location filename="../komportdoc.cpp" line="97"/>
+        <location filename="../komportdoc.cpp" line="117"/>
         <source>Warning</source>
         <translation>Warnung</translation>
     </message>
     <message>
-        <location filename="../komportdoc.cpp" line="98"/>
+        <location filename="../komportdoc.cpp" line="118"/>
         <source>The current file has been modified.
 Do you want to save it?</source>
         <translation>Die aktuelle Datei wurde geändert.
@@ -549,9 +626,29 @@ Möchten Sie sie speichern?</translation>
 <context>
     <name>KomportSerial</name>
     <message>
-        <location filename="../komportserial.cpp" line="165"/>
+        <location filename="../komportserial.cpp" line="640"/>
+        <source>Could not open the requested endpoint &quot;%1&quot;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../komportserial.cpp" line="752"/>
         <source>Could not apply the requested port settings (baud rate/data bits/parity/flow control) - the device may not support this combination.</source>
         <translation>Die angeforderten Port-Einstellungen (Baudrate/Datenbits/Parität/Flusskontrolle) konnten nicht angewendet werden - das Gerät unterstützt diese Kombination möglicherweise nicht.</translation>
+    </message>
+    <message>
+        <location filename="../komportserial.cpp" line="785"/>
+        <source>The port reported an error while the settings were applied.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../komportserial.cpp" line="786"/>
+        <source>The port reported an error while the settings were applied: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../komportserial.cpp" line="804"/>
+        <source>The requested baud rate &quot;%1&quot; is not usable and was not applied.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -622,6 +719,14 @@ Möchten Sie sie speichern?</translation>
         <location filename="../main.cpp" line="65"/>
         <source>file to open</source>
         <translation>zu öffnende Datei</translation>
+    </message>
+</context>
+<context>
+    <name>SessionController</name>
+    <message>
+        <location filename="../sessioncontroller.cpp" line="34"/>
+        <source>The source time of an observation was lower than the last emitted session time; the event kept the last session time.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

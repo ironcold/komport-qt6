@@ -54,9 +54,16 @@ class KomportView;
 // own transitive includes) into every translation unit that includes this
 // header.
 Q_MOC_INCLUDE("komportview.h")
+// Same reasoning for the recording report the M9 slot below takes by reference:
+// moc's generated code for this class needs the completeness of that type, and
+// this keeps its full definition out of every translation unit that includes this
+// header.
+Q_MOC_INCLUDE("sessionrecorder.h")
 class KomportHexView;
 class KomportMacroBar;
 class KomportSessionLogger;
+/** The M9 recording report, declared in sessionrecorder.h (SPEC-M9 5.6). */
+struct SessionRecordingReport;
 
 /**
   * The base class for Komport application windows. It sets up the main
@@ -219,6 +226,12 @@ class KomportApp : public QMainWindow
     void slotShowPreferences();
     /** changes the statusbar contents for the standard label permanently, used to indicate current actions. */
     void slotStatusMsg(const QString &text);
+    /** Start the live session recording to @p _path without a dialog (M9,
+      *  SPEC-M9 5.6): the non-interactive part of slotToggleSessionRecording(),
+      *  separated so that a start and its refusal are testable. Returns false and
+      *  reports through the status mechanism when the recorder refuses (an idle
+      *  session, a bad target or a header that cannot be built). */
+    bool startSessionRecording(const QString &_path);
     /** document has been changed */
     void slotDocumentModified();
     /** the serial port failed to apply its settings, or reported an error
@@ -234,6 +247,23 @@ class KomportApp : public QMainWindow
     void slotMacroTriggered(const QString &command);
     /** toggles session logging - prompts for a file to start, if not already logging */
     void slotToggleRecording(bool checked);
+    /** Start or stop the live session recording (M9, SPEC-M9 5.6/5.7): the
+      *  `.kpsession` recorder, which is independent of the text logger above.
+      *  Starting opens a file dialog; stopping reports through the status
+      *  mechanism. */
+    void slotToggleSessionRecording(bool checked);
+    /** A recording that ended without a user action (a write or flush failure)
+      *  still has to restore the user interface and tell the user. */
+    void slotSessionRecordingEnded(const SessionRecordingReport &_report);
+
+  private:
+    /** Bring the action's checked state and the persistent indicator in line with
+      *  the recorder's state. */
+    void updateRecordingUi();
+    /** One line describing a finished recording, for the status mechanism. */
+    QString recordingSummary(const SessionRecordingReport &_report) const;
+
+  public slots:
     /** apply a line-ending choice ("CR"/"LF"/"CR+LF") from the toolbar dropdown */
     void slotLineEndingChanged(const QString &text);
 
@@ -292,6 +322,9 @@ class KomportApp : public QMainWindow
     QAction* viewHexMonitor;
     /** toggles session logging */
     QAction* recordSession;
+    /** The M9 action that records a `.kpsession` file. Its checked state is part
+      *  of the recording indicator; the persistent one is recordingStatusLabel. */
+    QAction* recordLiveSession;
     /** saves the current settings under profileCombo's current text */
     QAction* profileSave;
     /** deletes the profile selected in profileCombo */
@@ -307,6 +340,10 @@ class KomportApp : public QMainWindow
     QComboBox* profileCombo;
     /** permanent status-bar label showing the active device/framing/line-ending */
     QLabel* connectionStatusLabel;
+    /** Persistent recording indicator (M9): visible exactly while a recording
+      *  runs, so a recording is not invisible just because its menu is closed or
+      *  another view has focus. Carries an object name for the tests. */
+    QLabel* recordingStatusLabel;
     /** left-hand status-bar label showing toolbar-icon hover hints and
      *  "Ready." when idle - a real ("normal", addWidget()) status-bar
      *  widget with QSizePolicy::Ignored horizontally, so its *allocated*

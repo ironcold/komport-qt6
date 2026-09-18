@@ -210,6 +210,16 @@ void KomportApp::initActions()
   connect( recordSession, &QAction::toggled, this, &KomportApp::slotToggleRecording );
   recordSession->setStatusTip( tr("Log the session to a file") );
 
+  // M9: the live session recording (.kpsession) is a different artefact from the
+  // text log above - raw session events with timestamps and metadata rather than
+  // displayed characters - so it gets its own action and its own icon. The logger
+  // action stays exactly as it is.
+  recordLiveSession = new QAction( QIcon::fromTheme(QStringLiteral("media-tape")), tr("Record &Live Session..."), this );
+  recordLiveSession->setObjectName( QStringLiteral("recordLiveSession") );
+  recordLiveSession->setCheckable( true );
+  connect( recordLiveSession, &QAction::toggled, this, &KomportApp::slotToggleSessionRecording );
+  recordLiveSession->setStatusTip( tr("Record the live session to a .kpsession file") );
+
   profileSave = new QAction( QIcon::fromTheme(QStringLiteral("document-save")), tr("Save Profile"), this );
   connect( profileSave, &QAction::triggered, this, &KomportApp::slotSaveProfile );
   profileSave->setStatusTip( tr("Save as this profile") );
@@ -246,6 +256,7 @@ void KomportApp::initMenus()
 
   QMenu *sessionMenu = menuBar()->addMenu( tr("&Session") );
   sessionMenu->addAction( recordSession );
+  sessionMenu->addAction( recordLiveSession );
 
   QMenu *settingsMenu = menuBar()->addMenu( tr("&Settings") );
   settingsMenu->addAction( showPreferences );
@@ -273,6 +284,7 @@ void KomportApp::initToolBar()
   mainToolBar->addSeparator();
   mainToolBar->addAction( viewHexMonitor );
   mainToolBar->addAction( recordSession );
+  mainToolBar->addAction( recordLiveSession );
   mainToolBar->addSeparator();
 
   mainToolBar->addWidget( new QLabel( tr(" Profile: "), mainToolBar ) );
@@ -362,6 +374,15 @@ void KomportApp::initStatusBar()
   // this window is only as wide as the terminal's fixed character grid.
   connectionStatusLabel = new QLabel( statusBar() );
   statusBar()->addPermanentWidget( connectionStatusLabel );
+
+  // M9: a persistent recording indicator next to it. A recording is the one state
+  // in this milestone that must not be invisible: it captures device data, so it
+  // stays on screen while it runs, whatever view or menu has focus.
+  recordingStatusLabel = new QLabel( tr("● Recording"), statusBar() );
+  recordingStatusLabel->setObjectName( QStringLiteral("recordingStatusLabel") );
+  recordingStatusLabel->setToolTip( tr("A live session recording is running") );
+  statusBar()->addPermanentWidget( recordingStatusLabel );
+  recordingStatusLabel->setVisible( false );
 }
 
 void KomportApp::initDocument()
@@ -369,6 +390,11 @@ void KomportApp::initDocument()
   doc = new KomportDoc(this);
   QObject::connect(doc,SIGNAL(documentModified()),this,SLOT(slotDocumentModified()));
   QObject::connect(doc,SIGNAL(viewModified(KomportView*)),this,SLOT(slotViewModified(KomportView*)));
+  // M9: a recording can end without the user asking for it (a write or flush
+  // failure ends it as damaged), and then the action and the indicator must not
+  // keep claiming that it runs.
+  QObject::connect(doc->getSessionRecorder(), &SessionRecorder::recordingEnded,
+                   this, &KomportApp::slotSessionRecordingEnded);
   doc->newDocument();
 }
 
@@ -939,8 +965,9 @@ void KomportApp::closeEvent(QCloseEvent *event)
     // window.
     const SessionRecordingReport report = doc->closeSession();
     if ( report.damaged )
-      qWarning( "M9: the recording of %s ended damaged: %s",
-                qPrintable( report.path ), qPrintable( report.reason ) );
+      qWarning( "M9: the recording of %s ended damaged after %llu complete records and %lld bytes in %.1f s: %s",
+                qPrintable( report.path ), report.records, report.bytes,
+                double(report.durationNs) / 1e9, qPrintable( report.reason ) );
     event->accept();
   } else {
     event->ignore();
@@ -1425,6 +1452,81 @@ void KomportApp::slotToggleRecording(bool checked)
     sessionLogger->stopLogging();
     slotStatusMsg( tr("Ready.") );
   }
+}
+
+void KomportApp::slotToggleSessionRecording(bool checked)
+{
+  if ( !checked ) {
+    const SessionRecordingReport report = doc->getSessionRecorder()->stop();
+    updateRecordingUi();
+    slotStatusMsg( recordingSummary(report) );
+    return;
+  }
+
+  // D5: a timestamped suggestion in the current directory; the dialog's own
+  // overwrite confirmation covers an existing file.
+  const QString suggested = QDir::currentPath() + QDir::separator()
+      + QStringLiteral("session-%1.kpsession")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+  const QString fileName = QFileDialog::getSaveFileName( this, tr("Record Live Session..."), suggested,
+                                                         tr("Komport session files (*.kpsession);;All files (*)") );
+  if ( fileName.isEmpty() ) {
+    updateRecordingUi();          // cancelled: nothing started, nothing to report
+    return;
+  }
+  if ( !startSessionRecording(fileName) )
+    updateRecordingUi();
+}
+
+bool KomportApp::startSessionRecording(const QString &_path)
+{
+  SessionRecordingRequest request;
+  request.path = _path;
+  request.applicationName = QStringLiteral("Komport");
+  request.applicationVersion = QCoreApplication::applicationVersion();
+  // D7: the snapshot comes from the transport, never assembled here.
+  request.configuration = doc->getSerial()->appliedConfigurationSnapshot();
+
+  const SessionRecordingStart started = doc->getSessionRecorder()->start(request);
+  updateRecordingUi();
+  if ( !started.ok ) {
+    slotStatusMsg( tr("Recording not started: %1").arg(started.reason) );
+    return false;
+  }
+  slotStatusMsg( tr("Recording the live session to %1").arg(_path) );
+  return true;
+}
+
+void KomportApp::slotSessionRecordingEnded(const SessionRecordingReport &_report)
+{
+  updateRecordingUi();
+  slotStatusMsg( recordingSummary(_report) );
+}
+
+void KomportApp::updateRecordingUi()
+{
+  // Live, not "not stopped": a damaged recording sits in the Damaged state and
+  // writes nothing further, so keeping the indicator lit would claim a recording
+  // that is already over - the one false positive this indicator must not have.
+  const bool recording = doc->getSessionRecorder()->state() == SessionRecorder::State::Live;
+  recordLiveSession->blockSignals( true );
+  recordLiveSession->setChecked( recording );
+  recordLiveSession->blockSignals( false );
+  recordingStatusLabel->setVisible( recording );
+}
+
+QString KomportApp::recordingSummary(const SessionRecordingReport &_report) const
+{
+  const QString seconds = QString::number( double(_report.durationNs) / 1e9, 'f', 1 );
+  if ( _report.damaged )
+    return tr("Recording ended damaged: %n complete record(s), %2 bytes written in %3 s, into %4: %5",
+              nullptr, int(_report.records))
+        .arg( _report.bytes ).arg( seconds ).arg( _report.path ).arg( _report.reason );
+  if ( _report.records == 0 )
+    return tr("Recording stopped: no session data recorded, into %1").arg( _report.path );
+  return tr("Recording stopped: %n complete record(s), %2 bytes in %3 s, into %4",
+            nullptr, int(_report.records))
+      .arg( _report.bytes ).arg( seconds ).arg( _report.path );
 }
 
 /** apply a line-ending choice ("CR"/"LF"/"CR+LF") from the toolbar dropdown */

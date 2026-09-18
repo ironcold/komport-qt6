@@ -184,7 +184,11 @@ writer's own buffer; it is not a durability guarantee, and v1 makes none.
 
 Stopping closes the file after a final flush and reports the outcome: path,
 complete record count, bytes written, session duration, and any error. Stopping
-the application follows the ordering of §1. A destructor performs no more than
+the application follows the ordering of §1, and it reports through the log rather
+than the status bar: the window is closing, so a visible message would not be read.
+A damaged close is logged with the same facts the visible report would carry (path,
+complete record count, accepted bytes, duration, reason), so the numbers survive
+where a status message would not have been seen. A destructor performs no more than
 that final flush and emits nothing.
 
 ## Consequences
