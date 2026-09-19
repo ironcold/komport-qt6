@@ -25,6 +25,7 @@
 #include "itransport.h"
 #include "sessioncontroller.h"
 #include "sessionevent.h"
+#include "sessionreader.h"
 #include "transportconfiguration.h"
 
 #include <QJsonObject>
@@ -35,9 +36,12 @@
 // SPEC-M8 section 14: the public session/transport contracts must have no widget
 // or executable-specific dependency. The controller is part of that surface, so
 // its header - and, in the object target, its implementation unit - is compiled
-// here against Qt6::Core alone.
+// here against Qt6::Core alone. The M10 reader joined that surface the same way
+// (ADR-009): sessionreader.h and its value types are built into this target.
 static_assert(sizeof(SessionController) > 0,
               "sessioncontroller.h must stay compilable against Qt6::Core (ADR-009)");
+static_assert(sizeof(SessionReader) > 0,
+              "sessionreader.h must stay compilable against Qt6::Core (ADR-009)");
 
 namespace {
 
@@ -108,12 +112,32 @@ int komportSessionContractCompileProof()
   const bool opened = transport.open();
   const qint64 accepted = transport.writeBytes(QByteArrayLiteral("abc"));
 
+  // M10: the reader's own surface and the value types it hands out compile and
+  // link against Qt Core alone. The target is never executed, so nothing here
+  // touches a file: only the contract's shape is exercised.
+  const bool readerSurface =
+      SessionReader::kRecordPrefixSize == 44
+      && SessionReader::kMaxRecordBodyBytes == 64 * 1024 * 1024
+      && SessionReader::kMaxHeaderBytes == 16 * 1024 * 1024
+      && SessionReader::magic().size() == 8
+      && !SessionReader::multiSourceRefusal().isEmpty();
+  SessionLoadOutcome loadOutcome;
+  loadOutcome.eventCount = 0;
+  loadOutcome.bytesRead = 0;
+  const SessionFilePtr session = loadOutcome.session;
+  SessionFileInfo fileInfo;
+  fileInfo.version = SessionReader::kFormatVersion;
+  fileInfo.source.sourceId = 1;
+
   const bool ok = structurallyValid
       && losslessRoundTrip
       && !changedGroups.isEmpty()
       && !metadata.isEmpty()
       && opened
       && transport.isOpen()
-      && accepted == 3;
+      && accepted == 3
+      && readerSurface
+      && session == nullptr
+      && fileInfo.source.sourceId == 1;
   return ok ? 0 : 1;
 }

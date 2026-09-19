@@ -50,6 +50,9 @@ target_link_libraries(tst_sessionrecordingui PRIVATE util)
 # the chunking property (one record per accepted unit, not per character).
 komport_add_test(tst_sessionrecordingendtoend)
 target_link_libraries(tst_sessionrecordingendtoend PRIVATE util)
+# M10: the `.kpsession` reader (ADR-006 applied, ADR-011 D1-D4). Uses the
+# injected byte-source seam and real temp files; no pty, hence no libutil.
+komport_add_test(tst_sessionreader)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
@@ -71,6 +74,7 @@ add_library(komport_session_contract_check OBJECT
   ${CMAKE_SOURCE_DIR}/komport/sessioncontroller.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionrecordcodec.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionrecorder.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessionreader.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
 target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)
