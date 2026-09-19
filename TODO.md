@@ -704,9 +704,33 @@ Legacy-RX-Puffer-Flush aus M8, die nicht gemessene (nur statisch hergeleitete)
 Speicherzusage des Recorders, und der noch ungebaute Reader/Replay-Player. Der Merge
 nach `master` ist erfolgt (2026-09-18, Merge-Commit mit `--no-ff`); damit sind
 Sitzungsplattform und Aufzeichnung im Hauptzweig, der Sockel bleibt über den neuen
-Meilensteinzweig weiterentwickelbar. Nächster Schritt: **M10**
+Meilensteinzweig weiterentwickelbar. Der nächste Schritt war **M10**
 (Loader und passive Replay-Sicht) — der erste und einzige Produktivkonsument des
 Formats.
+
+**M10 (Loader und passive Replay-Sicht) — Gate geschlossen (2026-09-19):** `ADR-011`
+(Session Reader und passive Wiedergabe) und `SPEC-M10` sind nach fünf unabhängigen
+Reviewrunden `Accepted`; die Akten liegen unter
+`docs/reviews/2026-09-18-M10-gate-review-round1.md` und
+`docs/reviews/2026-09-19-M10-gate-review-round2…5.md`. Der Verlauf: Runde 1 (Blocker:
+Replay-Bytes hätten über den Live-Rendering-Pfad Terminal-Antworten wie `CSI 5 n`,
+`CSI 6 n`, `CSI c` und `ESC Z` auf die Leitung geschrieben; Offline-Sperre unvollständig;
+der Loader normierte das v1-Format erneut statt `ADR-006` anzuwenden; `Step` während
+`Playing` und der Sicherheitsnachweis waren offen), Runde 2 (`setTiming()` ohne
+Rückgabewert, `New & Window` als übersehener Sendeweg, Header-Zahlenformen, Reihenfolge
+der Record-Längenprüfung vor der Recovery-Regel, Diagramm auf dem Live-Slot), Runde 3
+(Geltungsbereich des Offline-Zustands als Eigentümerfrage, Überlaufarithmetik,
+Refusal-Behandlung in der Timing-UI, `close()` aus `Playing`, Wortlaut des
+`bytesWritten`-Belegs), Runde 4 (prozessweite Kontrollsperre auch für vorher geöffnete
+Fenster) und Runde 5 (Anwendungs-Verifikation: kein weiterer Text-Edit nötig). Vom
+Eigentümer ratifiziert ist die prozessweite Exklusivität des Offline-Zustands: Laden nur,
+wenn alle Fenster idle sind, `New Window` gesperrt, Sperre und Guard in jedem offenen
+Fenster. Tragende Entscheidungen: `ADR-006` bleibt alleinige normative Formatquelle
+(M10-eigene Regel ist genau die Quellenanzahl), ein reply-freier
+Replay-Rendering-Eingang mit dem einen Antwort-Knoten `sendTerminalReply()`, `Step`
+während `Playing` wird abgelehnt, jede Ablehnung ist ein Rückgabewert, der Offline-Pfad
+hält keinen Transport. Nächster Schritt: Umsetzung nach `SPEC-M10` §11, Schritt 1
+(`SessionReader`) mit eigenem Review vor dem Commit.
 
 ### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
 
