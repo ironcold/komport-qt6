@@ -277,7 +277,13 @@ a change to a format rule is a change to ADR-006 (ADR-011 D2).
 carries the reason (and, where the file was fully read, the bytes read). "Recovered" means
 ADR-006's rule: the complete prefix becomes the session, the truncated final record is
 ignored, never delivered and never treated as a valid event, and the flag reports it.
-Every check is applied in the order listed, and every declared length is validated against
+Every check is applied in the order listed - with the single dependency the table's own
+wording implies, and with each row applied to the whole file before the next row begins
+(amendment, 2026-09-19, after the slice-1 implementation review: the presence-and-kind
+checks of row 11 necessarily precede the value checks of row 10, because a value cannot be
+checked before it exists; the source's domain resolution is part of row 13 and is therefore
+decided before rows 14-17; and a file that violates several rows is refused by the first row
+it violates in that order) - and every declared length is validated against
 its limit **before** the bytes it describes are read or any buffer is sized from it
 (ADR-006: "The reader validates every length before allocating").
 
@@ -285,7 +291,7 @@ its limit **before** the bytes it describes are read or any buffer is sized from
 
 | # | What is checked | Where ADR-006 fixes it | Outcome and reason |
 | --- | --- | --- | --- |
-| 1 | file open: the path cannot be opened read-only or is not a regular file | this loader's own I/O rule, not a format rule | refused: "the file could not be opened" (the specific reason is reported) |
+| 1 | file open: the path cannot be opened read-only or is not a regular file | this loader's own I/O rule, not a format rule | refused: "the file could not be opened" (amendment of 2026-09-19, **ratified by the owner on 2026-09-19**, after the slice-1 implementation review: the loader reports the reason of its own rule, and the §5.10 seam reports success only, so no operating-system detail is available. Extending the seam with a diagnostic was considered and not chosen - the loader's own text is the contract) |
 | 2 | file read: an I/O error while reading the declared bytes | this loader's own I/O rule | refused: "the file could not be read" |
 | 3 | start block: fewer than 16 bytes in total | ADR-006's start-block layout (8-byte magic, `u16` version, `u16` encoding, `u32` header length) | refused: "shorter than a start block" |
 | 4 | magic: the first 8 bytes are not `KPSN` 0x1A CR LF NUL | ADR-006, "Invalid magic/version/header ... fails loading" | refused: "bad magic" |
