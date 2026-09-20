@@ -140,10 +140,42 @@ private:
   qint64 delayNsFor(quint64 index) const;
   /** Ask the scheduler for the next delivery of the event at the current position. */
   void scheduleNextDelivery();
-  /** The scheduled callback: deliver one event, then schedule the next or finish. */
-  void onDeliveryDue();
-  /** Deliver the event at the current position (emitting `eventDelivered`). */
-  void deliverAtCurrentPosition();
+  /** The facts a continuation captured before the emission it guards (SPEC-M10 5.11). */
+  struct OperationSnapshot
+  {
+    quint64 scheduleToken = 0;
+    quint64 replayId = 0;
+    SessionFilePtr session;
+    SessionReplayState state = SessionReplayState::Idle;
+    quint64 position = 0;
+    quint64 delivered = 0;
+    SessionReplayTiming timing = SessionReplayTiming::Original;
+
+    bool sameReplay(const SessionReplayPlayer &player) const;
+    quint64 eventCount() const;
+    bool deliveryIsTheLastOne() const;
+    SessionReplayReport report() const;
+    SessionReplayReport completionReport() const;
+  };
+
+  /** The phase a continuation is in. SPEC-M10 5.11's table is the whole authorization model. */
+  enum class MutationPhase { Arm, Continue, Complete, StepContinue, Finish };
+
+  /** Capture the current facts; the only way to build an `OperationSnapshot`. */
+  OperationSnapshot captureSnapshot() const;
+  /** The single authorization of §5.11: may this continuation mutate the player? */
+  bool mayMutateReplay(const OperationSnapshot &snapshot, MutationPhase phase,
+                       quint64 expectedPosition) const;
+
+  /** The scheduled callback: deliver one event, then schedule the next or finish. The two
+    * identities it carries are the ones it was armed with (SPEC-M10 5.11). */
+  void onDeliveryDue(quint64 scheduleToken, quint64 replayId);
+  /** Deliver the event at the current position, emitting `eventDelivered` with a
+    * reference into @p snapshot's session - the snapshot keeps the stream alive
+    * for the whole emission, so a receiver that closes the player cannot leave
+    * the signal with a dangling reference (SPEC-M10 5.11: the snapshot's session
+    * is kept alive). */
+  void deliverAtCurrentPosition(const OperationSnapshot &snapshot);
   /** The report of the current state (delivered, remaining, position, finished). */
   SessionReplayReport report() const;
   /** Enter @p state, emitting `stateChanged` only when it actually changes. */
@@ -162,6 +194,10 @@ private:
   SessionReplayTiming mTiming = SessionReplayTiming::Original;
   quint64 mPosition = 0;               ///< index of the next event to deliver
   quint64 mDelivered = 0;
+  /** The identity of the *pending schedule* (SPEC-M10 5.11): bumped by every canceller. */
+  quint64 mScheduleToken = 0;
+  /** The identity of the *replay*: bumped by `start()` and `close()`, never by `stop()`. */
+  quint64 mReplayId = 0;
   SessionReplayScheduler *mScheduler;  ///< injected or owned; see below
   SessionMonotonicClock *mClock;       ///< injected or owned, and never consulted
   std::unique_ptr<SessionReplayScheduler> mOwnedScheduler;  ///< the production default

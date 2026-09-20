@@ -965,12 +965,18 @@ operation snapshot: schedule token, replay id, the session (kept alive, so the s
 beneath the emission), state, position, delivered count and timing policy. Everything the
 operation decides or reports afterwards is derived from that snapshot: its result, its reports,
 whether the delivery it is about to make is the last one of its replay, and that replay's
-completion report. Identity and reported facts therefore never come from live state. The one
+completion report. **The snapshot a continuation authorizes itself with is always the operation's
+entry snapshot, and each continuation names the position it owns as an explicit argument**
+(amendment of 2026-09-20, step 3b's design note, findings 1-3). `play()`, the only continuation with
+no delivery behind it, uses `Arm`; a multi-event step passes `startPosition + deliveredSoFar` with the
+snapshot it entered with. A snapshot taken *after* a receiver has acted is worthless here - it would
+compare equal to the live player in every respect, exactly when the check is needed. Identity and reported facts therefore never
+come from live state. The one
 *policy* a continuation reads live is the timing policy it arms with: `setTiming()` is specified
 to take effect for the next scheduled delivery (§5.6), and a receiver that changes it while a
 delivery is being announced has its change apply to that very next arming (rule 6).
 
-**The one helper.** `mayMutateReplay(snapshot, phase)` is the only way a code path that
+**The one helper.** `mayMutateReplay(snapshot, phase, expectedPosition)` is the only way a code path that
 continues after an emission may change the player's state, and its predicate *is* the whole
 authorization model:
 
@@ -979,17 +985,20 @@ authorization model:
 - `snapshot.scheduleToken == mScheduleToken`, **unless** `phase == Complete`: the pending schedule
   is still the one the continuation was armed in, except for the completion of a replay that has
   just delivered its last event, which a `stop()` must not be able to cancel (rule 1);
-- the live state is one the phase permits, and for an arming phase the position is exactly
-  `snapshot.position + 1` (this continuation is the one that delivered its event, and no receiver
-  moved the position);
+- the live state is one the phase permits, and the position is the one the table fixes for that phase:
+  `Arm` and `Continue` derive it from the entry snapshot (`snapshot.position` and
+  `snapshot.position + 1`), `StepContinue` uses the caller's `expectedPosition` - the step's own
+  progress is the one coordinate a caller must supply - and `Complete` checks no position, while `Finish` requires the captured end - `snapshot.eventCount() > 0` and `mPosition >= snapshot.eventCount()`
+  (3b's review, finding 2: the helper must not trust a caller where the relation is fixed);
 - nothing else is consulted: no accessor, no timing policy, no delivered count.
 
 | Phase | Used by | Permitted live state (with the identities above) |
 | --- | --- | --- |
-| `Continue` | arming the next delivery after a delivery | `Playing`, position `snapshot.position + 1` |
-| `Complete` | the delivery of the last event of this replay, and its completion commit | `Playing`, or `Paused` if the delivery's own receiver stopped the replay |
-| `StepContinue` | the next event of a synchronous step, after an interim delivery of the same step | the state the step started in, position `snapshot.position + 1` |
-| `Finish` | the final step reaching the end | the state the step started in, position at the captured end |
+| `Arm` | arming the first delivery of a replay, from `play()` | the same replay; `Playing`; position `snapshot.position`, derived by the helper |
+| `Continue` | arming the next delivery after a delivery | the same replay; `Playing`; position `snapshot.position + 1`, derived by the helper |
+| `Complete` | the delivery of the last event of this replay, and its completion commit | the same replay; `Playing`, or `Paused` if the delivery's own receiver stopped the replay; no position |
+| `StepContinue` | delivering event *k* of a synchronous step, called with the step's **entry** snapshot | the same replay; the state the step started in; `expectedPosition = startPosition + deliveredSoFar` |
+| `Finish` | the final step reaching the end | the same replay; the state the step started in; **the captured end**, i.e. `snapshot.eventCount() > 0` and `mPosition >= snapshot.eventCount()` |
 
 Every mutation site calls it - arming the next delivery, continuing after a delivery, the final
 step's `Finished`, the completion announcement - and there is no other guard in the class.
@@ -1012,7 +1021,7 @@ are normative here and nowhere else):
    target event itself went out, and `reachedEnd` means "this call took *its* replay to the end",
    not "the player is at the end now" (so §5.6's "leaves the player `Finished`" holds exactly when
    no receiver superseded the replay). After that result is decided, the step mutates live state
-   only through `mayMutateReplay(snapshot, phase)` - in particular the final step that reaches the end
+   only through `mayMutateReplay(snapshot, phase, expectedPosition)` - in particular the final step that reaches the end
    must not overwrite a state a receiver left behind.
 4. A stale continuation - a callback or a resumed code path that `mayMutateReplay()` refuses -
    delivers nothing, arms nothing, mutates nothing and emits nothing.
@@ -1026,10 +1035,22 @@ are normative here and nowhere else):
    call. If the receiver superseded the replay instead (`start()`, `close()`), the continuation
    arms nothing and the new replay's first delivery uses the policy in effect at its own arming.
 8. **A synchronous step that delivers several events** resumes after every interim delivery only
-   through `mayMutateReplay(snapshot, StepContinue)`: the step's own starting state and exactly the
-   next expected position. A receiver that plays, stops, closes, restarts or steps from an interim
-   delivery therefore ends the step there - a nested step moves the position, a `play()` changes the
-   state - and the outer step's result reports the deliveries it actually made (rule 3).
+   through `mayMutateReplay(snapshot, StepContinue, expectedPosition)`: the step's own starting state and exactly the
+   next expected position. A receiver that **supersedes** the replay from an interim delivery - by
+   `play()`, `close()`, `start(session)` or a nested `stepNext*()` - therefore ends the step there,
+   because its entry snapshot no longer authorizes the next delivery; the outer step's result reports
+   the deliveries it actually made (rule 3). A `stop()` ends it the same way **only when it acts**,
+   i.e. once the replay is `Playing`; the operations that do *not* interrupt a step are listed below.
+   **Which operations let a step continue (amendment of 2026-09-20, from 3b's two verification
+   rounds).** A step keeps delivering through every operation that neither supersedes the replay nor
+   acts on it: a valid `setTiming()` (the policy changes, while identity, schedule token, state and
+   position stay as they are), every refusal - `start(nullptr)`, an unknown timing value, `play()`
+   in `Step` mode - and a **no-op `stop()`** outside `Playing` (§5.5 accepts that without effect).
+   A step ends at the first interim delivery after which its entry snapshot no longer authorizes the
+   next one: `close()`, `start(session)`, `play()`, a nested `stepNext*()`, or a `stop()` **in
+   `Playing`**, where rule 10's token bump is what refuses it. The earlier wording of this rule
+   ("not by an operation that has no effect") was wrong and is replaced by this list, because a
+   valid `setTiming()` does have an effect and still lets the step continue.
 9. **A `stop()` in the final delivery, exactly.** While the same replay is still the loaded one, the
    observable sequence is: `eventDelivered`, the stop's own `stateChanged(Paused)`, the completion
    commit's `stateChanged(Finished)`, `replayFinished` with the completion report captured before
@@ -1076,19 +1097,20 @@ are normative here and nowhere else):
 `everyPlaySupersessionLeavesNothingArmed`, `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion`,
 `aStopReportSurvivesAReceiverThatActsOnTheStateSignal`,
 `aStopAtTheLastDeliveryStillCompletesTheReplay`,
-`aStepResultIsASnapshotThatAReceiverCannotRewrite`, plus three the fifth and sixth review rounds
+`aStepResultIsASnapshotThatAReceiverCannotRewrite`, plus the contract tests 3b added the fifth and sixth review rounds
 demand:
 
 | Test (step 3b) | What it asserts |
 | --- | --- |
 | `aFinalStepDoesNotOverwriteAReceiverThatClosesOrRestarts` | a receiver that `close()`s or `start()`s inside the final step's delivery ends in its own state (`Idle`/`Ready`) with nothing armed; the step's result still reports `advanced`, `matched` and `reachedEnd` from its snapshot; no `Finished` is entered and no `replayFinished` is emitted |
-| `anInterruptedMultiEventStepStopsAtTheInterruption` | a multi-event step whose first interim delivery has a receiver that plays, stops, closes, restarts or steps delivers nothing further, mutates nothing and reports only the deliveries it made (`advanced` 1, `matched` false unless the target was that first event, `reachedEnd` false) |
+| `anInterruptedMultiEventStepStopsAtTheInterruption` | the *interrupting* cases: a multi-event step whose first interim delivery has a receiver that `play()`s, `close()`s, `start(session)`s or steps, or that `stop()`s once the replay is `Playing` - the step delivers nothing further, mutates nothing and reports only the deliveries it made (`advanced` 1, `matched` false unless the target was that first event, `reachedEnd` false) |
+| `aStepContinuesThroughEverythingThatDoesNotSupersedeIt` | the *non-interrupting* cases of rule 8, from both `Ready` and `Paused`: a valid `setTiming()` (the policy changes, the step completes), an unknown timing, a null `start()`, a `play()` refused in `Step` mode and a no-op `stop()` - each with `advanced` 3, `matched`, no `reachedEnd`, three deliveries and nothing armed |
 | `mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase` | the helper itself: an authorized continuation (same replay, same token, permitted state and position) may mutate; a stale schedule token, a replaced session, a bumped replay id, a superseded state and a moved position each refuse - driven through the friend-for-testability seam of §5.10, so no production API is widened |
 | `timingChangedFromADeliverySlotAppliesToTheNextArming` | a receiver that `setTiming()`s inside a delivery arms its successor with the new policy (rule 6) |
 | `aStopFromTheTransientPausedIsANoOpAndTheCompletionStillHappens` | everything the transient `Paused` window defines, in one fixture: a second `stop()` returns the no-op report of that state; a step and a `play()` are refused with a reason; a declared `setTiming()` is accepted, changes the policy and leaves the already-captured stop and completion reports on the policy they were captured with; an out-of-range timing value refuses with "unknown timing policy" and changes nothing; a `start(nullptr)` refuses with its reason without ending the sequence; in every one of those branches nothing is delivered or armed and the completion commit still runs with its captured report (rules 6 and 9) |
 | `aReceiverOfTheTransientPausedThatStartsOrClosesEndsTheCompletion` | a `start()` or `close()` from that transient state: no `stateChanged(Finished)`, no `replayFinished`, the state the receiver set stands, and `aStopAtTheLastDeliveryStillCompletesTheReplay` keeps covering the undisturbed branch |
 | `aStopAtTheLastDeliveryStillCompletesTheReplay` | the undisturbed branch of rule 9: a `stop()` from the final delivery's own receiver leaves the replay `Finished` and the completion report goes out with the captured facts; the signal log pins the sequence `eventDelivered` -> `stateChanged(Paused)` -> `stateChanged(Finished)` -> `replayFinished`, and no second delivery is armed |
-| `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion` | a `stop()` from the completion's `stateChanged(Finished)` receiver returns the no-op report of that state, changes nothing, and the captured completion report is still emitted exactly once with `delivered`/`position` at the end and `finished` true (rule 9) |
+| `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion` | a `stop()` from the completion's `stateChanged(Finished)` receiver returns the no-op report of that state, whose delivered/remaining/finished fields the test asserts, changes nothing, and the captured completion report is still emitted exactly once with `delivered`/`position` at the end and `finished` true (rule 9) |
 
 The §7 classifier of "which test belongs to which slice" includes the direct authorization-helper
 test: a fixture that reaches the helper through the §5.10 seam counts as a 3b fixture even without
@@ -1322,7 +1344,7 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   `fileWithoutASourceIsRefused`, `clockDomainCountIsNotAnM10Rule`.
 - [ ] Re-entrancy (step 3b): with a receiver of `eventDelivered`, `stateChanged` or
   `replayFinished` calling player operations, the player never delivers, arms, mutates or reports
-  for a replay it no longer is - the §5.11 rules hold, `mayMutateReplay(snapshot, phase)`
+  for a replay it no longer is - the §5.11 rules hold, `mayMutateReplay(snapshot, phase, expectedPosition)`
   authorizes exactly its own replay and phase, a superseded operation keeps its snapshot-based
   result and reports, and every mutation after an emission goes through that one helper -
   `mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase`,
@@ -1483,7 +1505,7 @@ tests assert; changing any of them is a specification change, reviewed like any 
    helper - and may only be adopted once its review shows that none of §5.11's semantics is
    hidden in it (owner's decision of 2026-09-20).
 3b. The re-entrancy contract of §5.11 (A2) as its own slice, spec-first and with its own review
-   gate: the two identities, the operation snapshot, the single `mayMutateReplay(snapshot, phase)`
+   gate: the two identities, the operation snapshot, the single `mayMutateReplay(snapshot, phase, expectedPosition)`
    authorization helper at every mutation site after an emission, and the re-entrancy tests §5.11
    lists - including the final step's completion path the sixth review round found. This is the
    only place where mutation authorization is normed; delivering it as a documented limitation

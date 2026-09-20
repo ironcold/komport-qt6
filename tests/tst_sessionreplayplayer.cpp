@@ -46,6 +46,44 @@ struct SessionReplayPlayerSeamsForTest
   {
     return std::unique_ptr<SessionReplayPlayer>(new SessionReplayPlayer(scheduler, clock, nullptr));
   }
+
+  /** The two identities, so a test can build a stale or a current snapshot. */
+  static quint64 replayId(const SessionReplayPlayer &player)
+  {
+    return player.mReplayId;
+  }
+  static quint64 scheduleToken(const SessionReplayPlayer &player)
+  {
+    return player.mScheduleToken;
+  }
+  /** A snapshot of the given coordinates - the direct test of §5.11's predicate. */
+  static SessionReplayPlayer::OperationSnapshot snapshot(quint64 replayId, quint64 scheduleToken,
+                                                         const SessionFilePtr &session,
+                                                         SessionReplayState state, quint64 position)
+  {
+    SessionReplayPlayer::OperationSnapshot result;
+    result.replayId = replayId;
+    result.scheduleToken = scheduleToken;
+    result.session = session;
+    result.state = state;
+    result.position = position;
+    return result;
+  }
+  /** The helper, addressed by phase index (0 `Arm`, 1 `Continue`, 2 `Complete`,
+    *  3 `StepContinue`, 4 `Finish`) so a test can name the phases it uses. */
+  static bool mayMutate(const SessionReplayPlayer &player,
+                        const SessionReplayPlayer::OperationSnapshot &snapshot,
+                        int phaseIndex, quint64 expectedPosition)
+  {
+    static const SessionReplayPlayer::MutationPhase phases[] = {
+      SessionReplayPlayer::MutationPhase::Arm,
+      SessionReplayPlayer::MutationPhase::Continue,
+      SessionReplayPlayer::MutationPhase::Complete,
+      SessionReplayPlayer::MutationPhase::StepContinue,
+      SessionReplayPlayer::MutationPhase::Finish,
+    };
+    return player.mayMutateReplay(snapshot, phases[phaseIndex], expectedPosition);
+  }
 };
 
 namespace {
@@ -159,6 +197,15 @@ SessionFilePtr mixedSession()
   });
 }
 
+
+/** One Data event, so a single step reaches the end of the replay. */
+SessionFilePtr oneEventSession()
+{
+  return makeSession(QList<SessionEvent>{
+    dataEvent(1, SessionDirection::Rx, QByteArrayLiteral("A"), 0),
+  });
+}
+
 /** Three Data events with strictly increasing session time. */
 SessionFilePtr threeEventSession()
 {
@@ -179,9 +226,11 @@ struct PlayerFixture {
 
   QList<SessionEvent> delivered;          ///< every delivered event, in order
   QList<SessionReplayState> states;       ///< every emitted state
-  /** The emission order, for the ordering claims of §5.5/§5.6. These receivers
-    * only record; none of them calls back into the player (that is step 3b). */
+  /** The emission order, for the ordering claims of §5.5/§5.6. */
   QStringList signalLog;
+  /** Run inside the next `eventDelivered` emission, once - step 3b's hook: the
+    * receiver of a delivery acts on the player, which §5.11 must keep defined. */
+  std::function<void()> duringNextDelivery;
   int finishedCount = 0;
   SessionReplayReport lastReport;
 
@@ -191,6 +240,11 @@ struct PlayerFixture {
                      [this](const SessionEvent &event) {
                        signalLog.append(QStringLiteral("event:%1").arg(event.sequence));
                        delivered.append(event);
+                       if (duringNextDelivery) {
+                         const std::function<void()> action = duringNextDelivery;
+                         duringNextDelivery = nullptr;
+                         action();
+                       }
                      });
     QObject::connect(&player, &SessionReplayPlayer::stateChanged,
                      [this](SessionReplayState state) {
@@ -246,7 +300,25 @@ private slots:
   void zeroEventSessionRefusesPlayAndStep();
   void refusalsAreValuesThatChangeNothing();
   void thePlayerNeverConsultsWallClockTime();
+  void stopFromWithinADeliverySlotIsHonoured();
+  void closeFromWithinADeliverySlotIsHonoured();
+  void delayedReceiversSeeTheEventAfterAFirstSlotClosesThePlayer();
+  void everyStepOperationSurvivesAReceiverThatActsOnThePlayer();
+  void aCompletionReportIsImmutableAcrossAReceiverRestart();
+  void aRestartDuringTheFinalDeliveryOwesNoCompletionToTheReplacement();
+  void everyPlaySupersessionLeavesNothingArmed();
+  void aNoOpStopFromAFinishedReceiverStillReportsTheCompletion();
+  void aStopReportSurvivesAReceiverThatActsOnTheStateSignal();
+  void aStopAtTheLastDeliveryStillCompletesTheReplay();
+  void aStepResultIsASnapshotThatAReceiverCannotRewrite();
   void theTimingMatrixAndEveryRefusalLeaveThePlayerUnchanged();
+  void anInterruptedMultiEventStepStopsAtTheInterruption();
+  void mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase();
+  void timingChangedFromADeliverySlotAppliesToTheNextArming();
+  void aStopFromTheTransientPausedIsANoOpAndTheCompletionStillHappens();
+  void aReceiverOfTheTransientPausedThatStartsOrClosesEndsTheCompletion();
+  void aFinalStepDoesNotOverwriteAReceiverThatClosesOrRestarts();
+  void aStepContinuesThroughEverythingThatDoesNotSupersedeIt();
   void stepNextEventDeliversExactlyTheNextEvent();
   void scalingUpClampsInsteadOfWrapping();
 };
@@ -1159,6 +1231,794 @@ void TstSessionReplayPlayer::theTimingMatrixAndEveryRefusalLeaveThePlayerUnchang
         f.player.setTiming(static_cast<SessionReplayTiming>(99));
     QVERIFY(!unknown.ok);
     refusedUnchanged(f, before, unknown.reason, "an unknown policy at the end refuses");
+  }
+}
+
+/** A receiver of `eventDelivered` may stop the replay: `stop()` is honoured at
+  *  the delivery boundary and nothing is re-armed (review: slice-2 implementation
+  *  review, finding 1). */
+void TstSessionReplayPlayer::stopFromWithinADeliverySlotIsHonoured()
+{
+  PlayerFixture f;
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  QVERIFY(f.player.play().ok);
+  f.duringNextDelivery = [&f]() { f.player.stop(); };
+
+  QVERIFY(f.scheduler.fire());   // event 1 is delivered; the slot stops the replay
+  QCOMPARE(f.delivered.size(), 1);
+  QCOMPARE(f.player.state(), SessionReplayState::Paused);
+  QCOMPARE(f.player.position(), quint64(1));
+  QCOMPARE(f.player.deliveredCount(), quint64(1));
+  QVERIFY(!f.scheduler.armed());   // the stop won; no second schedule
+  QVERIFY(!f.scheduler.fire());
+  QCOMPARE(f.delivered.size(), 1);
+  QCOMPARE(f.finishedCount, 0);
+}
+
+/** A receiver of `eventDelivered` may close the player - the delivery must not
+  *  touch the released session afterwards (review: slice-2 implementation review,
+  *  finding 1). */
+void TstSessionReplayPlayer::closeFromWithinADeliverySlotIsHonoured()
+{
+  PlayerFixture f;
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  QVERIFY(f.player.play().ok);
+  f.duringNextDelivery = [&f]() { f.player.close(); };
+
+  QVERIFY(f.scheduler.fire());
+  QCOMPARE(f.delivered.size(), 1);
+  QCOMPARE(f.player.state(), SessionReplayState::Idle);
+  QCOMPARE(f.player.eventCount(), quint64(0));
+  QVERIFY(!f.scheduler.armed());
+  QVERIFY(!f.scheduler.fire());
+  QCOMPARE(f.delivered.size(), 1);
+  QCOMPARE(f.finishedCount, 0);
+
+  // The player is usable again afterwards.
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  QVERIFY(f.player.play().ok);
+  f.runToEnd();
+  QCOMPARE(f.finishedCount, 1);
+}
+
+/** A receiver that runs after one that closed the player still receives intact
+  *  data: the emitted event outlives the session reference it came from (review:
+  *  slice-2 application verification, finding 1). */
+void TstSessionReplayPlayer::delayedReceiversSeeTheEventAfterAFirstSlotClosesThePlayer()
+{
+  PlayerFixture f;
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  QVERIFY(f.player.play().ok);
+
+  // Connected after the fixture's receiver, so it runs later - exactly the order
+  // the finding describes.
+  QByteArray seenPayload;
+  quint64 seenSequence = 0;
+  int seenCount = 0;
+  QObject::connect(&f.player, &SessionReplayPlayer::eventDelivered,
+                   [&seenPayload, &seenSequence, &seenCount](const SessionEvent &event) {
+                     seenPayload = event.payload;
+                     seenSequence = event.sequence;
+                     ++seenCount;
+                   });
+
+  f.duringNextDelivery = [&f]() { f.player.close(); };
+  QVERIFY(f.scheduler.fire());
+
+  QCOMPARE(seenCount, 1);
+  QCOMPARE(seenPayload, QByteArrayLiteral("A"));
+  QCOMPARE(seenSequence, quint64(1));
+  QCOMPARE(f.player.state(), SessionReplayState::Idle);
+}
+
+/** Every step operation stops safely when a receiver acts on the player from
+  *  inside a synchronous delivery - including a receiver that starts a replay or
+  *  steps itself, neither of which changes the generation (review: slice-2
+  *  application verification 1 and 3, finding 2). */
+void TstSessionReplayPlayer::everyStepOperationSurvivesAReceiverThatActsOnThePlayer()
+{
+  const struct {
+    const char *name;
+    std::function<SessionReplayStep(SessionReplayPlayer &)> run;
+    bool targetIsTheFirstDelivered;   ///< the step's match is the event at the position
+  } operations[] = {
+    { "stepNextEvent", [](SessionReplayPlayer &p) { return p.stepNextEvent(); }, true },
+    { "stepNextRx", [](SessionReplayPlayer &p) { return p.stepNextRx(); }, false },
+    { "stepNextTx", [](SessionReplayPlayer &p) { return p.stepNextTx(); }, true },
+  };
+
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+    SessionReplayState expectedState;
+    int expectedDelivered;
+    bool expectedArmed;
+  } actions[] = {
+    { "close", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.close(); },
+      SessionReplayState::Idle, 1, false },
+    { "restart", [](SessionReplayPlayer &p, const SessionFilePtr &s) { p.start(s); },
+      SessionReplayState::Ready, 1, false },
+    { "play", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.play(); },
+      SessionReplayState::Playing, 1, true },
+    { "step", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.stepNextEvent(); },
+      SessionReplayState::Ready, 2, false },
+  };
+
+  for (const auto &operation : operations) {
+    for (const auto &action : actions) {
+      PlayerFixture f;
+      const SessionFilePtr session = mixedSession();
+      QVERIFY2(f.player.start(session).ok, operation.name);
+      f.duringNextDelivery = [&f, &session, &action]() { action.act(f.player, session); };
+
+      const SessionReplayStep step = operation.run(f.player);
+      const QString context = QStringLiteral("%1 + %2")
+                                  .arg(QString::fromLatin1(operation.name),
+                                       QString::fromLatin1(action.name));
+
+      // The step stopped at the delivery after which the receiver acted; it
+      // neither crashed nor advanced a stream that was no longer its own.
+      QVERIFY2(step.ok, qPrintable(context));
+      QCOMPARE(step.advanced, quint64(1));
+      QCOMPARE(f.delivered.size(), action.expectedDelivered);
+      QCOMPARE(f.player.state(), action.expectedState);
+      QCOMPARE(f.scheduler.armed(), action.expectedArmed);
+      // `matched` is only claimed when the target itself went out.
+      QCOMPARE(step.matched, operation.targetIsTheFirstDelivered);
+      QVERIFY(!step.reachedEnd);
+    }
+  }
+}
+
+/** The completion report is captured when the completion is decided: a receiver
+  *  that restarts or closes the player while that state change and report go out
+  *  changes the state, but never the report - the old callback must not hand out a
+  *  report about the replay the receiver substituted for it (review: slice-2
+  *  application verification, finding 2, and application verification 3). */
+void TstSessionReplayPlayer::aCompletionReportIsImmutableAcrossAReceiverRestart()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+    SessionReplayState expectedState;
+  } actions[] = {
+    { "restart", [](SessionReplayPlayer &player, const SessionFilePtr &session) { player.start(session); },
+      SessionReplayState::Ready },
+    { "close", [](SessionReplayPlayer &player, const SessionFilePtr &) { player.close(); },
+      SessionReplayState::Idle },
+    { "stop", [](SessionReplayPlayer &player, const SessionFilePtr &) { player.stop(); },
+      SessionReplayState::Finished },
+  };
+
+  for (const auto &action : actions) {
+    PlayerFixture f;
+    const SessionFilePtr session = threeEventSession();
+    QVERIFY2(f.player.start(session).ok, action.name);
+    QVERIFY(f.player.play().ok);
+    bool acted = false;
+    QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                     [&f, &session, &action, &acted](SessionReplayState state) {
+                       if (state == SessionReplayState::Finished && !acted) {
+                         acted = true;
+                         action.act(f.player, session);
+                       }
+                     });
+
+    f.runToEnd();
+    // The completed replay is reported with its own facts, whatever the receiver
+    // did with the player afterwards.
+    QCOMPARE(f.finishedCount, 1);
+    QCOMPARE(f.lastReport.delivered, quint64(3));
+    QCOMPARE(f.lastReport.remaining, quint64(0));
+    QCOMPARE(f.lastReport.position, quint64(3));
+    QVERIFY(f.lastReport.finished);
+    QCOMPARE(f.player.state(), action.expectedState);
+  }
+}
+
+/** A replay is identified by its own identity, not by its session pointer: a
+  *  restart during the final delivery - even with the very same session - is a new
+  *  replay, and if a receiver steps that replacement to its end, neither the old
+  *  callback nor the step may report a completion (review: slice-2 application
+  *  verification 4, finding 1). */
+void TstSessionReplayPlayer::aRestartDuringTheFinalDeliveryOwesNoCompletionToTheReplacement()
+{
+  PlayerFixture f;
+  const SessionFilePtr session = threeEventSession();
+  QVERIFY(f.player.start(session).ok);
+  QVERIFY(f.player.play().ok);
+  QVERIFY(f.scheduler.fire());
+  QVERIFY(f.scheduler.fire());
+
+  // The receiver of the final delivery restarts the same session...
+  bool restarted = false;
+  f.duringNextDelivery = [&f, &session, &restarted]() {
+    if (!restarted) {
+      restarted = true;
+      f.player.start(session);
+    }
+  };
+  // ...and a receiver of that restart's state signal steps the replacement to its
+  // end. A step never emits `replayFinished`, and the old callback no longer is
+  // that replay.
+  QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                   [&f](SessionReplayState state) {
+                     if (state != SessionReplayState::Ready)
+                       return;
+                     for (int guard = 0;
+                         guard < 10 && f.player.state() == SessionReplayState::Ready; ++guard)
+                       f.player.stepNextEvent();
+                   });
+
+  QVERIFY(f.scheduler.fire());   // the last event of the old replay is delivered
+
+  QCOMPARE(f.finishedCount, 0);   // no completion for the replacement, none from the old call
+  QCOMPARE(f.player.state(), SessionReplayState::Finished);   // the replacement, stepped to its end
+  QCOMPARE(f.player.position(), quint64(3));
+  QCOMPARE(f.delivered.size(), 6);   // three of the old replay, three of the replacement
+  QVERIFY(!f.scheduler.armed());
+}
+
+/** `play()` emits `stateChanged(Playing)` synchronously; a receiver that closes,
+  *  restarts or stops the player while that signal runs must leave nothing armed
+  *  (review: slice-2 application verification 2, finding 1), while `play()` itself
+  *  still reports the success it already has (application verification 3,
+  *  finding 1: the preconditions were passed and the state did change). */
+void TstSessionReplayPlayer::everyPlaySupersessionLeavesNothingArmed()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+    SessionReplayState expectedState;
+    bool expectedArmed;
+  } actions[] = {
+    { "close", [](SessionReplayPlayer &player, const SessionFilePtr &) { player.close(); },
+      SessionReplayState::Idle, false },
+    { "restart", [](SessionReplayPlayer &player, const SessionFilePtr &session) { player.start(session); },
+      SessionReplayState::Ready, false },
+    { "stop", [](SessionReplayPlayer &player, const SessionFilePtr &) { player.stop(); },
+      SessionReplayState::Paused, false },
+    // The reviewer's example: stop() and play() again from the state signal. The
+    // nested play() legitimately arms a delivery, and the outer call must neither
+    // arm a second one over it nor report a failure.
+    { "stop+play", [](SessionReplayPlayer &player, const SessionFilePtr &) {
+        player.stop();
+        player.play();
+      },
+      SessionReplayState::Playing, true },
+  };
+
+  for (const auto &action : actions) {
+    PlayerFixture f;
+    const SessionFilePtr session = threeEventSession();
+    QVERIFY2(f.player.start(session).ok, action.name);
+    bool acted = false;
+    QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                     [&f, &session, &action, &acted](SessionReplayState state) {
+                       if (state == SessionReplayState::Playing && !acted) {
+                         acted = true;
+                         action.act(f.player, session);
+                       }
+                     });
+
+    const SessionReplayStart started = f.player.play();
+    QVERIFY2(started.ok, action.name);   // the four preconditions were passed
+    QVERIFY(started.reason.isEmpty());
+    QCOMPARE(f.player.state(), action.expectedState);
+    QCOMPARE(f.scheduler.armed(), action.expectedArmed);
+    QCOMPARE(f.scheduler.delays.size(), action.expectedArmed ? 1 : 0);
+  }
+
+  // The same class: a restart with a *different* session from the state signal.
+  PlayerFixture f;
+  const SessionFilePtr session = threeEventSession();
+  const SessionFilePtr other = mixedSession();
+  QVERIFY(f.player.start(session).ok);
+  bool restarted = false;
+  QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                   [&f, &other, &restarted](SessionReplayState state) {
+                     if (state == SessionReplayState::Playing && !restarted) {
+                       restarted = true;
+                       f.player.start(other);
+                     }
+                   });
+  const SessionReplayStart started = f.player.play();
+  QVERIFY(started.ok);
+  QCOMPARE(f.player.state(), SessionReplayState::Ready);
+  QCOMPARE(f.player.eventCount(), quint64(4));   // the session it was restarted with
+  QCOMPARE(f.player.position(), quint64(0));
+  QVERIFY(!f.scheduler.armed());
+}
+
+/** `stop()` in `Finished` is an accepted no-op, so it must not swallow the
+  *  completion report the transition owes (review: slice-2 application
+  *  verification 2, finding 2). */
+void TstSessionReplayPlayer::aNoOpStopFromAFinishedReceiverStillReportsTheCompletion()
+{
+  PlayerFixture f;
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  QVERIFY(f.player.play().ok);
+  SessionReplayReport noOpStop;
+  QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                   [&f, &noOpStop](SessionReplayState state) {
+                     if (state == SessionReplayState::Finished)
+                       noOpStop = f.player.stop();
+                   });
+
+  f.runToEnd();
+  QCOMPARE(f.finishedCount, 1);
+  QCOMPARE(f.lastReport.delivered, quint64(3));
+  QCOMPARE(f.lastReport.remaining, quint64(0));
+  QVERIFY(f.lastReport.finished);
+  QCOMPARE(f.player.state(), SessionReplayState::Finished);
+  // The no-op stop's own return is the report of the state it found.
+  QCOMPARE(noOpStop.delivered, quint64(3));
+  QCOMPARE(noOpStop.remaining, quint64(0));
+  QVERIFY(noOpStop.finished);
+  QVERIFY(!f.scheduler.armed());
+}
+
+/** The stop report describes the state the stop leaves behind, even when a
+  *  receiver of `stateChanged(Paused)` closes or restarts the player (review:
+  *  slice-2 application verification 3, finding 3). */
+void TstSessionReplayPlayer::aStopReportSurvivesAReceiverThatActsOnTheStateSignal()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+  } actions[] = {
+    { "close", [](SessionReplayPlayer &player, const SessionFilePtr &) { player.close(); } },
+    { "restart", [](SessionReplayPlayer &player, const SessionFilePtr &session) { player.start(session); } },
+  };
+
+  for (const auto &action : actions) {
+    PlayerFixture f;
+    const SessionFilePtr session = threeEventSession();
+    QVERIFY2(f.player.start(session).ok, action.name);
+    QVERIFY(f.player.play().ok);
+    QVERIFY(f.scheduler.fire());   // one event delivered
+    bool acted = false;
+    QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                     [&f, &session, &action, &acted](SessionReplayState state) {
+                       if (state == SessionReplayState::Paused && !acted) {
+                         acted = true;
+                         action.act(f.player, session);
+                       }
+                     });
+
+    const SessionReplayReport report = f.player.stop();
+    QCOMPARE(report.delivered, quint64(1));   // the facts of the replay that was stopped
+    QCOMPARE(report.position, quint64(1));
+    QCOMPARE(report.remaining, quint64(2));
+    QVERIFY(!report.finished);
+    QCOMPARE(report.timing, SessionReplayTiming::Original);
+  }
+}
+
+/** A `stop()` that arrives while the last event is being delivered cannot
+  *  un-deliver it: the replay completes and reports it (SPEC-M10 5.5, amended
+  *  2026-09-20). `Paused` would claim events are left when none are. */
+void TstSessionReplayPlayer::aStopAtTheLastDeliveryStillCompletesTheReplay()
+{
+  PlayerFixture f;
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  QVERIFY(f.player.play().ok);
+  QVERIFY(f.scheduler.fire());
+  QVERIFY(f.scheduler.fire());
+  // The receiver of the last delivery stops the replay.
+  f.signalLog.clear();           // so the sequence below is exactly this delivery's
+  f.duringNextDelivery = [&f]() { f.player.stop(); };
+  QVERIFY(f.scheduler.fire());   // the last event is delivered
+
+  QCOMPARE(f.delivered.size(), 3);
+  QCOMPARE(f.player.state(), SessionReplayState::Finished);
+  QCOMPARE(f.finishedCount, 1);
+
+  // Rule 9's observable sequence, pinned: the delivery, the stop's own transition,
+  // the completion commit and the report - in that order and nothing else.
+  QCOMPARE(f.signalLog.size(), 4);
+  QCOMPARE(f.signalLog.at(0), QStringLiteral("event:3"));
+  QCOMPARE(f.signalLog.at(1), QStringLiteral("state:%1").arg(int(SessionReplayState::Paused)));
+  QCOMPARE(f.signalLog.at(2), QStringLiteral("state:%1").arg(int(SessionReplayState::Finished)));
+  QCOMPARE(f.signalLog.at(3), QStringLiteral("finished"));
+  QCOMPARE(f.lastReport.delivered, quint64(3));
+  QCOMPARE(f.lastReport.remaining, quint64(0));
+  QVERIFY(f.lastReport.finished);
+  QVERIFY(!f.scheduler.armed());
+  QVERIFY(!f.scheduler.fire());
+  QCOMPARE(f.delivered.size(), 3);
+}
+
+/** A step's result is an immutable snapshot of the replay that call advanced: a
+  *  receiver that supersedes the player from the step's own state change cannot
+  *  rewrite what the call reports, and the player itself is where the receiver left
+  *  it (SPEC-M10 §5.6, amended; review: slice-2 application verification 4,
+  *  finding 2). */
+void TstSessionReplayPlayer::aStepResultIsASnapshotThatAReceiverCannotRewrite()
+{
+  PlayerFixture f;
+  const SessionFilePtr session = makeSession(QList<SessionEvent>{
+    dataEvent(1, SessionDirection::Rx, QByteArrayLiteral("A"), 0),
+  });
+  QVERIFY(f.player.start(session).ok);
+
+  bool restarted = false;
+  QObject::connect(&f.player, &SessionReplayPlayer::stateChanged,
+                   [&f, &session, &restarted](SessionReplayState state) {
+                     if (state == SessionReplayState::Finished && !restarted) {
+                       restarted = true;
+                       f.player.start(session);
+                     }
+                   });
+
+  const SessionReplayStep step = f.player.stepNextEvent();
+  QVERIFY(step.ok);
+  QCOMPARE(step.advanced, quint64(1));
+  QVERIFY(step.matched);
+  QVERIFY(step.reachedEnd);   // this call took *its* replay to the end
+
+  // The player answers where it is now: the receiver restarted it.
+  QCOMPARE(f.player.state(), SessionReplayState::Ready);
+  QCOMPARE(f.player.position(), quint64(0));
+  QCOMPARE(f.player.deliveredCount(), quint64(0));
+}
+
+
+/** §5.11's `StepContinue`: a multi-event step stops at the delivery after which a
+  *  receiver *superseded* the replay - `play()`, `close()`, `start(session)`, a
+  *  nested step or a `stop()` that acts (in `Playing`) - delivers nothing further,
+  *  mutates nothing, and reports only the deliveries it made. A no-op `stop()`,
+  *  which §5.5 accepts without effect outside `Playing`, lets it continue. */
+void TstSessionReplayPlayer::anInterruptedMultiEventStepStopsAtTheInterruption()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+    SessionReplayState expectedState;
+    int expectedDelivered;
+    bool expectedArmed;
+    int expectedAdvanced;
+    bool expectedMatched;
+    bool pausedBefore;        ///< reach `Paused` first (isolates the token-bump reason)
+  } actions[] = {
+    { "play", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.play(); },
+      SessionReplayState::Playing, 1, true, 1, false, false },
+    // A `stop()` outside `Playing` is an accepted no-op (§5.5), so it does not
+    // interrupt a synchronous step: the step is interruptible by a *supersession*
+    // (play, close, restart, a nested step), not by a no-op.
+    { "stop (no-op in Ready: the step completes)",
+      [](SessionReplayPlayer &p, const SessionFilePtr &) { p.stop(); },
+      SessionReplayState::Ready, 3, false, 3, true, false },
+    // The stop that *acts*: the receiver first makes the replay `Playing`, so its
+    // `stop()` bumps the schedule token and the step's entry snapshot is refused -
+    // this is the "stop in Playing" case of rule 8, and the only way a stop ends a
+    // step (3b's closing round).
+    { "play() then stop() (the stop acts)",
+      [](SessionReplayPlayer &p, const SessionFilePtr &) { p.play(); p.stop(); },
+      SessionReplayState::Paused, 1, false, 1, false, true },
+    { "close", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.close(); },
+      SessionReplayState::Idle, 1, false, 1, false, false },
+    { "restart", [](SessionReplayPlayer &p, const SessionFilePtr &s) { p.start(s); },
+      SessionReplayState::Ready, 1, false, 1, false, false },
+    { "nested step", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.stepNextEvent(); },
+      SessionReplayState::Ready, 2, false, 1, false, false },
+  };
+
+  for (const auto &action : actions) {
+    PlayerFixture f;
+    const SessionFilePtr session = mixedSession();
+    QVERIFY2(f.player.start(session).ok, action.name);
+    if (action.pausedBefore) {
+      // The outer step starts in `Paused`, so the receiver's `play(); stop()` leaves
+      // that state as it was and only the schedule-token bump can refuse the
+      // continuation (3b's closing round).
+      QVERIFY(f.player.play().ok);
+      f.player.stop();
+      QCOMPARE(f.player.state(), SessionReplayState::Paused);
+    }
+    f.duringNextDelivery = [&f, &session, &action]() { action.act(f.player, session); };
+
+    const SessionReplayStep step = f.player.stepNextRx();   // would deliver 3 events
+    const QString context = QString::fromLatin1(action.name);
+
+    QVERIFY2(step.ok, qPrintable(context));
+    QVERIFY2(step.advanced == quint64(action.expectedAdvanced), qPrintable(context + QStringLiteral(" advanced")));
+    QVERIFY2(step.matched == action.expectedMatched,
+             qPrintable(context + QStringLiteral(" matched")));
+    QVERIFY2(!step.reachedEnd, qPrintable(context + QStringLiteral(" reachedEnd")));
+    QVERIFY2(f.delivered.size() == action.expectedDelivered, qPrintable(context + QStringLiteral(" delivered")));
+    QVERIFY2(f.player.state() == action.expectedState, qPrintable(context + QStringLiteral(" state")));
+    QVERIFY2(f.scheduler.armed() == action.expectedArmed, qPrintable(context + QStringLiteral(" armed")));
+  }
+}
+
+/** The one authorization, called directly: identity, schedule token (with the
+  *  `Complete` exemption) and the expected position are what it decides. */
+void TstSessionReplayPlayer::mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase()
+{
+  PlayerFixture f;
+  const SessionFilePtr session = threeEventSession();
+  const SessionFilePtr other = mixedSession();
+  QVERIFY(f.player.start(session).ok);
+  QVERIFY(f.player.play().ok);
+
+  const int phaseArm = 0, phaseContinue = 1, phaseComplete = 2, phaseStep = 3, phaseFinish = 4;
+  const quint64 replayId = SessionReplayPlayerSeamsForTest::replayId(f.player);
+  const quint64 token = SessionReplayPlayerSeamsForTest::scheduleToken(f.player);
+  const auto snapshot = [&](quint64 rid, quint64 tok, const SessionFilePtr &sess,
+                            SessionReplayState state, quint64 position) {
+    return SessionReplayPlayerSeamsForTest::snapshot(rid, tok, sess, state, position);
+  };
+
+  // Arm derives its relation too: the position it owns is its snapshot's own.
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 0), phaseArm, 0));
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 0), phaseArm, 1));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 1), phaseArm, 0));
+  // (Arm checks the live state and the snapshot's position; the snapshot's own
+  // `state` field is what `StepContinue`/`Finish` use, since `play()` deliberately
+  // changes the state between capturing and arming.)
+
+  // Continue derives its relation itself: a continuation that has delivered the
+  // event at the snapshot's position owns `snapshot.position + 1` - no caller
+  // argument can talk it into anything else (3b's review, finding 2).
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 0), phaseContinue, 0));
+  QVERIFY(f.scheduler.fire());                       // the event at position 0 is out
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 0), phaseContinue, 0));
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 0), phaseContinue, 99));
+
+  // StepContinue: the step's own progress is the one caller-supplied coordinate, so
+  // the helper authorizes exactly the position the step names - and nothing else.
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 1), phaseStep, 1));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 1), phaseStep, 0));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 1), phaseStep, 2));
+
+  // Identity: a stale replay id, a stale session or a stale token never authorize -
+  // except that `Complete` outranks a cancelled schedule (rule 1).
+  const quint64 staleReplay = replayId + 1;
+  const quint64 staleToken = token + 1;
+  for (const int phase : {phaseArm, phaseContinue, phaseStep, phaseComplete, phaseFinish}) {
+    QVERIFY2(!SessionReplayPlayerSeamsForTest::mayMutate(
+                 f.player, snapshot(staleReplay, token, session, SessionReplayState::Playing, 0), phase, 1),
+             "a stale replay id never authorizes");
+    QVERIFY2(!SessionReplayPlayerSeamsForTest::mayMutate(
+                 f.player, snapshot(replayId, token, other, SessionReplayState::Playing, 0), phase, 1),
+             "another session never authorizes");
+  }
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, staleToken, session, SessionReplayState::Playing, 0), phaseComplete, 1));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, staleToken, session, SessionReplayState::Playing, 0), phaseContinue, 1));
+
+  // StepContinue carries the step's own starting state, and its coordinate is the
+  // caller's - so it is exercised in the two states a step actually runs in, not
+  // only under `Playing` (3b's verification, finding 2).
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Ready, 0), phaseStep, 0));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Ready, 1), phaseStep, 1));
+
+  // Finish: the helper requires the captured end, so a mid-stream position is
+  // denied and the end of the stream is authorized (3b's closing round).
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Playing, 3), phaseFinish, 0));
+
+  f.player.stop();                                   // Paused, with a bumped token
+  QCOMPARE(f.player.state(), SessionReplayState::Paused);
+  const quint64 pausedToken = SessionReplayPlayerSeamsForTest::scheduleToken(f.player);
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, pausedToken, session, SessionReplayState::Paused, 1), phaseStep, 1));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, pausedToken, session, SessionReplayState::Paused, 1), phaseStep, 2));
+  QVERIFY(!SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player, snapshot(replayId, token, session, SessionReplayState::Paused, 1), phaseStep, 1));
+  // Reach the end of the stream, so `Finish` can be authorized against the captured end.
+  QVERIFY(f.player.play().ok);
+  f.runToEnd();
+  QCOMPARE(f.player.state(), SessionReplayState::Finished);
+  QVERIFY(SessionReplayPlayerSeamsForTest::mayMutate(
+      f.player,
+      snapshot(replayId, SessionReplayPlayerSeamsForTest::scheduleToken(f.player), session,
+               SessionReplayState::Finished, 3),
+      phaseFinish, 0));
+}
+
+/** Rule 6: a `setTiming()` from a delivery slot applies to the very next arming. */
+void TstSessionReplayPlayer::timingChangedFromADeliverySlotAppliesToTheNextArming()
+{
+  PlayerFixture f;
+  QVERIFY(f.player.start(threeEventSession()).ok);
+  f.duringNextDelivery = [&f]() { f.player.setTiming(SessionReplayTiming::Scale2); };
+  QVERIFY(f.player.play().ok);
+  QVERIFY(f.scheduler.fire());                       // delivers event 1...
+
+  QCOMPARE(f.scheduler.delays.size(), 2);
+  QCOMPARE(f.scheduler.delays.at(0), qint64(0));      // the first delivery is immediate
+  QCOMPARE(f.scheduler.delays.at(1), qint64(500));    // ...and the successor waited gap/2
+  QCOMPARE(f.player.timing(), SessionReplayTiming::Scale2);
+  QCOMPARE(f.player.deliveredCount(), quint64(1));
+}
+
+/** Rule 9: everything a receiver may do from the final delivery's transient
+  *  `Paused`, and the completion that outranks it. */
+void TstSessionReplayPlayer::aStopFromTheTransientPausedIsANoOpAndTheCompletionStillHappens()
+{
+  PlayerFixture f;
+  const SessionFilePtr session = threeEventSession();
+  QVERIFY(f.player.start(session).ok);
+  QVERIFY(f.player.play().ok);
+  QVERIFY(f.scheduler.fire());                        // events 1 and 2 first
+  QVERIFY(f.scheduler.fire());
+
+  SessionReplayReport secondStop;
+  SessionReplayStep stepAttempt;
+  SessionReplayStart playAttempt;
+  SessionReplayTimingChange declared;
+  SessionReplayTimingChange invalid;
+  SessionReplayStart nullStart;
+  f.duringNextDelivery = [&]() {                      // inside the final delivery
+    secondStop = f.player.stop();
+    stepAttempt = f.player.stepNextEvent();
+    playAttempt = f.player.play();
+    declared = f.player.setTiming(SessionReplayTiming::Scale2);
+    invalid = f.player.setTiming(static_cast<SessionReplayTiming>(99));
+    nullStart = f.player.start(SessionFilePtr());
+  };
+  QVERIFY(f.scheduler.fire());                        // the last delivery
+
+  QCOMPARE(f.finishedCount, 1);                       // the completion is owed and reported
+  QCOMPARE(f.player.state(), SessionReplayState::Finished);
+  // The acting stop's own report is the one of the replay it stopped - at the end
+  // of the stream, hence `finished` - while the completion report keeps the timing
+  // policy it was captured with.
+  QVERIFY(secondStop.finished);
+  QCOMPARE(f.lastReport.delivered, quint64(3));
+  QCOMPARE(f.lastReport.remaining, quint64(0));
+  QVERIFY(f.lastReport.finished);
+  QVERIFY(f.lastReport.timing == SessionReplayTiming::Original);   // captured before the change
+
+  QCOMPARE(secondStop.delivered, quint64(3));         // the stop's own report
+  QCOMPARE(secondStop.remaining, quint64(0));
+  QVERIFY(secondStop.timing == SessionReplayTiming::Original);   // captured, not the later change
+  QVERIFY(!stepAttempt.ok);
+  QVERIFY(!stepAttempt.reason.isEmpty());
+  QVERIFY(!playAttempt.ok);
+  QVERIFY(!playAttempt.reason.isEmpty());
+  QVERIFY(declared.ok);
+  QCOMPARE(f.player.timing(), SessionReplayTiming::Scale2);
+  QVERIFY(!invalid.ok);
+  QCOMPARE(invalid.reason, QStringLiteral("unknown timing policy"));
+  QVERIFY(!nullStart.ok);
+  QVERIFY(!nullStart.reason.isEmpty());
+  QVERIFY(!f.scheduler.armed());
+  QCOMPARE(f.delivered.size(), 3);
+}
+
+/** Rule 9's conditional branch: a receiver of that transient `Paused` that starts
+  *  or releases the replay ends the sequence - no completion is committed. */
+void TstSessionReplayPlayer::aReceiverOfTheTransientPausedThatStartsOrClosesEndsTheCompletion()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+    SessionReplayState expectedState;
+  } actions[] = {
+    { "close", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.close(); }, SessionReplayState::Idle },
+    { "restart", [](SessionReplayPlayer &p, const SessionFilePtr &s) { p.start(s); }, SessionReplayState::Ready },
+  };
+
+  for (const auto &action : actions) {
+    PlayerFixture f;
+    const SessionFilePtr session = threeEventSession();
+    QVERIFY2(f.player.start(session).ok, action.name);
+    QVERIFY(f.player.play().ok);
+    QVERIFY(f.scheduler.fire());
+    QVERIFY(f.scheduler.fire());
+    const int completionsBefore = f.finishedCount;
+    f.duringNextDelivery = [&f, &session, &action]() { action.act(f.player, session); };
+    QVERIFY(f.scheduler.fire());                      // the final delivery
+
+    QCOMPARE(f.finishedCount, completionsBefore);     // no completion report
+    QCOMPARE(f.player.state(), action.expectedState); // the receiver's state stands
+    QVERIFY2(!f.states.contains(SessionReplayState::Finished), action.name);
+    QVERIFY(!f.scheduler.armed());
+  }
+}
+
+/** Rule 3: a final step that reaches the end reports it from its snapshot but must
+  *  not overwrite the state a receiver left behind. */
+void TstSessionReplayPlayer::aFinalStepDoesNotOverwriteAReceiverThatClosesOrRestarts()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &, const SessionFilePtr &)> act;
+    SessionReplayState expectedState;
+  } actions[] = {
+    { "close", [](SessionReplayPlayer &p, const SessionFilePtr &) { p.close(); }, SessionReplayState::Idle },
+    { "restart", [](SessionReplayPlayer &p, const SessionFilePtr &s) { p.start(s); }, SessionReplayState::Ready },
+  };
+
+  for (const auto &action : actions) {
+    PlayerFixture f;
+    const SessionFilePtr session = oneEventSession();
+    QVERIFY2(f.player.start(session).ok, action.name);
+    f.duringNextDelivery = [&f, &session, &action]() { action.act(f.player, session); };
+
+    const SessionReplayStep step = f.player.stepNextEvent();
+    QVERIFY2(step.ok, action.name);
+    QCOMPARE(step.advanced, quint64(1));
+    QVERIFY(step.matched);
+    QVERIFY2(step.reachedEnd, "the result describes the replay this call advanced");
+    QCOMPARE(f.player.state(), action.expectedState);   // the receiver's state stands
+    QCOMPARE(f.finishedCount, 0);                       // a step never reports a completion
+    QVERIFY(!f.scheduler.armed());
+  }
+}
+
+
+/** Rule 8's list: a step keeps delivering through every operation that neither
+  *  supersedes the replay nor acts on it - a valid `setTiming()`, a refusal and a
+  *  no-op `stop()` - from both of the states a step runs in. */
+void TstSessionReplayPlayer::aStepContinuesThroughEverythingThatDoesNotSupersedeIt()
+{
+  const struct {
+    const char *name;
+    std::function<void(SessionReplayPlayer &)> act;
+    SessionReplayTiming expectedTiming;
+    bool stepModeBefore;      ///< configure `Step` before the step (rule 8's third refusal)
+  } actions[] = {
+    { "valid setTiming", [](SessionReplayPlayer &p) { p.setTiming(SessionReplayTiming::Scale2); },
+      SessionReplayTiming::Scale2, false },
+    { "unknown timing (refused)",
+      [](SessionReplayPlayer &p) { p.setTiming(static_cast<SessionReplayTiming>(99)); },
+      SessionReplayTiming::Original, false },
+    { "start(nullptr) (refused)", [](SessionReplayPlayer &p) { p.start(SessionFilePtr()); },
+      SessionReplayTiming::Original, false },
+    { "play() refused in Step mode", [](SessionReplayPlayer &p) { p.play(); },
+      SessionReplayTiming::Step, true },
+    { "stop() (no-op here)", [](SessionReplayPlayer &p) { p.stop(); },
+      SessionReplayTiming::Original, false },
+  };
+
+  for (const bool paused : { false, true }) {
+    for (const auto &action : actions) {
+      PlayerFixture f;
+      const SessionFilePtr session = mixedSession();
+      QVERIFY(f.player.start(session).ok);
+      QVERIFY(f.player.setTiming(SessionReplayTiming::Original).ok);
+      if (paused) {
+        QVERIFY(f.player.play().ok);
+        f.player.stop();
+        QCOMPARE(f.player.state(), SessionReplayState::Paused);
+      }
+      // Rule 8's third refusal needs the Step policy in place *before* the step;
+      // switching to it is accepted in `Ready` and `Paused` (§5.6).
+      if (action.stepModeBefore)
+        QVERIFY(f.player.setTiming(SessionReplayTiming::Step).ok);
+      f.duringNextDelivery = [&f, &action]() { action.act(f.player); };
+
+      const SessionReplayStep step = f.player.stepNextRx();
+      const QString context = QStringLiteral("%1/%2")
+                                  .arg(paused ? QStringLiteral("Paused") : QStringLiteral("Ready"),
+                                       QString::fromLatin1(action.name));
+
+      QVERIFY2(step.ok, qPrintable(context));
+      QVERIFY2(step.advanced == quint64(3), qPrintable(context + QStringLiteral(" advanced")));
+      QVERIFY2(step.matched, qPrintable(context + QStringLiteral(" matched")));
+      QVERIFY2(!step.reachedEnd, qPrintable(context + QStringLiteral(" reachedEnd")));
+      QVERIFY2(f.player.timing() == action.expectedTiming, qPrintable(context + QStringLiteral(" timing")));
+      QCOMPARE(f.delivered.size(), 3);
+      QVERIFY(!f.scheduler.armed());
+      QCOMPARE(f.finishedCount, 0);
+    }
   }
 }
 

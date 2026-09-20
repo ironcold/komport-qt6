@@ -169,6 +169,92 @@ SessionReplayPlayer::~SessionReplayPlayer()
   mScheduler->cancelPending();
 }
 
+SessionReplayPlayer::OperationSnapshot SessionReplayPlayer::captureSnapshot() const
+{
+  OperationSnapshot snapshot;
+  snapshot.scheduleToken = mScheduleToken;
+  snapshot.replayId = mReplayId;
+  snapshot.session = mSession;
+  snapshot.state = mState;
+  snapshot.position = mPosition;
+  snapshot.delivered = mDelivered;
+  snapshot.timing = mTiming;
+  return snapshot;
+}
+
+bool SessionReplayPlayer::OperationSnapshot::sameReplay(const SessionReplayPlayer &player) const
+{
+  return replayId == player.mReplayId && session == player.mSession;
+}
+
+quint64 SessionReplayPlayer::OperationSnapshot::eventCount() const
+{
+  return session ? quint64(session->events.size()) : 0;
+}
+
+bool SessionReplayPlayer::OperationSnapshot::deliveryIsTheLastOne() const
+{
+  const quint64 total = eventCount();
+  return total > 0 && position + 1 >= total;
+}
+
+SessionReplayReport SessionReplayPlayer::OperationSnapshot::report() const
+{
+  SessionReplayReport result;
+  result.delivered = delivered;
+  result.position = position;
+  const quint64 total = eventCount();
+  result.remaining = total > position ? total - position : 0;
+  result.finished = (state == SessionReplayState::Finished) || (total > 0 && position >= total);
+  result.timing = timing;
+  return result;
+}
+
+SessionReplayReport SessionReplayPlayer::OperationSnapshot::completionReport() const
+{
+  SessionReplayReport result;
+  result.delivered = delivered + 1;
+  result.position = position + 1;
+  const quint64 total = eventCount();
+  result.remaining = total > position + 1 ? total - (position + 1) : 0;
+  result.finished = true;
+  result.timing = timing;
+  return result;
+}
+
+bool SessionReplayPlayer::mayMutateReplay(const OperationSnapshot &snapshot, MutationPhase phase,
+                                          quint64 expectedPosition) const
+{
+  // SPEC-M10 5.11's predicate, and the only authorization in this class. `snapshot`
+  // is always the operation's *entry* snapshot: a snapshot taken after a receiver
+  // acted would compare equal to the live player in every respect and make this a
+  // tautology (step 3b's design note, finding 3).
+  if (!snapshot.sameReplay(*this))
+    return false;                       // the replay the operation started on is released or replaced
+  if (snapshot.scheduleToken != mScheduleToken && phase != MutationPhase::Complete)
+    return false;                       // its pending schedule was cancelled (rule 10)
+  // `expectedPosition` is consulted by `StepContinue` only, where the progress is
+  // inherently the caller's (the step's own delivered count). `Arm` and `Continue`
+  // have a fixed relation to the entry snapshot, and the helper derives it rather
+  // than trusting a caller (3b's review, finding 2).
+  switch (phase) {
+  case MutationPhase::Arm:
+    return mState == SessionReplayState::Playing && mPosition == snapshot.position;
+  case MutationPhase::Continue:
+    return mState == SessionReplayState::Playing && mPosition == snapshot.position + 1;
+  case MutationPhase::StepContinue:
+    return mState == snapshot.state && mPosition == expectedPosition;
+  case MutationPhase::Complete:
+    // The completion of a replay that delivered its last event outranks a `stop()`
+    // in that delivery (rule 1), so the token is exempt - but never the identity.
+    return mState == SessionReplayState::Playing || mState == SessionReplayState::Paused;
+  case MutationPhase::Finish:
+    return mState == snapshot.state && snapshot.eventCount() > 0
+        && mPosition >= snapshot.eventCount();
+  }
+  return false;
+}
+
 SessionReplayStart SessionReplayPlayer::start(const SessionFilePtr &session)
 {
   SessionReplayStart result;
@@ -176,10 +262,12 @@ SessionReplayStart SessionReplayPlayer::start(const SessionFilePtr &session)
     result.reason = QStringLiteral("no session was given");
     return result;
   }
-
   // The explicit restart: a running replay stops first, the delivered count and
-  // the position go back to the beginning, and nothing is re-armed. SPEC-M10
-  // 5.10 guarantees that the cancelled callback is never invoked.
+  // the position go back to the beginning, and nothing is re-armed. Both
+  // identities change, so every continuation armed for the old replay is refused
+  // from here on (SPEC-M10 5.11 rule 2).
+  ++mScheduleToken;
+  ++mReplayId;
   mScheduler->cancelPending();
   mSession = session;
   mPosition = 0;
@@ -217,7 +305,16 @@ SessionReplayStart SessionReplayPlayer::play()
     return result;
   }
 
+  const OperationSnapshot snapshot = captureSnapshot();   // before the state signal
   setState(SessionReplayState::Playing);
+
+  // `stateChanged` is synchronous: a receiver may have closed, restarted or
+  // stopped the player. `play()` has succeeded either way - it entered `Playing` -
+  // but it must not arm a delivery the receiver just cancelled (rule 4).
+  if (!mayMutateReplay(snapshot, MutationPhase::Arm, 0)) {
+    result.ok = true;
+    return result;
+  }
   scheduleNextDelivery();
   result.ok = true;
   return result;
@@ -226,9 +323,15 @@ SessionReplayStart SessionReplayPlayer::play()
 SessionReplayReport SessionReplayPlayer::stop()
 {
   if (mState == SessionReplayState::Playing) {
+    // A canceller does not authorize its own cancellation (rule 10): cancelling
+    // is not a mutation, and it must work in any state. It bumps the schedule
+    // token and cancels before it changes the state, and the report it returns is
+    // the one of the replay it stopped, captured before that state signal.
+    const OperationSnapshot stopped = captureSnapshot();
+    ++mScheduleToken;
     mScheduler->cancelPending();
     setState(SessionReplayState::Paused);
-    return report();
+    return stopped.report();
   }
   // A stop in Idle, Ready, Paused or Finished is a no-op report, not an error,
   // and it emits nothing (SPEC-M10 5.5).
@@ -259,6 +362,8 @@ SessionReplayStep SessionReplayPlayer::stepNextTx()
 
 void SessionReplayPlayer::close()
 {
+  ++mScheduleToken;
+  ++mReplayId;
   mScheduler->cancelPending();
   mSession.reset();
   mPosition = 0;
@@ -351,28 +456,39 @@ qint64 SessionReplayPlayer::delayNsFor(quint64 index) const
 
 void SessionReplayPlayer::scheduleNextDelivery()
 {
-  mScheduler->scheduleAfter(delayNsFor(mPosition), [this]() { onDeliveryDue(); });
+  const quint64 scheduleToken = mScheduleToken;
+  const quint64 replayId = mReplayId;
+  mScheduler->scheduleAfter(delayNsFor(mPosition),
+                            [this, scheduleToken, replayId]() { onDeliveryDue(scheduleToken, replayId); });
 }
 
-void SessionReplayPlayer::onDeliveryDue()
+void SessionReplayPlayer::onDeliveryDue(quint64 scheduleToken, quint64 replayId)
 {
-  // No state, session or identity check here on purpose: SPEC-M10 5.10 guarantees
-  // that a callback cancelled by stop(), close() or start() is never invoked, so
-  // under a valid mutation context this callback always belongs to a replay that
-  // is still playing. A guard would be mutation-authorization logic in the core
-  // (step 3a's review gate, finding 1).
-  deliverAtCurrentPosition();
-  if (mPosition >= quint64(mSession->events.size())) {
+  const OperationSnapshot snapshot = captureSnapshot();   // before the first emission
+  if (snapshot.replayId != replayId || snapshot.scheduleToken != scheduleToken)
+    return;                       // a stale continuation: this callback's schedule is gone (rule 4)
+
+  // Whether this delivery is the last of *this* replay, and the completion report
+  // itself, are snapshot facts: a receiver of the delivery can neither report a
+  // completion that belongs to another replay nor suppress the one this one owes.
+  const bool lastEventOfThisReplay = snapshot.deliveryIsTheLastOne();
+  const SessionReplayReport finishedReport = snapshot.completionReport();
+
+  deliverAtCurrentPosition(snapshot);
+
+  if (lastEventOfThisReplay && mayMutateReplay(snapshot, MutationPhase::Complete, 0)) {
     setState(SessionReplayState::Finished);
-    emit replayFinished(report());
+    emit replayFinished(finishedReport);
     return;
   }
+  if (!mayMutateReplay(snapshot, MutationPhase::Continue, 0))
+    return;
   scheduleNextDelivery();
 }
 
-void SessionReplayPlayer::deliverAtCurrentPosition()
+void SessionReplayPlayer::deliverAtCurrentPosition(const OperationSnapshot &snapshot)
 {
-  const SessionEvent &event = mSession->events.at(qsizetype(mPosition));
+  const SessionEvent &event = snapshot.session->events.at(qsizetype(mPosition));
   ++mPosition;
   ++mDelivered;
   emit eventDelivered(event);
@@ -461,16 +577,27 @@ SessionReplayStep SessionReplayPlayer::stepToMatch(SessionDirection direction)
 SessionReplayStep SessionReplayPlayer::performStep(qint64 matchIndex, bool matched)
 {
   SessionReplayStep result;
-  const quint64 startPosition = mPosition;
-  while (qint64(mPosition) <= matchIndex)
-    deliverAtCurrentPosition();
+  const OperationSnapshot entry = captureSnapshot();   // fixes the result and the reports
+  const quint64 startPosition = entry.position;
+  quint64 advanced = 0;
 
-  const quint64 total = mSession ? quint64(mSession->events.size()) : 0;
+  while (qint64(startPosition + advanced) <= matchIndex) {
+    // The step's own entry snapshot authorizes every delivery, with the position
+    // this continuation owns spelled out: after `advanced` deliveries that is
+    // `startPosition + advanced` (SPEC-M10 5.11, `StepContinue`).
+    if (!mayMutateReplay(entry, MutationPhase::StepContinue, startPosition + advanced))
+      break;
+    deliverAtCurrentPosition(entry);
+    ++advanced;
+  }
+
+  const quint64 streamSize = entry.eventCount();
+  const bool completed = advanced == quint64(matchIndex) - startPosition + 1;
   result.ok = true;
-  result.advanced = mPosition - startPosition;
-  result.matched = matched;
-  result.reachedEnd = total > 0 && mPosition >= total;
-  if (result.reachedEnd)
+  result.advanced = advanced;
+  result.matched = matched && completed;
+  result.reachedEnd = completed && streamSize > 0 && startPosition + advanced >= streamSize;
+  if (result.reachedEnd && mayMutateReplay(entry, MutationPhase::Finish, 0))
     setState(SessionReplayState::Finished);
   return result;
 }
