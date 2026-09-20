@@ -873,6 +873,16 @@ How that is checked, and what each check does and does not prove:
 
 ### 5.10 Internal seams (testable, not public API)
 
+**Cancellation guarantee (amendment of 2026-09-20, step 3a's review gate).** A scheduler
+implementation must not invoke a callback that `cancelPending()` removed: once a canceller has
+returned, no callback armed before it can run. The production `QTimer` implementation upholds this
+(the timer is stopped and the stored callback dropped) and the test scheduler does too. A
+callback that is **already executing** is not affected by a cancellation - the guarantee is about
+callbacks that have not run yet, which is exactly what the core's guard-free callback needs. This is
+what lets the core (§11 step 3a) rely on cancellation alone and stay free of any state or identity
+check inside the delivery callback - a guard there would be §5.11's authorization rules in the
+core, which the cut forbids.
+
 Mirroring SPEC-M9 §5.9, three seams make loading and replay deterministic without a
 faulty filesystem, wall-clock time or a real timer:
 

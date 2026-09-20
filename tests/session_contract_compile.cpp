@@ -26,6 +26,7 @@
 #include "sessioncontroller.h"
 #include "sessionevent.h"
 #include "sessionreader.h"
+#include "sessionreplayplayer.h"
 #include "transportconfiguration.h"
 
 #include <QJsonObject>
@@ -42,6 +43,8 @@ static_assert(sizeof(SessionController) > 0,
               "sessioncontroller.h must stay compilable against Qt6::Core (ADR-009)");
 static_assert(sizeof(SessionReader) > 0,
               "sessionreader.h must stay compilable against Qt6::Core (ADR-009)");
+static_assert(sizeof(SessionReplayPlayer) > 0,
+              "sessionreplayplayer.h must stay compilable against Qt6::Core (ADR-009)");
 
 namespace {
 
@@ -129,6 +132,32 @@ int komportSessionContractCompileProof()
   fileInfo.version = SessionReader::kFormatVersion;
   fileInfo.source.sourceId = 1;
 
+  // The player's own surface: its enumerators, its result values and its
+  // operations compile against Qt Core alone.
+  const SessionReplayPlayer player;
+  const SessionReplayState state = player.state();
+  const SessionReplayTiming timing = player.timing();
+  SessionReplayStart startResult;
+  SessionReplayStep stepResult;
+  SessionReplayTimingChange timingResult;
+  SessionReplayReport report;
+  startResult.reason = QStringLiteral("x");
+  stepResult.advanced = 0;
+  stepResult.matched = false;
+  stepResult.reachedEnd = true;
+  timingResult.timing = timing;
+  report.finished = false;
+  const bool playerSurface =
+      state == SessionReplayState::Idle
+      && timing == SessionReplayTiming::Original
+      && player.position() == 0
+      && player.deliveredCount() == 0
+      && player.eventCount() == 0
+      && !startResult.ok
+      && !stepResult.matched
+      && timingResult.timing == SessionReplayTiming::Original
+      && !report.finished;
+
   const bool ok = structurallyValid
       && losslessRoundTrip
       && !changedGroups.isEmpty()
@@ -138,6 +167,7 @@ int komportSessionContractCompileProof()
       && accepted == 3
       && readerSurface
       && session == nullptr
-      && fileInfo.source.sourceId == 1;
+      && fileInfo.source.sourceId == 1
+      && playerSurface;
   return ok ? 0 : 1;
 }

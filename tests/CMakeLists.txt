@@ -53,6 +53,9 @@ target_link_libraries(tst_sessionrecordingendtoend PRIVATE util)
 # M10: the `.kpsession` reader (ADR-006 applied, ADR-011 D1-D4). Uses the
 # injected byte-source seam and real temp files; no pty, hence no libutil.
 komport_add_test(tst_sessionreader)
+# M10: the passive replay player (ADR-011 D6-D10, SPEC-M10 5.5/5.6). Uses the
+# scripted scheduler and the counting clock, so no wall-clock time and no pty.
+komport_add_test(tst_sessionreplayplayer)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
@@ -75,6 +78,7 @@ add_library(komport_session_contract_check OBJECT
   ${CMAKE_SOURCE_DIR}/komport/sessionrecordcodec.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionrecorder.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionreader.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessionreplayplayer.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
 target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)

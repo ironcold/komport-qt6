@@ -99,6 +99,11 @@ add_library(komport_core OBJECT
   # tests/session_contract_compile.cpp (ADR-009).
   komport/sessionreader.cpp
   komport/sessionreader.h
+  # M10 player (ADR-011 D6-D10, SPEC-M10 5.5/5.6/5.10): the read-only passive
+  # replay, QtCore-only like the rest of the session surface.
+  komport/sessionreplayplayer.cpp
+  komport/sessionreplayplayer.h
+  komport/sessionreplayseams.h
   komport/komport.qrc
 )
 
