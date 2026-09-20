@@ -488,10 +488,10 @@ any of Ready/Paused/Finished --close()-------------> Idle
 | State | Meaning | What is accepted |
 | --- | --- | --- |
 | `Idle` | no session attached; no position exists | `start()`, `setTiming()`; `stop()` and `close()` are no-ops; `play()` and the steps refuse with a reason |
-| `Ready` | session attached, position at the first event, nothing delivered | `play()`, `stepNext*()`, `start()` (restart), `close()`, `setTiming()` |
+| `Ready` | session attached, position at the first event, nothing delivered | `play()`, `stepNext*()`, `start()` (restart), `close()`, `setTiming()`; `stop()` is an accepted no-op |
 | `Playing` | automatic replay running through the scheduler | `stop()`, `start()` (restart, which stops first), `close()` (cancels the pending callback), `setTiming()` for every ladder value except `Step`, which is refused with a reason (§5.6); accepted values apply to the next delivery |
-| `Paused` | stopped at a preserved position with events remaining | `play()` (resume), `stepNext*()`, `start()`, `close()`, `setTiming()` |
-| `Finished` | every stored event was delivered | `start()` (restart), `close()`, `setTiming()`; `play()` and `stepNext*()` refuse with a reason |
+| `Paused` | stopped at a preserved position; events remain, except in the transient window inside the final delivery's completion (§5.11 rule 9) | `play()` (resume), `stepNext*()`, `start()`, `close()`, `setTiming()`; `stop()` is an accepted no-op |
+| `Finished` | every stored event was delivered | `start()` (restart), `close()`, `setTiming()`; `stop()` is an accepted no-op; `play()` and `stepNext*()` refuse with a reason |
 
 Operation semantics (normative):
 
@@ -504,13 +504,23 @@ Operation semantics (normative):
   is no session (`Idle`), when the session has zero events, when the position is at the
   end (`Finished`), and when the timing policy is `Step` (the reason says that step mode
   advances only on a step command - ADR-011 D7).
-- `stop()` cancels a pending scheduled delivery, preserves the position and the
-  delivered count, emits nothing, and returns a report. `stop()` in `Ready`/`Idle` is a
+- `stop()` is accepted in **every** state. In `Playing` it cancels the pending scheduled
+  delivery, preserves the position and the delivered count, emits no `eventDelivered` and no
+  `replayFinished`, and returns a report; in `Idle`, `Ready`, `Paused` and `Finished` it is an
+  accepted no-op that returns the report of that state and changes nothing (which is what rule 10
+  means by "a canceller works in any state").
+  (Amendment of 2026-09-20, review: slice-2 application verification 4, finding 3: the earlier
+  wording "emits nothing" was wrong - the `Playing → Paused` transition is announced through
+  `stateChanged`, like every other transition in the state table - and a stop that arrives while
+  the last event is being delivered is §5.11's rule 1, not this section's.) `stop()` in `Ready`/`Idle` is a
   no-op report, not an error.
 - A `Playing` replay that delivers its last event transitions to `Finished` and emits
-  `replayFinished` with the report (delivered, remaining 0, finished `true`), so an end
-  without an explicit user action is still reported - the same rule ADR-010 fixes for a
-  recording that ends by itself.
+  `replayFinished` with the report (delivered, remaining 0, finished `true`), so an end without
+  an explicit user action is still reported - the same rule ADR-010 fixes for a recording that
+  ends by itself. How that transition behaves when a receiver acts during it - a concurrent
+  `stop()`, a replay replaced by `start()`, an operation superseded by a receiver - is
+  **§5.11**, rules 1 and 2, and is normed there and nowhere else (amendment of 2026-09-20,
+  owner's cut of the step-3 slice).
 - `close()` detaches the session, releases the shared pointer, cancels any pending
   scheduled delivery and returns to `Idle`; it emits nothing but the state change. It is
   defined in every state, including `Playing`, and cannot refuse - it returns no value,
@@ -522,6 +532,12 @@ Operation semantics (normative):
   no duplication, no derived event (ADR-011 D5).
 - Every refusal is a returned value carrying a reason; no refusal is silent and no
   refusal changes the state.
+- **Mutation context (amendment of 2026-09-20, owner's cut of the step-3 slice).** Everything in
+  this section holds under a *valid mutation context*: the calls arrive on the player's thread
+  and not from a receiver of the player's signals. What happens when a receiver does call back -
+  the two identities, the operation snapshot, the one authorization helper and the completion and
+  step-report rules - is normed in **§5.11** and nowhere else. Under this precondition the core
+  needs no re-entrancy logic at all.
 - `setTiming()` returns a `SessionReplayTimingChange` and changes nothing but the timing
   policy. It accepts every declared ladder value in `Idle`, `Ready`, `Paused` and
   `Finished` (`ok == true`, `timing` the new policy) and takes effect as described in
@@ -578,7 +594,9 @@ Normative details:
   event is delivered per scheduled callback.
 - Automatic advancement is **always** through the scheduler seam, including
   `Immediate` with a zero delay: one event per callback, so the user interface stays
-  responsive, `stop()` is honoured at a delivery boundary, and no operation blocks or
+  responsive, `stop()` is honoured at a delivery boundary (under a valid mutation context; what a
+  receiver's `stop()` may still do during the delivery itself is §5.11, rules 1 and 7), and no
+  operation blocks or
   iterates over the session.
 - The delay is computed from the gap between the event last delivered and the event to
   be delivered; it is not an absolute wall-clock schedule, and its real-world precision
@@ -600,6 +618,7 @@ Steps (ADR-011 D8):
   (whether the requested direction/event was found) and `reachedEnd`.
 - A step that finds no match advances to the end, delivers the remaining events, reports
   `matched == false` and `reachedEnd == true`, and leaves the player `Finished`.
+  (Re-entrancy aspects of this bullet are **§5.11**, rules 3 and 4, and are normed only there.)
 - Steps are refused while `Playing` (the reason says to stop first) and in `Idle` and
   `Finished`; a refused step changes nothing.
 - Step delivery is synchronous (it is a user-driven, single-turn advance, not a
@@ -875,12 +894,16 @@ public:
   virtual void scheduleAfter(qint64 delayNs, std::function<void()> callback) = 0;
   virtual void cancelPending() = 0;
 };
-/** Internal seam: the monotonic time source used for the scheduler and the report. */
-class SessionMonotonicClock {
-public:
-  virtual ~SessionMonotonicClock();
-  virtual qint64 nowNs() const = 0;
-};
+/** Internal seam: the monotonic time source. The player reuses M9's existing
+  * `SessionMonotonicClock` (`komport/sessionrecorderseams.h`, `qint64 nowNs()`):
+  * a second class of the same name and purpose in one library would be a latent
+  * name clash, so M10 declares no clock of its own (correction of 2026-09-19,
+  * during the step-3 slice: the earlier sketch of this block showed the seam here
+  * with a `const` accessor, which no unit can satisfy without colliding with the
+  * accepted M9 declaration). The player never consults it - every delay comes
+  * from the stored timeline - and `thePlayerNeverConsultsWallClockTime` pins
+  * that.
+  */
 ```
 
 - `SessionReader` takes an optional byte source; the default wraps `QFile` opened
@@ -901,6 +924,165 @@ public:
   assert through a real pty and the port's observable state (§5.8) instead of injecting a
   transport double. Introducing such a seam would change M8's ownership contract and is
   not part of this milestone.
+
+### 5.11 Re-entrancy and mutation authorization (§11 step 3b)
+
+Owner's decision of 2026-09-20: this milestone's replay player is cut in two. §5.5 and §5.6 are
+the **core** (step 3a) and hold under one precondition - **a valid mutation context**: the calls
+arrive on the player's own thread and *not* from a receiver of the player's signals. Under that
+precondition the core needs no re-entrancy logic at all: no identity counter, no snapshot, no
+authorization helper, only its state machine, its timing arithmetic, its refusals and its
+scheduler seam. The core slice may only be adopted if its review shows that none of this
+section's semantics is hidden in it.
+
+This section is the **only** place where the player's mutation authorization is normed. It is cut
+out separately because six review rounds of the unsplit step-3 slice each found another place
+where a synchronous signal receiver could leave the player inconsistent; the earlier text tried to
+norm it inside §5.5's operation bullets, and that is exactly how the contradictions and the
+distributed guards accumulated.
+
+**The two identities** (private state; the public surface stays as §5.5 fixes it):
+
+- `mReplayId` - the identity of the *replay*: bumped by `start()` and `close()`, never by
+  `stop()`, which preserves the position and therefore the replay;
+- `mScheduleToken` - the identity of the *pending schedule*: bumped by every operation that
+  cancels one (`start()`, `stop()`, `close()`).
+
+A scheduled callback carries both values it was armed with.
+
+**The snapshot.** Before its first synchronous emission, an operation captures an immutable
+operation snapshot: schedule token, replay id, the session (kept alive, so the stream cannot die
+beneath the emission), state, position, delivered count and timing policy. Everything the
+operation decides or reports afterwards is derived from that snapshot: its result, its reports,
+whether the delivery it is about to make is the last one of its replay, and that replay's
+completion report. Identity and reported facts therefore never come from live state. The one
+*policy* a continuation reads live is the timing policy it arms with: `setTiming()` is specified
+to take effect for the next scheduled delivery (§5.6), and a receiver that changes it while a
+delivery is being announced has its change apply to that very next arming (rule 6).
+
+**The one helper.** `mayMutateReplay(snapshot, phase)` is the only way a code path that
+continues after an emission may change the player's state, and its predicate *is* the whole
+authorization model:
+
+- `snapshot.replayId == mReplayId` and `snapshot.session == mSession` - the continuation belongs to
+  the replay that is still loaded (`stop()` preserves it, so it never denies this);
+- `snapshot.scheduleToken == mScheduleToken`, **unless** `phase == Complete`: the pending schedule
+  is still the one the continuation was armed in, except for the completion of a replay that has
+  just delivered its last event, which a `stop()` must not be able to cancel (rule 1);
+- the live state is one the phase permits, and for an arming phase the position is exactly
+  `snapshot.position + 1` (this continuation is the one that delivered its event, and no receiver
+  moved the position);
+- nothing else is consulted: no accessor, no timing policy, no delivered count.
+
+| Phase | Used by | Permitted live state (with the identities above) |
+| --- | --- | --- |
+| `Continue` | arming the next delivery after a delivery | `Playing`, position `snapshot.position + 1` |
+| `Complete` | the delivery of the last event of this replay, and its completion commit | `Playing`, or `Paused` if the delivery's own receiver stopped the replay |
+| `StepContinue` | the next event of a synchronous step, after an interim delivery of the same step | the state the step started in, position `snapshot.position + 1` |
+| `Finish` | the final step reaching the end | the state the step started in, position at the captured end |
+
+Every mutation site calls it - arming the next delivery, continuing after a delivery, the final
+step's `Finished`, the completion announcement - and there is no other guard in the class.
+Cancelling a pending delivery is deliberately **not** one of them: it is not a mutation and needs no
+authorization (rule 10), which is why there is no `Cancel` phase.
+
+**The rules this section fixes** (moved here from §5.5 and §5.6, where they were amendments - they
+are normative here and nowhere else):
+
+1. The completion of a replay that delivered its last event outranks a `stop()` that arrives while
+   that event is being delivered. The last event is out, so the replay is `Finished`; `Paused` is
+   never a state with no events remaining. `stop()` itself emits no event delivery and no
+   completion report of its own - the state change and the report belong to the delivery that has
+   just completed.
+2. That replay is identified by `mReplayId`, never by the session pointer: an explicit `start()`
+   during the delivery begins a *new* replay even when it is handed the very same session, so the
+   new replay owes the old callback no completion - and a replay a receiver advanced with a
+   `step()` never reports a completion through `replayFinished` at all.
+3. A step's result is a snapshot of the replay that call advanced: `matched` is only true when the
+   target event itself went out, and `reachedEnd` means "this call took *its* replay to the end",
+   not "the player is at the end now" (so §5.6's "leaves the player `Finished`" holds exactly when
+   no receiver superseded the replay). After that result is decided, the step mutates live state
+   only through `mayMutateReplay(snapshot, phase)` - in particular the final step that reaches the end
+   must not overwrite a state a receiver left behind.
+4. A stale continuation - a callback or a resumed code path that `mayMutateReplay()` refuses -
+   delivers nothing, arms nothing, mutates nothing and emits nothing.
+5. A superseded operation keeps the result and the reports it had already decided from its
+   snapshot and never rewrites them from live state; the one emission such an operation may still
+   make is the completion report of a replay that delivered its last event before the
+   supersession (rules 1 and 7). It leaves the state the receiver set in place.
+6. **Timing changes during a delivery (linearization).** A receiver that calls `setTiming()` while
+   a delivery is being announced changes the policy that the continuation of that same delivery
+   arms with - the policy in effect when it arms, never a policy captured before the receiver's
+   call. If the receiver superseded the replay instead (`start()`, `close()`), the continuation
+   arms nothing and the new replay's first delivery uses the policy in effect at its own arming.
+8. **A synchronous step that delivers several events** resumes after every interim delivery only
+   through `mayMutateReplay(snapshot, StepContinue)`: the step's own starting state and exactly the
+   next expected position. A receiver that plays, stops, closes, restarts or steps from an interim
+   delivery therefore ends the step there - a nested step moves the position, a `play()` changes the
+   state - and the outer step's result reports the deliveries it actually made (rule 3).
+9. **A `stop()` in the final delivery, exactly.** While the same replay is still the loaded one, the
+   observable sequence is: `eventDelivered`, the stop's own `stateChanged(Paused)`, the completion
+   commit's `stateChanged(Finished)`, `replayFinished` with the completion report captured before
+   that commit. A receiver of that `stateChanged(Paused)` that **replaces or releases** the replay
+   (`start()`, `close()`) ends the sequence there: the replay this delivery belonged to is no longer
+   the loaded one, so the completion commit is refused like any other stale continuation (rules 4,
+   5 and 10) and the state the receiver set stands. The stop returns the
+   report of its own snapshot - delivered and position at the end, remaining 0, `finished` true -
+   and it cancels no completion (rule 1). A `stop()` from the completion's own
+   `stateChanged(Finished)` receiver is an accepted no-op: it returns the no-op report of that
+   state, changes nothing and does **not** suppress the captured completion report, which is still
+   emitted.
+   From that transient `Paused` state, while the same replay is still loaded: a **second `stop()`**
+   is an accepted no-op that changes nothing and cancels no completion; a **step** and a
+   **`play()`** are refused, because the position is at the end of the stream (§5.5's refusal for a
+   step at the end and for `play()` at the end). A **`setTiming()`** from that state is accepted like in any `Paused` (§5.5), **for declared ladder
+   values only**: it changes only the timing policy, needs no authorization, ends no sequence, and the
+   reports this step captured keep the policy they were captured with - the change would apply to a
+   future arming, and there is none here. A value outside the declared enumerators refuses exactly as
+   §5.5 specifies (`ok == false`, "unknown timing policy", nothing changed) and does not interrupt the
+   completion either. A **`start(nullptr)`** is refused (`ok == false`, the null-session reason) and changes
+   nothing, so the sequence continues as if it had not been called. Only a successful `start()` or a
+   `close()` from a receiver of that transient state ends the sequence, as above.
+10. **Cancellation order.** A canceller (`stop()`, `close()`, a restart) bumps `mScheduleToken` and
+   clears the pending schedule as one step, *before* it performs and announces the state change it
+   causes, and it does not authorize its own cancellation through the helper: cancelling a pending
+   delivery is not a state mutation, and a canceller must be able to stop a replay in any state. The
+   bump is what refuses a continuation that was armed earlier - that continuation compares the token
+   it was armed with against the live one.
+7. **Commit points and observable order.** A delivery is: `eventDelivered`, then, if it was the
+   last event of its replay, the completion commit - `stateChanged(Finished)`, then
+   `replayFinished` with the completion report captured *before* the commit. A `stop()` from the
+   delivery's own receiver cannot cancel that commit (rule 1); a `start()` or a `close()` from the
+   commit's own `stateChanged(Finished)` receiver does not suppress it either - the report still
+   describes the replay that reached its end, while the state the player is left in is whatever
+   the receiver set. A step never commits a completion (rule 2).
+
+**Tests (step 3b's acceptance evidence; §7's player table separates them from the core tests):**
+`stopFromWithinADeliverySlotIsHonoured`, `closeFromWithinADeliverySlotIsHonoured`,
+`delayedReceiversSeeTheEventAfterAFirstSlotClosesThePlayer`,
+`everyStepOperationSurvivesAReceiverThatActsOnThePlayer`,
+`aCompletionReportIsImmutableAcrossAReceiverRestart`,
+`aRestartDuringTheFinalDeliveryOwesNoCompletionToTheReplacement`,
+`everyPlaySupersessionLeavesNothingArmed`, `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion`,
+`aStopReportSurvivesAReceiverThatActsOnTheStateSignal`,
+`aStopAtTheLastDeliveryStillCompletesTheReplay`,
+`aStepResultIsASnapshotThatAReceiverCannotRewrite`, plus three the fifth and sixth review rounds
+demand:
+
+| Test (step 3b) | What it asserts |
+| --- | --- |
+| `aFinalStepDoesNotOverwriteAReceiverThatClosesOrRestarts` | a receiver that `close()`s or `start()`s inside the final step's delivery ends in its own state (`Idle`/`Ready`) with nothing armed; the step's result still reports `advanced`, `matched` and `reachedEnd` from its snapshot; no `Finished` is entered and no `replayFinished` is emitted |
+| `anInterruptedMultiEventStepStopsAtTheInterruption` | a multi-event step whose first interim delivery has a receiver that plays, stops, closes, restarts or steps delivers nothing further, mutates nothing and reports only the deliveries it made (`advanced` 1, `matched` false unless the target was that first event, `reachedEnd` false) |
+| `mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase` | the helper itself: an authorized continuation (same replay, same token, permitted state and position) may mutate; a stale schedule token, a replaced session, a bumped replay id, a superseded state and a moved position each refuse - driven through the friend-for-testability seam of §5.10, so no production API is widened |
+| `timingChangedFromADeliverySlotAppliesToTheNextArming` | a receiver that `setTiming()`s inside a delivery arms its successor with the new policy (rule 6) |
+| `aStopFromTheTransientPausedIsANoOpAndTheCompletionStillHappens` | everything the transient `Paused` window defines, in one fixture: a second `stop()` returns the no-op report of that state; a step and a `play()` are refused with a reason; a declared `setTiming()` is accepted, changes the policy and leaves the already-captured stop and completion reports on the policy they were captured with; an out-of-range timing value refuses with "unknown timing policy" and changes nothing; a `start(nullptr)` refuses with its reason without ending the sequence; in every one of those branches nothing is delivered or armed and the completion commit still runs with its captured report (rules 6 and 9) |
+| `aReceiverOfTheTransientPausedThatStartsOrClosesEndsTheCompletion` | a `start()` or `close()` from that transient state: no `stateChanged(Finished)`, no `replayFinished`, the state the receiver set stands, and `aStopAtTheLastDeliveryStillCompletesTheReplay` keeps covering the undisturbed branch |
+| `aStopAtTheLastDeliveryStillCompletesTheReplay` | the undisturbed branch of rule 9: a `stop()` from the final delivery's own receiver leaves the replay `Finished` and the completion report goes out with the captured facts; the signal log pins the sequence `eventDelivered` -> `stateChanged(Paused)` -> `stateChanged(Finished)` -> `replayFinished`, and no second delivery is armed |
+| `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion` | a `stop()` from the completion's `stateChanged(Finished)` receiver returns the no-op report of that state, changes nothing, and the captured completion report is still emitted exactly once with `delivered`/`position` at the end and `finished` true (rule 9) |
+
+The §7 classifier of "which test belongs to which slice" includes the direct authorization-helper
+test: a fixture that reaches the helper through the §5.10 seam counts as a 3b fixture even without
+a signal connection.
 
 ## 6. Invariants
 
@@ -939,7 +1121,9 @@ public:
   file handle and no cached state.
 - **Single-threaded:** no new thread, no queued connection, no blocking operation; one
   event is delivered per scheduled callback, and `stop()` takes effect at a delivery
-  boundary.
+  boundary - under a valid mutation context; what a receiver's `stop()` may still do during the
+  delivery itself, and the transient `Paused` it may observe there, are normed only in §5.11
+  (rules 1, 9 and 10).
 - **Prompt-free replay:** starting or running a replay performs no user interaction and
   needs no confirmation (ADR-007); no replay state is persisted across runs.
 
@@ -1002,6 +1186,13 @@ Reader tests:
 
 Player tests (scripted scheduler, injected clock, fixture sessions):
 
+The table below is **split by the two slices** (owner's decision of 2026-09-20): the tests that
+exercise the state machine, the timing arithmetic, the steps and the refusals under a valid
+mutation context belong to step 3a, and the ones whose fixture makes a receiver act during a
+signal belong to step 3b - §5.11 lists those by name. A test is in 3b when its fixture contains a
+connection that calls a player operation; an unlisted test runs in both suites when it is cheap
+(the two slices share `tst_sessionreplayplayer`).
+
 | Test | Asserts |
 | --- | --- |
 | `startPositionsAtTheFirstEventAndNeverMutatesTheSession` | state `Ready`, position 0, delivered 0, and the stored events are identical after a full replay |
@@ -1020,7 +1211,7 @@ Player tests (scripted scheduler, injected clock, fixture sessions):
 | `stepPastTheLastMatchAdvancesToTheEndAndReportsNoMatch` | `matched == false`, `reachedEnd == true`, state `Finished` |
 | `stepIsRefusedWhilePlaying` | the reason says to stop first, nothing is delivered and the position is unchanged |
 | `stepAfterFinishIsRefused` | `Finished` refuses a step and is recovered only by `start()` |
-| `stopPreservesPositionAndCount` | `stop()` cancels the pending delivery, keeps position/delivered, returns the report, emits nothing |
+| `stopPreservesPositionAndCount` | `stop()` cancels the pending delivery, keeps position/delivered and returns the report; it emits no `eventDelivered` and no `replayFinished`, and announces `Playing → Paused` through `stateChanged` |
 | `playResumesFromThePreservedPosition` | no event is delivered twice across stop/play |
 | `replayFinishedReportsDeliveredRemainingAndTiming` | at the end of a `Playing` replay: `replayFinished` with `delivered == eventCount`, `remaining == 0`, `finished == true`, state `Finished` |
 | `restartReplaysTheWholeStreamAgain` | `start()` again resets the position and the count and delivers everything again |
@@ -1119,6 +1310,27 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   refused with its own reason, and M10 adds no rule of its own about the number of clock
   domains (ADR-011 D2) - `multiSourceFileIsRefusedWithTheM10Message`,
   `fileWithoutASourceIsRefused`, `clockDomainCountIsNotAnM10Rule`.
+- [ ] Re-entrancy (step 3b): with a receiver of `eventDelivered`, `stateChanged` or
+  `replayFinished` calling player operations, the player never delivers, arms, mutates or reports
+  for a replay it no longer is - the §5.11 rules hold, `mayMutateReplay(snapshot, phase)`
+  authorizes exactly its own replay and phase, a superseded operation keeps its snapshot-based
+  result and reports, and every mutation after an emission goes through that one helper -
+  `mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase`,
+  `aFinalStepDoesNotOverwriteAReceiverThatClosesOrRestarts`,
+  `timingChangedFromADeliverySlotAppliesToTheNextArming`,
+  `anInterruptedMultiEventStepStopsAtTheInterruption`,
+  `aStopFromTheTransientPausedIsANoOpAndTheCompletionStillHappens`,
+  `aReceiverOfTheTransientPausedThatStartsOrClosesEndsTheCompletion`,
+  `aStopAtTheLastDeliveryStillCompletesTheReplay`, `everyPlaySupersessionLeavesNothingArmed`,
+  `everyStepOperationSurvivesAReceiverThatActsOnThePlayer`,
+  `stopFromWithinADeliverySlotIsHonoured`, `closeFromWithinADeliverySlotIsHonoured`,
+,
+  `aCompletionReportIsImmutableAcrossAReceiverRestart`,
+  `aRestartDuringTheFinalDeliveryOwesNoCompletionToTheReplacement`,
+  `aStepResultIsASnapshotThatAReceiverCannotRewrite`,
+  `aStopReportSurvivesAReceiverThatActsOnTheStateSignal`,
+  `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion`,
+  `delayedReceiversSeeTheEventAfterAFirstSlotClosesThePlayer`.
 - [ ] Passive replay distributes the stored, immutable events in stored order to its
   consumer, with no gaps, duplication or modification, without mutating the session and
   with a report at the end and from `stop()` -
@@ -1194,7 +1406,7 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
 | --- | --- |
 | A loaded session is held in memory in full, proportional to the file, and M9 writes one record per accepted write, so a byte-wise upload produces a large file | Stated as a cost, not hidden (ADR-011 D10); the store is randomly accessible and the position is an index, so a bounded-memory cursor is additive later; the reader never duplicates the session (one `shared_ptr`, shared with the player); the recorded per-record overhead is known from M9 (44 bytes plus metadata) |
 | Replay timing cannot be exact on a desktop OS | ADR-005 already states that stored timing is evidence and replay timing is a policy; tests assert the computed delays with an injected clock and scheduler and never assert wall-clock precision (architecture section 39.3); the real-world precision is documented as best-effort |
-| A large session could block the user interface during a replay | Automatic advancement is always scheduled and delivers exactly one event per callback, including at `Immediate`; `stop()` is honoured at a delivery boundary; the display adapter renders only what was delivered |
+| A large session could block the user interface during a replay | Automatic advancement is always scheduled and delivers exactly one event per callback, including at `Immediate`; `stop()` is honoured at a delivery boundary (under a valid mutation context; §5.11 rules 1 and 9); the display adapter renders only what was delivered |
 | The reader drifts into writer territory, or the two implementations diverge until one is a mirror of the other | The reader is its own unit, calls no writer code, refuses to import M9's test-side reader, and one test pins the shared format facts equal while the profile rules are asserted from both sides |
 | A user cannot tell a refused file from a recovered one | The two outcomes are distinct in the load result, in the reason text and in the status report, and both have dedicated tests and a dedicated acceptance criterion |
 | The offline state leaks a transmit path (key input, paste, macro bar, upload, download, recording start, settings, profile load, or a second window's connection) | Every output-relevant control and entry point is enumerated in §5.7.1 - including `New &Window`, whose slot constructs a window that would load a profile and open a port - disabled *and* guarded in the slot itself, and each one is invoked directly in a test; the offline contracts hold no transport at all. The disabled state and the guard are process-wide, so an already-open second window is covered as well (`offlineStateDisablesControlsInEveryOpenWindow`, `offlineGuardRefusesInEveryWindow`) |
@@ -1230,7 +1442,10 @@ implemented here without reinterpretation:
 | D13 document ownership and its operations | §5.9 |
 | D14 no code path can transmit: the mechanisms, the reply choke point, and the audit plus dynamic no-write evidence that check them | §5.7, §5.7.1, §5.8 |
 
-No decision remains open in this specification. The refusal string of §5.3.3 row 29 (and
+No decision remains open in this specification, **except** the cut of the step-3 player slice
+into 3a (the core) and 3b (the contract of §5.11): that cut is the owner's decision of 2026-09-20,
+its two slices are adopted through their own review gates, and every amendment this milestone
+needed is dated in place instead of being layered. The refusal string of §5.3.3 row 29 (and
 its "the file declares no source" companion reason), the three loading-refusal reasons of
 §5.7, the offline refusal of the guarded entry points (§5.7.1), the indicator text and the
 operation and state names of §5.5 are the normative strings and names this milestone's
@@ -1250,10 +1465,19 @@ tests assert; changing any of them is a specification change, reviewed like any 
 2. `SessionFile`/`SessionFileInfo`/`SessionSourceDescriptor`/`SessionClockDomain` and
    the widget-free contract check entry for the new units (ADR-009), so the boundary is
    compiled from the first commit.
-3. `SessionReplayPlayer` with its five states, the seven operations, the timing
-   arithmetic (including the refusal of `Step` while `Playing`, returned as
-   `SessionReplayTimingChange`), the scheduler and clock seams, the delivery signal and
-   value-returned refusals, with `tst_sessionreplayplayer`.
+3a. `SessionReplayPlayer` core (A1), under the valid-mutation-context precondition of §5.11:
+   the five states, the seven operations, the timing arithmetic (including the refusal of `Step`
+   while `Playing`, returned as `SessionReplayTimingChange`), the scheduler and clock seams, the
+   delivery signal and the value-returned refusals, with `tst_sessionreplayplayer`'s core tests.
+   This slice carries no re-entrancy logic - no identity counter, no snapshot, no authorization
+   helper - and may only be adopted once its review shows that none of §5.11's semantics is
+   hidden in it (owner's decision of 2026-09-20).
+3b. The re-entrancy contract of §5.11 (A2) as its own slice, spec-first and with its own review
+   gate: the two identities, the operation snapshot, the single `mayMutateReplay(snapshot, phase)`
+   authorization helper at every mutation site after an emission, and the re-entrancy tests §5.11
+   lists - including the final step's completion path the sixth review round found. This is the
+   only place where mutation authorization is normed; delivering it as a documented limitation
+   instead was rejected by the owner.
 4. The reply-free rendering path: `KomportEmulation::sendTerminalReply()` as the single
    choke point, `KomportEmulation::slotReplayReceivedChar()`,
    `KomportView::slotReplayReceivedChar()` and `KomportView::setKeyInputEnabled()`, with
