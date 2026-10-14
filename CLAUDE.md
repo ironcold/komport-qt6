@@ -268,5 +268,7 @@ Default an). Siehe `TODO.md` Abschnitt 0.1 für den Anlass.
 - Lizenz: GPL (siehe `COPYING`), Original-Autor Mike Sharkey — bei Umbenennungen/neuen
   Dateien Copyright-Header-Konvention der bestehenden Dateien beibehalten bzw. sinnvoll
   ergänzen (nicht den ursprünglichen Autor entfernen).
-- `komport.desktop`, Icons (`lo16-app-komport.png`, `lo32-app-komport.png`) bleiben
-  nutzbar, ggf. Pfade/Kategorien im `.desktop`-File an Nicht-KDE-Umgebungen anpassen.
+- `komport.desktop` bleibt nutzbar, ggf. Pfade/Kategorien an Nicht-KDE-Umgebungen
+  anpassen. App-Icon ist `komport/komport-qt6.svg` (Terminal-Bildschirm + DB9-Stecker,
+  ersetzt die alten KDE3-PNGs `lo16`/`lo32-app-komport.png`); eingebettet per
+  `komport.qrc`, installiert nach `share/icons/hicolor/scalable/apps`.

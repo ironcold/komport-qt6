@@ -68,7 +68,7 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   // actually destroy the window once closeEvent() accepts it.
   setAttribute( Qt::WA_DeleteOnClose );
 
-  setWindowIcon( QIcon(QStringLiteral(":/icons/lo32-app-komport.png")) );
+  setWindowIcon( QIcon(QStringLiteral(":/icons/komport-qt6.svg")) );
 
   config = new QSettings(this);
 

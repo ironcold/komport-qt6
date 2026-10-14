@@ -202,13 +202,8 @@ target_link_libraries(komport-qt6 PRIVATE komport_core)
 
 install(TARGETS komport-qt6 RUNTIME DESTINATION bin)
 install(FILES komport/komport.desktop DESTINATION share/applications)
-install(FILES komport/lo32-app-komport.png
-  DESTINATION share/icons/hicolor/32x32/apps
-  RENAME komport-qt6.png
-)
-install(FILES komport/lo16-app-komport.png
-  DESTINATION share/icons/hicolor/16x16/apps
-  RENAME komport-qt6.png
+install(FILES komport/komport-qt6.svg
+  DESTINATION share/icons/hicolor/scalable/apps
 )
 
 # Regression tests for crash classes past code reviews already found and

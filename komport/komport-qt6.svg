@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Komport-Qt6 application icon: a phosphor-green terminal screen with a
+  DB9 serial plug in front of it - "retro serial terminal".
+  Licensed under the GPL like the rest of Komport-Qt6 (see COPYING).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a5664"/>
+      <stop offset="1" stop-color="#2a323c"/>
+    </linearGradient>
+    <radialGradient id="screen" cx="0.5" cy="0.45" r="0.7">
+      <stop offset="0" stop-color="#123522"/>
+      <stop offset="1" stop-color="#06120b"/>
+    </radialGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e3e7ec"/>
+      <stop offset="0.5" stop-color="#aab2bc"/>
+      <stop offset="1" stop-color="#7d8792"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="1" stop-color="#c9962e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- monitor bezel and screen -->
+  <rect x="16" y="20" width="224" height="168" rx="20" fill="url(#bezel)"/>
+  <rect x="30" y="34" width="196" height="136" rx="10" fill="url(#screen)"/>
+
+  <!-- prompt, cursor and two lines of output -->
+  <g fill="none" stroke="#4cf47e" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="52,62 76,82 52,102" stroke-width="12"/>
+  </g>
+  <rect x="88" y="92" width="34" height="12" rx="2" fill="#4cf47e"/>
+  <rect x="52" y="124" width="104" height="8" rx="4" fill="#4cf47e" opacity="0.55"/>
+  <rect x="52" y="144" width="144" height="8" rx="4" fill="#4cf47e" opacity="0.3"/>
+
+  <!-- DB9 plug: metal flange, two screws, D-shaped shell, 5 + 4 pins -->
+  <rect x="48" y="172" width="160" height="64" rx="10" fill="url(#metal)"
+        stroke="#5b636d" stroke-width="2"/>
+  <circle cx="64" cy="204" r="7" fill="#5b636d"/>
+  <circle cx="192" cy="204" r="7" fill="#5b636d"/>
+  <polygon points="80,184 176,184 168,224 88,224" fill="#1b2027"
+           stroke="#1b2027" stroke-width="8" stroke-linejoin="round"/>
+  <g fill="url(#pin)">
+    <circle cx="96" cy="196" r="5"/>
+    <circle cx="112" cy="196" r="5"/>
+    <circle cx="128" cy="196" r="5"/>
+    <circle cx="144" cy="196" r="5"/>
+    <circle cx="160" cy="196" r="5"/>
+    <circle cx="104" cy="212" r="5"/>
+    <circle cx="120" cy="212" r="5"/>
+    <circle cx="136" cy="212" r="5"/>
+    <circle cx="152" cy="212" r="5"/>
+  </g>
+</svg>
