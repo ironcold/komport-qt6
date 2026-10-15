@@ -251,6 +251,12 @@ void KomportView::updateCell(QPoint _p){
 
 /** key press event */
 void KomportView::keyPressEvent(QKeyEvent* _e){
+    if ( !mKeyInputEnabled ) {
+        // SPEC-M10 5.7.1: the event is consumed without emitting keyPressed, so the
+        // view keeps its focus, its selection and its scrolling but sends no byte.
+        _e->accept();
+        return;
+    }
     if ( mScrollBar->value() != mScrollBar->maximum() ) {
         resetScroll();
         slotScroll( mScrollBar->value() );
@@ -500,6 +506,23 @@ void KomportView::slotReceivedChar(char _ch){
         resetScroll();
         slotScroll( mScrollBar->value() );
     }
+}
+
+/** render a replayed char: the emulation's reply-free replay entry first - the live
+ *  order is emulation first, view bookkeeping second - and then exactly the same
+ *  display bookkeeping as the live slot above (SPEC-M10 5.7). */
+void KomportView::slotReplayReceivedChar(char _ch){
+    if ( mEmulation )
+        mEmulation->slotReplayReceivedChar( _ch );
+    if ( mScrollBar->value() != mScrollBar->maximum() ) {
+        resetScroll();
+        slotScroll( mScrollBar->value() );
+    }
+}
+
+/** enable or suppress terminal key input (SPEC-M10 5.7.1) */
+void KomportView::setKeyInputEnabled(bool _enabled){
+    mKeyInputEnabled = _enabled;
 }
 
 /** get serial port */

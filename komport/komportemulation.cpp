@@ -538,6 +538,7 @@ ESC[Ps;...;Psm
 **/
 
 #include "komportemulation.h"
+#include <QPointer>
 
 #include <QApplication>
 #include <QDebug>
@@ -1268,13 +1269,13 @@ void KomportEmulation::doDeviceStatusReport()
   int code = ctlParam(0);
   switch ( code ) {
     case 5: // status report request -> "ready, no malfunction"
-      serial()->putStr( "\x1b[0n" );
+      sendTerminalReply( QByteArrayLiteral("\x1b[0n") );
       break;
     case 6: // cursor position report request
       {
         QPoint pos = cellArray()->cursor();
         QByteArray reply = "\x1b[" + QByteArray::number(pos.y()+1) + ";" + QByteArray::number(pos.x()+1) + "R";
-        serial()->putStr( reply.constData() );
+        sendTerminalReply( reply );
       }
       break;
     default:
@@ -1289,7 +1290,7 @@ void KomportEmulation::doDeviceStatusReport()
  *  invite a host to rely on features this emulation doesn't have. */
 void KomportEmulation::doDeviceAttributes()
 {
-  serial()->putStr( "\x1b[?62c" );
+  sendTerminalReply( QByteArrayLiteral("\x1b[?62c") );
 }
 
 /** set scrolling region / DECSTBM (CSI Pt;Pb r): Pt/Pb are 1-based, default
@@ -1461,8 +1462,74 @@ void KomportEmulation::shortEscape(char _ch)
   }
 }
 
-// received a char */
+/** Scoped reply mode (SPEC-M10 5.7) - defined in this translation unit only: the header
+  *  forward-declares it, so no consumer of the class can install a reply mode. */
+class KomportEmulationReplyModeScope
+{
+public:
+  KomportEmulationReplyModeScope(KomportEmulation &_emulation, bool _allowed);
+  ~KomportEmulationReplyModeScope();
+
+  KomportEmulationReplyModeScope(const KomportEmulationReplyModeScope &) = delete;
+  KomportEmulationReplyModeScope &operator=(const KomportEmulationReplyModeScope &) = delete;
+
+private:
+  /** The emulation, guarded: it becomes null when the render destroys it. */
+  QPointer<QObject> mEmulation;
+  /** The mode this scope has to give back. */
+  bool mPrevious;
+};
+
+KomportEmulationReplyModeScope::KomportEmulationReplyModeScope(KomportEmulation &_emulation,
+                                                               bool _allowed)
+  : mEmulation(&_emulation), mPrevious(_emulation.mTerminalRepliesAllowed)
+{
+  _emulation.mTerminalRepliesAllowed = _allowed;
+}
+
+/** Restores the mode - but only while the emulation still exists: rendering emits
+  *  `cellChanged` synchronously from drawChar(), so a receiver can destroy the emulation
+  *  inside the render this scope wraps. This keeps the *scope's own exit* from writing
+  *  into freed memory; it is not a general lifetime guarantee for the render itself. */
+KomportEmulationReplyModeScope::~KomportEmulationReplyModeScope()
+{
+  KomportEmulation *emulation = static_cast<KomportEmulation *>(mEmulation.data());
+  if (emulation)
+    emulation->mTerminalRepliesAllowed = mPrevious;
+}
+
+/** The single choke point for terminal-generated replies (SPEC-M10 5.8): every
+  *  reply the emulation produces passes through here, and it produces none while a
+  *  replay render is in progress. Nothing else in this class answers the terminal. */
+void KomportEmulation::sendTerminalReply(const QByteArray &reply)
+{
+  if ( !mTerminalRepliesAllowed )
+    return;
+  serial()->putStr( reply.constData() );
+}
+
+/** The live receive entry: replies allowed, whatever a caller had installed. The
+  *  scoped rollback restores that caller's mode on every exit - including an exit
+  *  taken while a nested replay render is on the stack (SPEC-M10 5.7). */
 void KomportEmulation::slotReceivedChar(char _ch)
+{
+  const KomportEmulationReplyModeScope repliesAllowed( *this, true );
+  renderReceivedChar( _ch );
+}
+
+/** The replay receive entry (SPEC-M10 5.7): the same rendering as the live entry,
+  *  with terminal-generated replies suppressed for the duration of this call only.
+  *  A replayed "CSI 5 n", "CSI 6 n", "CSI c" or "ESC Z" is displayed, not answered;
+  *  a re-entrant live call inside a render still answers, and an outer replay keeps
+  *  suppressing across it, because the mode is scoped and restored, never sticky. */
+void KomportEmulation::slotReplayReceivedChar(char _ch)
+{
+  const KomportEmulationReplyModeScope repliesSuppressed( *this, false );
+  renderReceivedChar( _ch );
+}
+
+// received a char */
+void KomportEmulation::renderReceivedChar(char _ch)
 {
   // handle the terminal control sequence... a fresh ESC always takes
   // priority and (re)starts sequence recognition - real hosts do send ESC

@@ -1,0 +1,37 @@
+## Verdict
+
+**Do not commit this slice as-is.** The missing view-level test is a prior blocking requirement. Even with that test added, the source audit and PTY evidence need strengthening before approval.
+
+## Findings
+
+1. **Blocking — required view path and input guard are untested.**  
+   [`tests/tst_replayreply.cpp:148`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:148) drives only `KomportEmulation::slotReplayReceivedChar`; it never constructs a `KomportView` or calls [`KomportView::slotReplayReceivedChar`](file:///home/max/Development/misc/komport-qt6/komport/komportview.cpp:514). This repeats the previously identified blocking gap, and the self-review acknowledges it. The plan requires rendering/scroll-order equivalence plus `setKeyInputEnabled(false)` key suppression.  
+   Minimal fix: add the offscreen `KomportApp`/view harness test specified in the plan: replay canonical queries, a private/noncanonical variant, and printable sentinels through the view entry; compare render and scroll bookkeeping with live input; send a synthetic key event with input disabled and assert no `keyPressed`, no accepted write, and preserved intended scroll state.
+
+2. **Blocking — the “single choke point” source audit does not prove its claim.**  
+   [`tests/tst_replayreply.cpp:254`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:254)-[`273`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:273) counts only textual `sendTerminalReply( ` and `serial()->putStr/putChar`. It misses the existing `KomportSerial *s` write form in [`komportemulation.cpp:706`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:706)-[`737`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:737) and [`1612`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1612)-[`1616`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1616). A future escape handler could use a local `s`, a helper, or `writeBytes`, while all current count assertions still pass. `QMetaObject::invokeMethod` or a signal-connected active slot would likewise evade it.  
+   Minimal fix: audit all transmitting entry-point spellings/call forms, whitelist only established active-input functions, and assert that the two reply functions have no direct transmit call and invoke the choke point at their three sites. State the audit’s deliberate limitation on arbitrary indirect calls; do not call it proof of “every direct write in the file.”
+
+3. **Blocking — the dynamic PTY checks do not meet the specified peer evidence, nor pin exact live replies.**  
+   [`tests/tst_replayreply.cpp:151`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:151)-[`157`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:157) performs one immediate non-blocking read. A delayed write could arrive just after `EAGAIN`. The specification requires peer silence *with a timeout*. The live test merely checks `bytesWritten.count() >= 1` at [`128`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:128), so a wrong reply also passes.  
+   Minimal fix: poll/read the PTY for a bounded interval after replay input; for live input, read and compare the precise expected reply for each query.
+
+4. **High — synchronous destruction during rendering is unsafe and untested.**  
+   A `cellChanged` receiver runs synchronously from [`KomportCellArray::drawChar`](file:///home/max/Development/misc/komport-qt6/komport/komportcellarray.cpp:251). If it destroys the view/emulation, `renderReceivedChar()` resumes and calls `advanceCursorWithWrap()` after `drawChar()` at [`komportemulation.cpp:1586`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1586)-[`1587`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1587), then the new rollback still refers to `mTerminalRepliesAllowed` at scope exit. The emulation is manually deleted by the view destructor at [`komportview.cpp:108`](file:///home/max/Development/misc/komport-qt6/komport/komportview.cpp:108).  
+   Minimal fix: either establish and enforce a no-synchronous-destruction rendering-lifetime contract, or make the rendering path deletion-safe with a guarded lifetime strategy and tests. A serial `close()` alone is safe for reply-mode restoration, but object destruction is not.
+
+## Attack log
+
+- `CSI 5 n`, `CSI 6 n`, `CSI c`, `CSI 0 c`, private/noncanonical `c`, private status queries, and `ESC Z`: the current dispatcher reaches only `doDeviceStatusReport()` / `doDeviceAttributes()`, whose three current reply sites use [`sendTerminalReply`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1272), [`1278`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1278), [`1293`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1293). Replay mode suppresses that choke point at [`1470`](file:///home/max/Development/misc/komport-qt6/komport/komportemulation.cpp:1470). This holds in present code.
+
+- Charset designation, display charset translation, escape fragments, BEL, and cell/row updates have no present port route. An incomplete escape fragment returns under the rollback; it is not dynamically tested.
+
+- Existing rendering signals have no production connection to key simulation, macros, transfers, line endings, or the hex monitor. Those remain active paths, not replay paths. However, the re-entrancy test itself proves that a `cellChanged` receiver can make a **live** query and transmit one reply during an outer replay render ([`tests/tst_replayreply.cpp:214`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:214)-[`230`](file:///home/max/Development/misc/komport-qt6/tests/tst_replayreply.cpp:230)). That is intentional under the scoped-mode design, but means this slice alone does not establish “no output under arbitrary rendering callbacks.” A macro callback would bypass the choke point; later offline guards must close that route.
+
+- Scoped nesting itself is correct by inspection: replay→replay restores suppression; replay→live enables only the inner live call; live→replay would restore allow. The test pins the first two directions, but not live→replay, a second emulation instance, delayed/queued re-entry after scope exit, escape fragments, exceptions, close, or destruction.
+
+- The ordinary live path is unchanged when the default `mKeyInputEnabled == true`: rendering body is moved intact behind a scoped allow wrapper. The new disabled-key behavior returns before scroll reset, so it preserves the current scrollback position; whether that exactly matches “keeps scrolling” needs the missing view test.
+
+- Step 6/7 adapter work will not inherently alter the three emulation reply sites, but the present text-count audit is not semantically stable and does not yet audit the view/adapter path required by the full specification.
+
+Validation was limited by the read-only sandbox: the existing `tst_replayreply` executable ran its source audit successfully, but all four PTY-dependent dynamic tests were skipped because serial lock files could not be created. Rebuilding was also blocked by the sandbox’s read-only build directory.

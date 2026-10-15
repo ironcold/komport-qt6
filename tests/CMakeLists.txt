@@ -56,6 +56,22 @@ komport_add_test(tst_sessionreader)
 # M10: the passive replay player (ADR-011 D6-D10, SPEC-M10 5.5/5.6). Uses the
 # scripted scheduler and the counting clock, so no wall-clock time and no pty.
 komport_add_test(tst_sessionreplayplayer)
+# M10: the reply-free rendering path (SPEC-M10 5.7/5.8) - the live entry points
+# still answer, a replayed query is rendered but not answered. Uses a real pty as
+# the peer and ITransport::bytesWritten as the observation, so it links libutil.
+komport_add_test(tst_replayreply)
+target_link_libraries(tst_replayreply PRIVATE util)
+# The source audit part of that test reads the two emulation files, so their
+# paths are compiled in rather than guessed from the working directory.
+# M10 step 4 at the view level: a real KomportApp offscreen drives the replay
+# rendering through KomportView::slotReplayReceivedChar() and the key-input
+# suppression with a real key event. Uses a pty as the peer, so it links libutil.
+komport_add_test(tst_replayreplyui)
+target_link_libraries(tst_replayreplyui PRIVATE util)
+target_compile_definitions(tst_replayreply PRIVATE
+  KOMPORT_EMULATION_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportemulation.cpp"
+  KOMPORT_EMULATION_HEADER="${CMAKE_SOURCE_DIR}/komport/komportemulation.h"
+  KOMPORT_VIEW_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportview.cpp")
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
