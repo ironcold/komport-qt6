@@ -17,6 +17,8 @@
  ***************************************************************************/
 
 // include files for Qt
+#include <QApplication>
+#include <QPointer>
 #include <QDir>
 #include <QWidget>
 #include <QMessageBox>
@@ -64,6 +66,11 @@ KomportDoc::~KomportDoc()
   // and not a notification: the application's close path stops the recorder
   // explicitly (KomportApp::closeEvent()), and this is only the safety net.
   mSessionRecorder.reset();
+  // SPEC-M10 5.9: then the replay player and the session it shares, before the
+  // transport. The player is closed and detached here, in order; only its memory is
+  // released later (see retireReplayPlayer()).
+  retireReplayPlayer(std::move(mReplayPlayer), true);
+  mOfflineSession.reset();
 }
 
 void KomportDoc::addView(KomportView *view)
@@ -244,6 +251,146 @@ SessionRecordingReport KomportDoc::closeSession()
     return SessionRecordingReport();
   return mSessionRecorder->stop();
 }
+void KomportDoc::retireReplayPlayer(std::unique_ptr<SessionReplayPlayer> player, bool silent)
+{
+  // The player may be executing: a receiver of one of its synchronous signals
+  // (stateChanged, eventDelivered, replayFinished) can reach the document's close
+  // path or its destructor, and the player's own call resumes after the signal
+  // returns. SessionReplayPlayer::retire() (SPEC-M10 5.11 rule 11) therefore ends
+  // the player's life: synchronously when none of its calls is on the stack, else
+  // when the outermost returns. @p silent - the destructor's case, which emits
+  // nothing - drops every receiver first.
+  if ( !player )
+    return;
+  if ( silent )
+    player->disconnect();
+  SessionReplayPlayer::retire(std::move(player));
+}
+
+bool KomportDoc::hasOfflineSession() const
+{
+  return mOfflineSession != nullptr;
+}
+
+SessionReplayPlayer* KomportDoc::getReplayPlayer() const
+{
+  return mReplayPlayer.get();
+}
+
+SessionFilePtr KomportDoc::offlineSession() const
+{
+  return mOfflineSession;
+}
+
+namespace {
+/** This document plus the document of every open KomportApp window, without
+  * duplicates (SPEC-M10 5.7: the offline state is process-wide, ADR-011 D11). The
+  * walk is the one slotFileQuit() uses; @p self is always included so a document
+  * without a window (the tests) is checked too. */
+QList<const KomportDoc*> allOpenDocuments(const KomportDoc *self)
+{
+  QList<const KomportDoc*> documents;
+  documents.append(self);
+  const QWidgetList windows = QApplication::topLevelWidgets();
+  for ( QWidget *w : windows ) {
+    if ( auto *win = qobject_cast<KomportApp*>(w) ) {
+      const KomportDoc *d = win->getDocument();
+      if ( d && !documents.contains(d) )
+        documents.append(d);
+    }
+  }
+  return documents;
+}
+} // namespace
+
+bool KomportDoc::isAnyOfflineSession() const
+{
+  for ( const KomportDoc *d : allOpenDocuments(this) )
+    if ( d->hasOfflineSession() )
+      return true;
+  return false;
+}
+
+SessionLoadOutcome KomportDoc::loadOfflineSession(const QString &path)
+{
+  // SPEC-M10 5.7: loading is permitted only while the whole application is idle.
+  // Order of the reasons: a live session, a running recording, a loaded session.
+  const QList<const KomportDoc*> documents = allOpenDocuments(this);
+  QString refusal;
+  for ( const KomportDoc *d : documents ) {
+    if ( d->mSessionController->state() != SessionController::State::Idle ) {
+      refusal = tr("a live session is active - close it before loading a session for replay");
+      break;
+    }
+  }
+  if ( refusal.isEmpty() ) {
+    for ( const KomportDoc *d : documents ) {
+      if ( d->mSessionRecorder->state() != SessionRecorder::State::Stopped ) {
+        refusal = tr("a recording is running - stop it before loading a session for replay");
+        break;
+      }
+    }
+  }
+  if ( refusal.isEmpty() && isAnyOfflineSession() )
+    refusal = tr("an offline session is already loaded - close it first");
+  if ( !refusal.isEmpty() ) {
+    // A refusal changes nothing: no close, open or configure of the transport, no
+    // recording stopped, no loaded session discarded.
+    SessionLoadOutcome refused;
+    refused.path = path;
+    refused.reason = refusal;
+    return refused;
+  }
+
+  SessionLoadOutcome outcome = mSessionReader.load(path);
+  if ( !outcome.ok || !outcome.session )
+    return outcome;   // a load failure enters no offline state
+
+  // The player shares the one immutable session; start() attaches it and positions
+  // it at the first event without delivering anything (state Ready).
+  auto player = std::make_unique<SessionReplayPlayer>();
+  const SessionReplayStart started = player->start(outcome.session);
+  if ( !started.ok ) {
+    outcome.ok = false;
+    outcome.reason = started.reason;
+    outcome.session.reset();
+    return outcome;
+  }
+  mOfflineSession = outcome.session;
+  mReplayPlayer = std::move(player);
+  emit offlineSessionChanged(true);
+  return outcome;
+}
+
+void KomportDoc::closeOfflineSession()
+{
+  // Re-entrancy: player->close() emits stateChanged(Idle) synchronously, so a
+  // receiver may call back into this function. The flag makes that inner call a
+  // no-op, and the members stay set until the player's close() has returned, so a
+  // load attempted from that receiver is still refused ("already loaded") and the
+  // player is never destroyed inside its own close() frame.
+  if ( mClosingOfflineSession || (!mOfflineSession && !mReplayPlayer) )
+    return;
+  // Lifetime: a receiver of the player's synchronous signals may also delete this
+  // document or re-enter from inside a player call. The player is therefore taken
+  // out of the member and only retired (closed, detached, deleted later), and
+  // nothing of *this is touched afterwards unless the guard shows the document is
+  // still alive.
+  QPointer<KomportDoc> self(this);
+  mClosingOfflineSession = true;
+  // The session member stays set until the player is retired, so a load attempted
+  // from a receiver is refused.
+  retireReplayPlayer(std::move(mReplayPlayer), false);
+  if ( !self )
+    return;   // the document was deleted by a receiver
+  mOfflineSession.reset();
+  mClosingOfflineSession = false;
+  // Announced last, with the document already in its final state: a receiver may
+  // load another session from here, and that load must survive this call. Nothing
+  // of *this is touched afterwards.
+  emit offlineSessionChanged(false);
+}
+
 /** No descriptions */
 void KomportDoc::slotViewModified(KomportView* _v){
     emit viewModified(_v);

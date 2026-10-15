@@ -110,6 +110,16 @@ public:
   SessionReplayStep stepNextTx();
   /** Detach the session and return to `Idle`; cannot refuse. */
   void close();
+  /** End of life (SPEC-M10 5.11 rule 11): takes over the ownership of @p player,
+    * makes it terminal - from now on every operation refuses with a reason, so a
+    * receiver of the closing `Idle` cannot restart it - and closes it, announcing
+    * `Idle`. If none of the player's own calls is on the stack it is then destroyed
+    * synchronously, here; otherwise (a receiver of one of its synchronous signals
+    * retires it) it deletes itself with `deleteLater()` when the outermost of those
+    * calls returns, so it is never freed under a call that will resume. Taking a
+    * `std::unique_ptr` is the ownership contract: a player that is not heap-owned
+    * by exactly one owner cannot be retired. */
+  static void retire(std::unique_ptr<SessionReplayPlayer> player);
 
   SessionReplayState state() const;
   SessionReplayTiming timing() const;
@@ -135,6 +145,27 @@ private:
   SessionReplayPlayer(SessionReplayScheduler *scheduler, SessionMonotonicClock *clock,
                       QObject *parent);
   friend struct SessionReplayPlayerSeamsForTest;
+
+  /** Counts the player's own calls that are on the stack (SPEC-M10 5.11 rule 11):
+    * a retired player is only deleted when the count returns to zero. */
+  class CallScope
+  {
+  public:
+    explicit CallScope(SessionReplayPlayer *player) : mPlayer(player) { ++mPlayer->mCallDepth; }
+    ~CallScope()
+    {
+      if (--mPlayer->mCallDepth == 0 && mPlayer->mDeleteWhenUnwound) {
+        mPlayer->mDeleteWhenUnwound = false;
+        mPlayer->deleteLater();   // last statement: nothing touches the player afterwards
+      }
+    }
+    CallScope(const CallScope &) = delete;
+    CallScope &operator=(const CallScope &) = delete;
+
+  private:
+    SessionReplayPlayer *mPlayer;
+  };
+  friend class CallScope;
 
   /** The delay before the event at @p index, from the stored session timeline. */
   qint64 delayNsFor(quint64 index) const;
@@ -198,6 +229,9 @@ private:
   quint64 mScheduleToken = 0;
   /** The identity of the *replay*: bumped by `start()` and `close()`, never by `stop()`. */
   quint64 mReplayId = 0;
+  int mCallDepth = 0;               ///< the player's own calls on the stack (rule 11)
+  bool mRetired = false;            ///< terminal: every operation refuses (rule 11)
+  bool mDeleteWhenUnwound = false;  ///< retired while a call was on the stack (rule 11)
   SessionReplayScheduler *mScheduler;  ///< injected or owned; see below
   SessionMonotonicClock *mClock;       ///< injected or owned, and never consulted
   std::unique_ptr<SessionReplayScheduler> mOwnedScheduler;  ///< the production default

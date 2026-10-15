@@ -30,6 +30,8 @@
 #include "komportserial.h"
 #include "sessioncontroller.h"
 #include "sessionrecorder.h"
+#include "sessionreader.h"
+#include "sessionreplayplayer.h"
 
 // forward declaration of the Komport classes
 class KomportView;
@@ -113,6 +115,32 @@ class KomportDoc : public QObject
     *  that the ordering itself is testable without a window. */
   SessionRecordingReport closeSession();
 
+  /** Load @p path as the offline session for passive replay (SPEC-M10 5.7). The
+    *  preconditions are process-wide and enforced here, so they are testable
+    *  without a window: this document and every open KomportApp window must have
+    *  an idle session controller, a stopped recorder and no offline session.
+    *  A refusal (precondition or load failure) is reported in the returned
+    *  outcome's `reason`, changes nothing and enters no offline state. On
+    *  success the document owns the session and a replay player attached to it
+    *  (state `Ready`); nothing is replayed automatically, no port is opened,
+    *  and no recorded setting is applied. */
+  SessionLoadOutcome loadOfflineSession(const QString &path);
+  /** Leave the offline state: stops a running replay, destroys the player and
+    *  releases the session. Opens no port and applies no recorded setting. A
+    *  no-op when nothing is loaded. */
+  void closeOfflineSession();
+  /** Whether this document holds an offline session. */
+  bool hasOfflineSession() const;
+  /** Whether this document or any open KomportApp window holds an offline
+    *  session - the one process-wide predicate behind every offline guard
+    *  (SPEC-M10 5.7.1). */
+  bool isAnyOfflineSession() const;
+  /** The replay player of the loaded offline session, or null while none is
+    *  loaded. Owned by the document. */
+  SessionReplayPlayer* getReplayPlayer() const;
+  /** The loaded offline session, or null. */
+  SessionFilePtr offlineSession() const;
+
   public slots:
     /** calls repaint() on all views connected to the document object and is called by the view by which the document has been changed.
      * As this view normally repaints itself, it is excluded from the paintEvent.
@@ -126,6 +154,10 @@ class KomportDoc : public QObject
     static QList<KomportView*> *pViewList;
 
   private:
+    /** End the life of @p player (may be null) with SessionReplayPlayer::retire(); see
+      * the definition for why it is not simply destroyed in place. @p silent drops the
+      * player's receivers first, so nothing is emitted. */
+    static void retireReplayPlayer(std::unique_ptr<SessionReplayPlayer> player, bool silent);
     /** the modified flag of the current document */
     bool modified;
     QUrl doc_url;
@@ -141,7 +173,20 @@ class KomportDoc : public QObject
     * explicitly first: a QObject-child arrangement is not acceptable, because
     * mSerial is a by-value member and would already be destroyed. */
   std::unique_ptr<SessionController> mSessionController;
+  /** The offline loader (SPEC-M10 5.1; stateless between loads). */
+  SessionReader mSessionReader;
+  /** The loaded offline session, shared with the player, or null. Declared before
+    * the player, so it is destroyed after it (controller -> recorder -> player ->
+    * session -> transport, SPEC-M10 5.9). */
+  SessionFilePtr mOfflineSession;
+  /** The replay player, created by a successful load and destroyed on close. */
+  std::unique_ptr<SessionReplayPlayer> mReplayPlayer;
+  /** Set while closeOfflineSession() runs the player's close(), which emits
+    * synchronously; makes a re-entrant close a no-op. */
+  bool mClosingOfflineSession = false;
 signals: // Signals
+  /** The document entered (true) or left (false) the offline state. */
+  void offlineSessionChanged(bool offline);
   /** Document has changed. */
   void documentModified();
 signals: // Signals

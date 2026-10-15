@@ -30,7 +30,10 @@
 #include "sessionreader.h"   // SessionFile, SessionFilePtr, SessionEvent
 #include "sessionevent.h"
 
+#include <QCoreApplication>
+#include <QEvent>
 #include <QList>
+#include <QPointer>
 #include <QTest>
 
 #include <functional>
@@ -297,6 +300,9 @@ private slots:
   void restartReplaysTheWholeStreamAgain();
   void closeReleasesTheSessionAndReturnsToIdle();
   void closeWhilePlayingCancelsAndReturnsToIdle();
+  void aRetiredPlayerRefusesEveryOperationEvenFromItsOwnIdleReceiver();
+  void aRetiredPlayerOutlivesItsOuterCallEvenThroughANestedEventLoop();
+  void retiringDetachesTheQtParentSoDeletingTheParentCannotFreeTheCaller();
   void zeroEventSessionRefusesPlayAndStep();
   void refusalsAreValuesThatChangeNothing();
   void thePlayerNeverConsultsWallClockTime();
@@ -870,6 +876,93 @@ void TstSessionReplayPlayer::closeReleasesTheSessionAndReturnsToIdle()
 
 /** `close()` while `Playing` cancels the pending callback and delivers nothing
   *  afterwards (review round 3, cleanup item 2). */
+/** SPEC-M10 5.11 rule 11: retire() makes the player terminal before it announces
+  *  Idle, so a receiver of that Idle cannot revive it; with no player call on the
+  *  stack the object is gone when retire() returns, with no event loop. */
+void TstSessionReplayPlayer::aRetiredPlayerRefusesEveryOperationEvenFromItsOwnIdleReceiver()
+{
+  PlayerFixture f;
+  SessionReplayPlayer *player = f.owned.release();   // the owner hands it to retire()
+  QPointer<SessionReplayPlayer> guard(player);
+  QVERIFY(player->start(threeEventSession()).ok);
+  QVERIFY(player->play().ok);
+
+  bool attempted = false;
+  bool anyAccepted = false;
+  quint64 eventCountSeen = 99;
+  QObject::connect(player, &SessionReplayPlayer::stateChanged, [&](SessionReplayState state) {
+    if (state != SessionReplayState::Idle)
+      return;
+    attempted = true;
+    eventCountSeen = player->eventCount();
+    anyAccepted = player->start(threeEventSession()).ok || player->play().ok
+        || player->stepNextEvent().ok || player->stepNextRx().ok || player->stepNextTx().ok
+        || player->setTiming(SessionReplayTiming::Immediate).ok;
+  });
+
+  SessionReplayPlayer::retire(std::unique_ptr<SessionReplayPlayer>(player));
+  QVERIFY(attempted);
+  QVERIFY2(!anyAccepted, "a retired player must refuse every operation");
+  QCOMPARE(eventCountSeen, quint64(0));                // the session was released
+  QVERIFY(!f.scheduler.armed());                       // nothing armed, no timer
+  QVERIFY2(guard.isNull(), "no player call is on the stack: destroyed synchronously");
+}
+
+/** The deletion waits for every call of the player on the stack: a receiver that
+  *  retires it from inside play()'s own state signal and then spins a nested event
+  *  loop must not free it under play(). */
+void TstSessionReplayPlayer::aRetiredPlayerOutlivesItsOuterCallEvenThroughANestedEventLoop()
+{
+  PlayerFixture f;
+  SessionReplayPlayer *player = f.owned.release();
+  QPointer<SessionReplayPlayer> guard(player);
+  QVERIFY(player->start(threeEventSession()).ok);
+
+  bool aliveInsideTheReceiver = false;
+  QObject::connect(player, &SessionReplayPlayer::stateChanged, [&](SessionReplayState state) {
+    if (state != SessionReplayState::Playing)
+      return;
+    SessionReplayPlayer::retire(std::unique_ptr<SessionReplayPlayer>(player));
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);   // a nested loop's work
+    aliveInsideTheReceiver = !guard.isNull();
+  });
+
+  const SessionReplayStart started = player->play();   // resumes after the receiver returned
+  QVERIFY(started.ok);
+  QVERIFY(aliveInsideTheReceiver);
+  QVERIFY(!f.scheduler.armed());                       // the retire cancelled the arming
+  QVERIFY(!guard.isNull());                            // deletion is posted, not done
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QVERIFY(guard.isNull());
+}
+
+/** retire() takes the only ownership: a Qt parent is detached first, so a receiver
+  *  that retires the player and then deletes the former parent cannot free the player
+  *  beneath the play() call that is still on the stack. */
+void TstSessionReplayPlayer::retiringDetachesTheQtParentSoDeletingTheParentCannotFreeTheCaller()
+{
+  ScriptedScheduler scheduler;
+  CountingClock clock;
+  auto *parent = new QObject;
+  std::unique_ptr<SessionReplayPlayer> owned = SessionReplayPlayerSeamsForTest::create(&scheduler, &clock);
+  SessionReplayPlayer *player = owned.release();
+  player->setParent(parent);                           // a supported construction mode
+  QPointer<SessionReplayPlayer> guard(player);
+  QVERIFY(player->start(threeEventSession()).ok);
+
+  QObject::connect(player, &SessionReplayPlayer::stateChanged, [&](SessionReplayState state) {
+    if (state != SessionReplayState::Playing)
+      return;
+    SessionReplayPlayer::retire(std::unique_ptr<SessionReplayPlayer>(player));
+    delete parent;                                     // would delete the child under play()
+  });
+  const SessionReplayStart started = player->play();   // must resume on a live object
+  QVERIFY(started.ok);
+  QVERIFY(!guard.isNull());
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QVERIFY(guard.isNull());
+}
+
 void TstSessionReplayPlayer::closeWhilePlayingCancelsAndReturnsToIdle()
 {
   PlayerFixture f;

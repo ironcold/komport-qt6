@@ -257,7 +257,12 @@ bool SessionReplayPlayer::mayMutateReplay(const OperationSnapshot &snapshot, Mut
 
 SessionReplayStart SessionReplayPlayer::start(const SessionFilePtr &session)
 {
+  CallScope scope(this);
   SessionReplayStart result;
+  if (mRetired) {
+    result.reason = QStringLiteral("the player is retired");
+    return result;
+  }
   if (!session) {
     result.reason = QStringLiteral("no session was given");
     return result;
@@ -279,7 +284,12 @@ SessionReplayStart SessionReplayPlayer::start(const SessionFilePtr &session)
 
 SessionReplayStart SessionReplayPlayer::play()
 {
+  CallScope scope(this);
   SessionReplayStart result;
+  if (mRetired) {
+    result.reason = QStringLiteral("the player is retired");
+    return result;
+  }
   if (!mSession) {
     result.reason = QStringLiteral("no session is loaded");
     return result;
@@ -322,6 +332,7 @@ SessionReplayStart SessionReplayPlayer::play()
 
 SessionReplayReport SessionReplayPlayer::stop()
 {
+  CallScope scope(this);
   if (mState == SessionReplayState::Playing) {
     // A canceller does not authorize its own cancellation (rule 10): cancelling
     // is not a mutation, and it must work in any state. It bumps the schedule
@@ -340,6 +351,7 @@ SessionReplayReport SessionReplayPlayer::stop()
 
 SessionReplayStep SessionReplayPlayer::stepNextEvent()
 {
+  CallScope scope(this);
   const QString refusal = stepRefusal();
   SessionReplayStep result;
   if (!refusal.isEmpty()) {
@@ -352,16 +364,37 @@ SessionReplayStep SessionReplayPlayer::stepNextEvent()
 
 SessionReplayStep SessionReplayPlayer::stepNextRx()
 {
+  CallScope scope(this);
   return stepToMatch(SessionDirection::Rx);
 }
 
 SessionReplayStep SessionReplayPlayer::stepNextTx()
 {
+  CallScope scope(this);
   return stepToMatch(SessionDirection::Tx);
+}
+
+void SessionReplayPlayer::retire(std::unique_ptr<SessionReplayPlayer> player)
+{
+  if (!player)
+    return;
+  SessionReplayPlayer *const retired = player.get();
+  // The unique_ptr is the one owner from here on: a Qt parent would delete the player
+  // beneath a call that is still on the stack (the parent being deleted by a receiver).
+  retired->setParent(nullptr);
+  retired->mRetired = true;   // before the Idle below: its receivers must find a terminal player
+  retired->close();
+  if (retired->mCallDepth == 0)
+    return;                   // nothing of the player is executing: destroyed here, synchronously
+  // One of the player's own calls is still on the stack, below a receiver that got
+  // here: it is freed when the outermost of them returns, not under it.
+  retired->mDeleteWhenUnwound = true;
+  player.release();
 }
 
 void SessionReplayPlayer::close()
 {
+  CallScope scope(this);
   ++mScheduleToken;
   ++mReplayId;
   mScheduler->cancelPending();
@@ -386,6 +419,10 @@ SessionReplayTimingChange SessionReplayPlayer::setTiming(SessionReplayTiming tim
   SessionReplayTimingChange result;
   result.timing = mTiming;
 
+  if (mRetired) {
+    result.reason = QStringLiteral("the player is retired");
+    return result;
+  }
   if (!isDeclaredTiming(timing)) {
     // Only reachable through a cast; a refusal is still a value, never silence.
     result.reason = QStringLiteral("unknown timing policy");
@@ -464,6 +501,7 @@ void SessionReplayPlayer::scheduleNextDelivery()
 
 void SessionReplayPlayer::onDeliveryDue(quint64 scheduleToken, quint64 replayId)
 {
+  CallScope scope(this);
   const OperationSnapshot snapshot = captureSnapshot();   // before the first emission
   if (snapshot.replayId != replayId || snapshot.scheduleToken != scheduleToken)
     return;                       // a stale continuation: this callback's schedule is gone (rule 4)
@@ -537,6 +575,8 @@ bool SessionReplayPlayer::isDeclaredTiming(SessionReplayTiming timing)
 
 QString SessionReplayPlayer::stepRefusal() const
 {
+  if (mRetired)
+    return QStringLiteral("the player is retired");
   if (!mSession)
     return QStringLiteral("no session is loaded");
   if (mSession->events.isEmpty())

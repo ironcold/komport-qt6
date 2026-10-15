@@ -56,6 +56,11 @@ komport_add_test(tst_sessionreader)
 # M10: the passive replay player (ADR-011 D6-D10, SPEC-M10 5.5/5.6). Uses the
 # scripted scheduler and the counting clock, so no wall-clock time and no pty.
 komport_add_test(tst_sessionreplayplayer)
+# M10 step 5: the document-level offline state (SPEC-M10 5.7/5.9) - ownership,
+# the process-wide loading preconditions and the close path. Uses a pty for the
+# live/recording preconditions, hence libutil.
+komport_add_test(tst_sessionofflinedocument)
+target_link_libraries(tst_sessionofflinedocument PRIVATE util)
 # M10: the reply-free rendering path (SPEC-M10 5.7/5.8) - the live entry points
 # still answer, a replayed query is rendered but not answered. Uses a real pty as
 # the peer and ITransport::bytesWritten as the observation, so it links libutil.

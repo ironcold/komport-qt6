@@ -853,6 +853,18 @@ How that is checked, and what each check does and does not prove:
   the controller and the recorder; the destruction order is controller → recorder →
   replay player → reader and session → transport, and the player's destructor stops its
   timer, emits nothing and releases the session.
+- **Retiring the player (amendment of 2026-10-15, step 5's review gate; the rule itself is §5.11
+  rule 11).** The player's signals are synchronous and its own calls resume after them, so a
+  receiver can reach the document's close path or its destructor from inside a player call. The
+  document therefore never destroys the player in place: `closeOfflineSession()` and the
+  destructor hand it to `SessionReplayPlayer::retire()` (the destructor first drops the player's
+  receivers, so it emits nothing). In the ordinary case no player call is on the stack and the
+  player is destroyed synchronously, in the order above; only when a receiver retires it from
+  inside one of its own signals is its memory released when that call unwinds. A retired player
+  holds no transport, no document, no session and no file, so the order controller -> recorder ->
+  player -> reader/session -> transport holds for everything that matters. `closeOfflineSession()`
+  and the destructor touch no member of the document after retiring the player unless the
+  document is shown to be alive.
 - The session is shared, not copied: `SessionFilePtr` is one `shared_ptr<const
   SessionFile>` held by the document and by the player, so a loaded session exists once
   in memory and no consumer can mutate it (ADR-011 D6).
@@ -1088,6 +1100,22 @@ are normative here and nowhere else):
    describes the replay that reached its end, while the state the player is left in is whatever
    the receiver set. A step never commits a completion (rule 2).
 
+11. **End of life (amendment of 2026-10-15, step 5's review gate).** `SessionReplayPlayer::retire(
+   std::unique_ptr<SessionReplayPlayer>)` is the owner's way to end a player whose signals may still
+   be on the stack; taking the `unique_ptr` *is* the ownership contract (a player that is not
+   heap-owned by exactly one owner cannot be retired; a Qt parent, which would be a second owner, is detached first). It sets the terminal `retired` state *before*
+   it closes the player - so a receiver of the closing `Idle` finds a player that refuses `start()`,
+   `play()`, every step and `setTiming()` with the reason "the player is retired" - then performs the
+   `close()` of §5.5 (cancelling the pending delivery, releasing the session, announcing `Idle`). The
+   player counts its own calls on the stack (`start`, `play`, `stop`, the steps, `close`, the
+   scheduled delivery). If that count is zero after the close, the player is destroyed there and then,
+   synchronously and without an event loop; if a call is still on the stack (a receiver retired it from
+   inside a synchronous signal), the player deletes itself with `deleteLater()` when the outermost of
+   those calls returns, and not before, so neither a receiver that deletes the owner nor one that spins
+   a nested event loop can free it under a call that will resume. Only that second case needs an event
+   loop to reclaim the object, and the retired object is inert until then (no session, no timer,
+   nothing armed); `close()` stays legal on a retired player.
+
 **Tests (step 3b's acceptance evidence; §7's player table separates them from the core tests):**
 `stopFromWithinADeliverySlotIsHonoured`, `closeFromWithinADeliverySlotIsHonoured`,
 `delayedReceiversSeeTheEventAfterAFirstSlotClosesThePlayer`,
@@ -1107,6 +1135,8 @@ demand:
 | `aStepContinuesThroughEverythingThatDoesNotSupersedeIt` | the *non-interrupting* cases of rule 8, from both `Ready` and `Paused`: a valid `setTiming()` (the policy changes, the step completes), an unknown timing, a null `start()`, a `play()` refused in `Step` mode and a no-op `stop()` - each with `advanced` 3, `matched`, no `reachedEnd`, three deliveries and nothing armed |
 | `mayMutateReplayAuthorizesOnlyItsOwnReplayAndPhase` | the helper itself: an authorized continuation (same replay, same token, permitted state and position) may mutate; a stale schedule token, a replaced session, a bumped replay id, a superseded state and a moved position each refuse - driven through the friend-for-testability seam of §5.10, so no production API is widened |
 | `timingChangedFromADeliverySlotAppliesToTheNextArming` | a receiver that `setTiming()`s inside a delivery arms its successor with the new policy (rule 6) |
+| `aRetiredPlayerRefusesEveryOperationEvenFromItsOwnIdleReceiver` (step 5) | rule 11: a receiver of the closing `Idle` that tries `start`, `play`, the three steps and `setTiming` is refused every time; nothing is armed and the session is released; with no player call on the stack the object is gone as soon as `retire()` returns, with no event loop |
+| `aRetiredPlayerOutlivesItsOuterCallEvenThroughANestedEventLoop` (step 5) | rule 11: a receiver of `play()`'s `stateChanged(Playing)` retires the player and flushes deferred deletions as a nested loop would; the player is alive when `play()` resumes and deleted only afterwards (ASan-clean); a second case pins that an owner-less stack frame needs no event loop to reclaim it |
 | `aStopFromTheTransientPausedIsANoOpAndTheCompletionStillHappens` | everything the transient `Paused` window defines, in one fixture: a second `stop()` returns the no-op report of that state; a step and a `play()` are refused with a reason; a declared `setTiming()` is accepted, changes the policy and leaves the already-captured stop and completion reports on the policy they were captured with; an out-of-range timing value refuses with "unknown timing policy" and changes nothing; a `start(nullptr)` refuses with its reason without ending the sequence; in every one of those branches nothing is delivered or armed and the completion commit still runs with its captured report (rules 6 and 9) |
 | `aReceiverOfTheTransientPausedThatStartsOrClosesEndsTheCompletion` | a `start()` or `close()` from that transient state: no `stateChanged(Finished)`, no `replayFinished`, the state the receiver set stands, and `aStopAtTheLastDeliveryStillCompletesTheReplay` keeps covering the undisturbed branch |
 | `aStopAtTheLastDeliveryStillCompletesTheReplay` | the undisturbed branch of rule 9: a `stop()` from the final delivery's own receiver leaves the replay `Finished` and the completion report goes out with the captured facts; the signal log pins the sequence `eventDelivered` -> `stateChanged(Paused)` -> `stateChanged(Finished)` -> `replayFinished`, and no second delivery is armed |
