@@ -77,6 +77,11 @@ target_compile_definitions(tst_replayreply PRIVATE
   KOMPORT_EMULATION_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportemulation.cpp"
   KOMPORT_EMULATION_HEADER="${CMAKE_SOURCE_DIR}/komport/komportemulation.h"
   KOMPORT_VIEW_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportview.cpp")
+# M10 step 6a: the application wiring of the offline state (SPEC-M10 5.7/5.7.1) in
+# real offscreen windows - indicator, controls in every window, the offline guard
+# inside every entry point. Uses a pty as the peer, so it links libutil.
+komport_add_test(tst_sessionreplayui)
+target_link_libraries(tst_sessionreplayui PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)

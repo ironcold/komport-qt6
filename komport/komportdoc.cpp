@@ -282,6 +282,11 @@ SessionFilePtr KomportDoc::offlineSession() const
   return mOfflineSession;
 }
 
+QString KomportDoc::offlinePath() const
+{
+  return mOfflinePath;
+}
+
 namespace {
 /** This document plus the document of every open KomportApp window, without
   * duplicates (SPEC-M10 5.7: the offline state is process-wide, ADR-011 D11). The
@@ -357,6 +362,7 @@ SessionLoadOutcome KomportDoc::loadOfflineSession(const QString &path)
     return outcome;
   }
   mOfflineSession = outcome.session;
+  mOfflinePath = path;
   mReplayPlayer = std::move(player);
   emit offlineSessionChanged(true);
   return outcome;
@@ -384,6 +390,7 @@ void KomportDoc::closeOfflineSession()
   if ( !self )
     return;   // the document was deleted by a receiver
   mOfflineSession.reset();
+  mOfflinePath.clear();
   mClosingOfflineSession = false;
   // Announced last, with the document already in its final state: a receiver may
   // load another session from here, and that load must survive this call. Nothing

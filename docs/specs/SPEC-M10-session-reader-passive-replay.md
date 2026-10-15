@@ -720,6 +720,18 @@ Steps (ADR-011 D8):
   hidden, the live controls re-enabled. It opens no port, applies no recorded setting
   and resumes nothing. It is permitted in any replay state and stops a running replay
   first.
+- **Window teardown leaves the offline state** (amendment 2026-10-15, step 6a): the window
+  that holds the session calls `closeOfflineSession()` from `closeEvent()` (after
+  `closeSession()`) and, as a safety net, from `~KomportApp()`. Without this the other
+  windows' controls - disabled because *some* window was offline - would stay disabled after
+  the replaying window is gone, since the document's destructor retires the player silently.
+  Every window follows the document's `offlineSessionChanged` through one process-wide update,
+  and a control that re-enables itself for another reason (the paste action on a clipboard
+  change, the recent-files menu on a rebuild) consults the window's offline flag first, so it
+  cannot undo the disabling. `KomportDoc::offlinePath()` carries the loaded path for the
+  indicator's tooltip. The guards of §5.7.1 refuse every call of the two recording toggles, a
+  stop included: while a session is loaded no recording or logger can be started, and a
+  refusal changes nothing.
 - Requesting a replay start is never gated behind a confirmation dialog (ADR-007: a
   passive replay is safe to start without one). No replay-related state is persisted
   across runs and no replay starts automatically on load.
@@ -1550,7 +1562,12 @@ tests assert; changing any of them is a specification change, reviewed like any 
    top-level-window walk) and `closeOfflineSession()`, the destruction order and the
    document-level tests (`tst_sessiondocument`-style additions or a new document test
    target).
-6. Application wiring: the `Load Session for Replay...` action and its dialog, the
+6. (Cut into 6a and 6b, 2026-10-15, to keep the reviews small: **6a** is the offline
+   state - the load action and its non-interactive part, the indicator, `Close Session`,
+   the control enumeration and the guards in every window, window teardown, with the
+   state/guard rows of `tst_sessionreplayui`; **6b** is the replay controls, the timing
+   ladder, the result-value handling and the display adapter, with the remaining rows.)
+   Application wiring: the `Load Session for Replay...` action and its dialog, the
    `offlineReplayStatusLabel` indicator, the complete control enumeration of §5.7.1 (the
    disabled controls - including `New &Window`, paste and the recording actions - *and* the
    offline refusal inside every guarded entry slot), the process-wide UI update that applies

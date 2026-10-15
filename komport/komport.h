@@ -255,6 +255,38 @@ class KomportApp : public QMainWindow
     /** A recording that ended without a user action (a write or flush failure)
       *  still has to restore the user interface and tell the user. */
     void slotSessionRecordingEnded(const SessionRecordingReport &_report);
+    /** M10 (SPEC-M10 5.7): ask for a `.kpsession` file and load it for passive
+      *  replay. The dialog is modal and interactive, so the tests drive
+      *  loadSessionForReplayFile() instead. */
+    void slotLoadSessionForReplay();
+    /** M10: leave the offline state (SPEC-M10 5.7, `Close Session`). Permitted in
+      *  every replay state; opens no port and resumes nothing. */
+    void slotCloseOfflineSession();
+    /** M10: the document of this window entered or left the offline state - the
+      *  trigger for the process-wide user-interface update. */
+    void slotOfflineSessionChanged(bool _offline);
+
+  public:
+    /** M10 (SPEC-M10 5.7): the non-interactive part of slotLoadSessionForReplay(),
+      *  separated so that a load and its refusal are testable. Reports the outcome
+      *  through the status mechanism; returns false when nothing was loaded. */
+    bool loadSessionForReplayFile(const QString &_path);
+
+  private:
+    /** M10 (SPEC-M10 5.7.1): the offline guard every output-relevant entry point
+      *  starts with. True - after reporting the refusal through the status
+      *  mechanism - while this window or any other open window holds an offline
+      *  session; the caller returns without a side effect. The predicate is the
+      *  document's one process-wide `isAnyOfflineSession()`. */
+    bool refuseWhileOffline();
+    /** M10: apply the offline state to this window: the transmit, capture and
+      *  connection controls are disabled and key input is suppressed while any
+      *  window is offline; the indicator and `Close Session` follow this window's
+      *  own document. */
+    void updateOfflineUi();
+    /** M10: updateOfflineUi() for every open KomportApp window (the offline state is
+      *  process-wide, ADR-011 D11). */
+    static void updateOfflineUiForAllWindows();
 
   private:
     /** Bring the action's checked state and the persistent indicator in line with
@@ -304,6 +336,11 @@ class KomportApp : public QMainWindow
      *  and synchronously before open() returns, while the QSerialPort error of
      *  that same attempt is suppressed as its duplicate. */
     bool mSerialErrorPending = false;
+    /** M10: whether the controls currently carry the offline state (some window
+      *  holds an offline session). Kept as a member so that code which re-enables a
+      *  control on its own - the paste action, the recent-files menu - never undoes
+      *  the offline disabling, and so that it is usable before the document exists. */
+    bool mOfflineUi = false;
 
     // Actions
     QAction* fileNewWindow;
@@ -329,6 +366,11 @@ class KomportApp : public QMainWindow
     QAction* profileSave;
     /** deletes the profile selected in profileCombo */
     QAction* profileDelete;
+    /** M10: `Load Session for Replay...` (object name `loadSessionForReplay`) */
+    QAction* loadSessionForReplay;
+    /** M10: `Close Session` (object name `closeOfflineSession`); enabled exactly
+      *  while this window holds the offline session */
+    QAction* closeOfflineSessionAction;
 
     // Menus/toolbar
     QMenu* fileOpenRecentMenu;
@@ -344,6 +386,9 @@ class KomportApp : public QMainWindow
       *  runs, so a recording is not invisible just because its menu is closed or
       *  another view has focus. Carries an object name for the tests. */
     QLabel* recordingStatusLabel;
+    /** M10: persistent offline indicator `offlineReplayStatusLabel`, visible exactly
+      *  while this window holds an offline session; its tooltip carries the path. */
+    QLabel* offlineReplayStatusLabel;
     /** left-hand status-bar label showing toolbar-icon hover hints and
      *  "Ready." when idle - a real ("normal", addWidget()) status-bar
      *  widget with QSizePolicy::Ignored horizontally, so its *allocated*

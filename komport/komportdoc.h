@@ -140,6 +140,8 @@ class KomportDoc : public QObject
   SessionReplayPlayer* getReplayPlayer() const;
   /** The loaded offline session, or null. */
   SessionFilePtr offlineSession() const;
+  /** The path the offline session was loaded from, empty while none is loaded. */
+  QString offlinePath() const;
 
   public slots:
     /** calls repaint() on all views connected to the document object and is called by the view by which the document has been changed.
@@ -179,6 +181,8 @@ class KomportDoc : public QObject
     * the player, so it is destroyed after it (controller -> recorder -> player ->
     * session -> transport, SPEC-M10 5.9). */
   SessionFilePtr mOfflineSession;
+  /** The path of mOfflineSession (shown read-only by the indicator's tooltip). */
+  QString mOfflinePath;
   /** The replay player, created by a successful load and destroyed on close. */
   std::unique_ptr<SessionReplayPlayer> mReplayPlayer;
   /** Set while closeOfflineSession() runs the player's close(), which emits
