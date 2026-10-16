@@ -36,6 +36,7 @@
 
 #include <QByteArray>
 #include <QElapsedTimer>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QFile>
 #include <QStringList>
@@ -101,6 +102,88 @@ QByteArray readPeerWithTimeout(int masterFd, int bytes, int timeoutMs)
   return received;
 }
 
+
+QString stripCommentsAndStrings(const QString &in)
+{
+  QString out;
+  out.reserve(in.size());
+  for (int i = 0; i < in.size(); ++i) {
+    const QChar c = in.at(i);
+    if (c == QLatin1Char('/') && i + 1 < in.size() && in.at(i + 1) == QLatin1Char('/')) {
+      while (i < in.size() && in.at(i) != QLatin1Char('\n'))
+        out.append(QLatin1Char(' ')), ++i;
+      out.append(QLatin1Char('\n'));
+    } else if (c == QLatin1Char('/') && i + 1 < in.size() && in.at(i + 1) == QLatin1Char('*')) {
+      i += 1;
+      out.append(QLatin1String("  "));
+      while (i + 1 < in.size() && !(in.at(i) == QLatin1Char('*') && in.at(i + 1) == QLatin1Char('/'))) {
+        out.append(in.at(i) == QLatin1Char('\n') ? QLatin1Char('\n') : QLatin1Char(' '));
+        ++i;
+      }
+      i += 1;
+      out.append(QLatin1String("  "));
+    } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+      const QChar quote = c;
+      out.append(QLatin1Char(' '));
+      ++i;
+      while (i < in.size() && in.at(i) != quote) {
+        if (in.at(i) == QLatin1Char('\\')) {
+          out.append(QLatin1Char(' '));
+          ++i;
+        }
+        out.append(in.at(i) == QLatin1Char('\n') ? QLatin1Char('\n') : QLatin1Char(' '));
+        ++i;
+      }
+      out.append(QLatin1Char(' '));
+    } else {
+      out.append(c);
+    }
+  }
+  return out;
+}
+
+// Brace-aware: a body runs from the first `{` after `Owner::name(` to its matching
+// `}` in the stripped text, so braces inside strings or comments cannot confuse it.
+QList<QPair<QString, QPair<int, int>>> bodiesOf(const QString &raw, const QString &owner)
+{
+  const QString text = stripCommentsAndStrings(raw);
+  QList<QPair<QString, QPair<int, int>>> bodies;
+  const QRegularExpression definition(QStringLiteral("\\b") + owner + QStringLiteral("::(\\w+)\\s*\\("));
+  auto match = definition.globalMatch(text);
+  while (match.hasNext()) {
+    const QRegularExpressionMatch current = match.next();
+    const int opening = text.indexOf(QLatin1Char('{'), current.capturedEnd());
+    if (opening < 0)
+      continue;
+    int depth = 0;
+    int closing = -1;
+    for (int at = opening; at < text.size(); ++at) {
+      if (text.at(at) == QLatin1Char('{'))
+        ++depth;
+      else if (text.at(at) == QLatin1Char('}')) {
+        --depth;
+        if (depth == 0) {
+          closing = at;
+          break;
+        }
+      }
+    }
+    if (closing > opening)
+      bodies.append(qMakePair(current.captured(1), qMakePair(opening, closing)));
+  }
+  return bodies;
+}
+
+const QStringList kTransmitIdentifiers = { QStringLiteral("putStr"), QStringLiteral("putChar"),
+                                          QStringLiteral("writeBytes") };
+bool reportsTransmit(const QString &body)
+{
+  for (const QString &identifier : kTransmitIdentifiers)
+    if (QRegularExpression(QStringLiteral("\\b") + identifier + QStringLiteral("\\b")).match(body).hasMatch())
+      return true;
+  return false;
+  }
+
 /** Feeds one byte at a time through one of the emulation's two receive entries. */
 template <typename Entry>
 void feed(KomportEmulation &emulation, const QByteArray &bytes, Entry entry)
@@ -121,6 +204,7 @@ private slots:
   void suppressionNeverSurvivesTheReplayCall();
   void aNestedReplayStaysSuppressedAndAReentrantLiveCallAnswers();
   void replayEntriesAndReplySitesPassTheSourceAudit();
+  void offlineUnitsNameNoWriteEntryPointOrTransport();
 };
 
 void TstReplayReply::theLiveEntryPointsStillAnswer()
@@ -275,84 +359,6 @@ void TstReplayReply::replayEntriesAndReplySitesPassTheSourceAudit()
   // both fine, comments and string literals are stripped first), and its limit is
   // written down instead of implied - an indirect call (QMetaObject::invokeMethod, a
   // signal into another object, a virtual override elsewhere) is invisible to it.
-  const auto stripCommentsAndStrings = [](const QString &in) {
-    QString out;
-    out.reserve(in.size());
-    for (int i = 0; i < in.size(); ++i) {
-      const QChar c = in.at(i);
-      if (c == QLatin1Char('/') && i + 1 < in.size() && in.at(i + 1) == QLatin1Char('/')) {
-        while (i < in.size() && in.at(i) != QLatin1Char('\n'))
-          out.append(QLatin1Char(' ')), ++i;
-        out.append(QLatin1Char('\n'));
-      } else if (c == QLatin1Char('/') && i + 1 < in.size() && in.at(i + 1) == QLatin1Char('*')) {
-        i += 1;
-        out.append(QLatin1String("  "));
-        while (i + 1 < in.size() && !(in.at(i) == QLatin1Char('*') && in.at(i + 1) == QLatin1Char('/'))) {
-          out.append(in.at(i) == QLatin1Char('\n') ? QLatin1Char('\n') : QLatin1Char(' '));
-          ++i;
-        }
-        i += 1;
-        out.append(QLatin1String("  "));
-      } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
-        const QChar quote = c;
-        out.append(QLatin1Char(' '));
-        ++i;
-        while (i < in.size() && in.at(i) != quote) {
-          if (in.at(i) == QLatin1Char('\\')) {
-            out.append(QLatin1Char(' '));
-            ++i;
-          }
-          out.append(in.at(i) == QLatin1Char('\n') ? QLatin1Char('\n') : QLatin1Char(' '));
-          ++i;
-        }
-        out.append(QLatin1Char(' '));
-      } else {
-        out.append(c);
-      }
-    }
-    return out;
-  };
-
-  // Brace-aware: a body runs from the first `{` after `Owner::name(` to its matching
-  // `}` in the stripped text, so braces inside strings or comments cannot confuse it.
-  const auto bodiesOf = [&stripCommentsAndStrings](const QString &raw, const QString &owner) {
-    const QString text = stripCommentsAndStrings(raw);
-    QList<QPair<QString, QPair<int, int>>> bodies;
-    const QRegularExpression definition(QStringLiteral("\\b") + owner + QStringLiteral("::(\\w+)\\s*\\("));
-    auto match = definition.globalMatch(text);
-    while (match.hasNext()) {
-      const QRegularExpressionMatch current = match.next();
-      const int opening = text.indexOf(QLatin1Char('{'), current.capturedEnd());
-      if (opening < 0)
-        continue;
-      int depth = 0;
-      int closing = -1;
-      for (int at = opening; at < text.size(); ++at) {
-        if (text.at(at) == QLatin1Char('{'))
-          ++depth;
-        else if (text.at(at) == QLatin1Char('}')) {
-          --depth;
-          if (depth == 0) {
-            closing = at;
-            break;
-          }
-        }
-      }
-      if (closing > opening)
-        bodies.append(qMakePair(current.captured(1), qMakePair(opening, closing)));
-    }
-    return bodies;
-  };
-
-  const QStringList transmitIdentifiers = { QStringLiteral("putStr"), QStringLiteral("putChar"),
-                                            QStringLiteral("writeBytes") };
-  const auto reportsTransmit = [&transmitIdentifiers](const QString &body) {
-    for (const QString &identifier : transmitIdentifiers)
-      if (QRegularExpression(QStringLiteral("\\b") + identifier + QStringLiteral("\\b")).match(body).hasMatch())
-        return true;
-    return false;
-  };
-
   // 1. The emulation. Its transmitting functions must be exactly the allow-list: the
   //    choke point plus the two established active-input functions.
   QFile emulationFile(QStringLiteral(KOMPORT_EMULATION_SOURCE));
@@ -375,7 +381,7 @@ void TstReplayReply::replayEntriesAndReplySitesPassTheSourceAudit()
   // Every transmitting identifier lies inside a body this audit parsed *and* that
   // body is allow-listed - otherwise a call in a function the extraction misses would
   // slip through while the set comparison above still passed.
-  for (const QString &identifier : transmitIdentifiers) {
+  for (const QString &identifier : kTransmitIdentifiers) {
     auto occurrences = QRegularExpression(QStringLiteral("\\b") + identifier + QStringLiteral("\\b"))
                            .globalMatch(emulationText);
     while (occurrences.hasNext()) {
@@ -457,10 +463,243 @@ void TstReplayReply::replayEntriesAndReplySitesPassTheSourceAudit()
   QVERIFY(headerText.contains(QStringLiteral("bool mTerminalRepliesAllowed = true;")));
   QVERIFY(headerText.contains(QStringLiteral("class KomportEmulationReplyModeScope;")));
   QVERIFY(!headerText.contains(QStringLiteral("KomportEmulationReplyModeScope(KomportEmulation")));
+  // 5. The application wiring (SPEC-M10 5.8, step 7): the display adapter and every
+  //    other function the offline state drives. The only KomportApp function that
+  //    transmits is the macro slot, and it starts with the offline refusal.
+  QFile appFile(QStringLiteral(KOMPORT_APP_SOURCE));
+  QVERIFY2(appFile.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(appFile.fileName()));
+  const QString appRaw = QString::fromUtf8(appFile.readAll());
+  const QString appRawText = stripCommentsAndStrings(appRaw);
+  const auto appRawBodies = bodiesOf(appRaw, QStringLiteral("KomportApp"));
+  // The audited text is the translation unit as the compiler sees it: preprocessed with
+  // the real include path, only the lines that belong to komport.cpp itself (line
+  // markers), so a token-pasted write macro or an inline helper cannot hide behind the
+  // lexical spelling. The raw text is kept for the one structural check (the guard's
+  // spelling) and as a cross-check that the expansion is the same file.
+  QString appExpanded;
+  QString projectHeaderText;   // the project headers' active text, for inline helpers
+  {
+    QStringList flags = { QStringLiteral("-std=c++17"), QStringLiteral("-fPIC"), QStringLiteral("-E") };
+    for (const QString &dir : (QString::fromLatin1(KOMPORT_APP_INCLUDE_DIRS) + QLatin1Char('|') + QString::fromLatin1(KOMPORT_CORE_INCLUDE_DIRS)).split(QLatin1Char('|'), Qt::SkipEmptyParts))
+      if (dir != QLatin1String("/usr/include"))   // an explicit system dir breaks the C++ headers' include_next
+        flags << QStringLiteral("-isystem") << dir;
+    for (const QString &define : QString::fromLatin1(KOMPORT_APP_DEFINES).split(QLatin1Char('|'), Qt::SkipEmptyParts))
+      flags << QStringLiteral("-D") + define;
+    flags << QStringLiteral("-DKOMPORT_VERSION=\"1.0.0\"") << QStringLiteral("-I") + QStringLiteral(KOMPORT_SOURCE_DIR) << QStringLiteral(KOMPORT_APP_SOURCE);
+    QProcess compiler;
+    compiler.start(QStringLiteral(KOMPORT_CXX_COMPILER), flags);
+    QVERIFY(compiler.waitForFinished(120000));
+    QVERIFY2(compiler.exitStatus() == QProcess::NormalExit && compiler.exitCode() == 0,
+             qPrintable(QString::fromLocal8Bit(compiler.readAllStandardError())));
+    const QString all = QString::fromLocal8Bit(compiler.readAllStandardOutput());
+    bool inApp = false;
+    bool inProject = false;
+    for (const QString &line : all.split(QLatin1Char('\n'))) {
+      if (line.startsWith(QLatin1String("# "))) {
+        const int open = line.indexOf(QLatin1Char('"'));
+        const int close = line.indexOf(QLatin1Char('"'), open + 1);
+        const QString file = open >= 0 && close > open ? line.mid(open + 1, close - open - 1) : QString();
+        inApp = file == QStringLiteral(KOMPORT_APP_SOURCE);
+        inProject = !inApp && file.startsWith(QStringLiteral(KOMPORT_SOURCE_DIR "/"));
+        continue;
+      }
+      if (inApp)
+        appExpanded += line + QLatin1Char('\n');
+      else if (inProject)
+        projectHeaderText += line + QLatin1Char('\n');
+    }
+  }
+  const QString appText = stripCommentsAndStrings(appExpanded);
+  // Inline helpers in project headers: a member call of a write entry point in any
+  // project header's active text would be reachable from a replay handler without
+  // appearing at its call site. Declarations (`void putStr(...)`) have no member
+  // access in front of them and are not calls; a definition inside the transport
+  // classes would be (and today none exists).
+  {
+    const QString headers = stripCommentsAndStrings(projectHeaderText);
+    QVERIFY2(headers.size() > 1000, "the header spans are missing");
+    const QRegularExpression memberCall(QStringLiteral("(\\.|->)\\s*(putStr|putChar|writeBytes)\\s*\\("));
+    QVERIFY2(!memberCall.match(headers).hasMatch(), qPrintable(memberCall.match(headers).captured(0)));
+  }
+  const auto appBodies = bodiesOf(appExpanded, QStringLiteral("KomportApp"));
+  QVERIFY2(appBodies.size() >= appRawBodies.size(), "the expansion lost function bodies");
+  QStringList appTransmitting;
+  for (const auto &body : appBodies)
+    if (reportsTransmit(appText.mid(body.second.first, body.second.second - body.second.first)))
+      appTransmitting.append(body.first);
+  appTransmitting.sort();
+  QVERIFY2(appTransmitting == QStringList{ QStringLiteral("slotMacroTriggered") },
+           qPrintable(appTransmitting.join(QStringLiteral(", "))));
+  // Outside every parsed body of komport.cpp there is no transmit identifier either.
+  for (const QString &identifier : kTransmitIdentifiers) {
+    auto occurrences = QRegularExpression(QStringLiteral("\\b") + identifier + QStringLiteral("\\b")).globalMatch(appText);
+    while (occurrences.hasNext()) {
+      const int at = occurrences.next().capturedStart();
+      QString enclosing;
+      for (const auto &body : appBodies)
+        if (at > body.second.first && at < body.second.second)
+          enclosing = body.first;
+      QCOMPARE(enclosing, QStringLiteral("slotMacroTriggered"));
+    }
+  }
+  const auto appBody = [&](const QString &name) {
+    for (const auto &body : appBodies)
+      if (body.first == name)
+        return appText.mid(body.second.first, body.second.second - body.second.first);
+    return QString();
+  };
+  {
+    // the offline refusal is the first statement of the one transmitting function
+    // (judged on the raw spelling; the expansion normalizes whitespace)
+    QString macro;
+    for (const auto &body : appRawBodies)
+      if (body.first == QStringLiteral("slotMacroTriggered"))
+        macro = appRawText.mid(body.second.first, body.second.second - body.second.first);
+    QVERIFY(!macro.isEmpty());
+    QVERIFY2(macro.trimmed().mid(1).trimmed().startsWith(QStringLiteral("if ( refuseWhileOffline() ) return;")),
+             qPrintable(macro.left(120)));
+  }
+  // The adapter and the replay handlers: no transport call, no indirect dispatch, no
+  // open/close/configure of the port, and the adapter reaches the view only through
+  // the replay entry.
+  const QStringList driven = { QStringLiteral("slotReplayEventDelivered"), QStringLiteral("slotReplayFinished"),
+                               QStringLiteral("slotReplayStateChanged"), QStringLiteral("slotReplayPlay"),
+                               QStringLiteral("slotReplayStop"), QStringLiteral("slotReplayStepEvent"),
+                               QStringLiteral("slotReplayStepRx"), QStringLiteral("slotReplayStepTx"),
+                               QStringLiteral("reportReplayStep"), QStringLiteral("slotReplayTimingActivated"),
+                               QStringLiteral("updateReplayControls"), QStringLiteral("showReplayTiming"),
+                               QStringLiteral("updateOfflineUi"), QStringLiteral("slotOfflineSessionChanged"),
+                               QStringLiteral("loadSessionForReplayFile"), QStringLiteral("slotCloseOfflineSession") };
+  for (const QString &name : driven) {
+    const QString body = appBody(name);
+    QVERIFY2(!body.isEmpty(), qPrintable(name));
+    QVERIFY2(!reportsTransmit(body), qPrintable(name));
+    for (const QString &forbidden : { QStringLiteral("getSerial"), QStringLiteral("->open("),
+                                      QStringLiteral("->close("), QStringLiteral("applyConfiguration"),
+                                      QStringLiteral("slotReceivedChar"), QStringLiteral("slotSimKeyPressed"),
+                                      QStringLiteral("slotKeyPressed"), QStringLiteral("invokeMethod") })
+      QVERIFY2(!body.contains(forbidden), qPrintable(name + QStringLiteral(" uses ") + forbidden));
+  }
+  QVERIFY(appBody(QStringLiteral("slotReplayEventDelivered")).contains(QStringLiteral("slotReplayReceivedChar")));
+
   // The accepted, pre-existing limit is written down as a limit.
   QVERIFY(headerText.contains(QStringLiteral("not supported")));
   QVERIFY(headerText.contains(QStringLiteral("accepted, known limit")));
   QVERIFY(headerText.contains(QStringLiteral("cellChanged")));
+}
+
+void TstReplayReply::offlineUnitsNameNoWriteEntryPointOrTransport()
+{
+  // SPEC-M10 5.8: the four offline units include neither the transport interface, the
+  // serial transport nor a widget header, and name no write entry point outside
+  // comments and string literals. The dependency audit (komport_session_contract_check)
+  // cannot see a transport, because ITransport is QtCore-only - this test can.
+  const QStringList units = { QStringLiteral("sessionreader.h"), QStringLiteral("sessionreader.cpp"),
+                              QStringLiteral("sessionreplayplayer.h"), QStringLiteral("sessionreplayplayer.cpp") };
+  const QStringList forbiddenIncludes = { QStringLiteral("itransport.h"), QStringLiteral("komportserial.h"),
+                                          QStringLiteral("sessioncontroller.h"), QStringLiteral("QWidget"),
+                                          QStringLiteral("QApplication"), QStringLiteral("QtWidgets"),
+                                          QStringLiteral("QSerialPort") };
+  for (const QString &unit : units) {
+    QFile file(QStringLiteral(KOMPORT_SOURCE_DIR "/") + unit);
+    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
+    const QString raw = QString::fromUtf8(file.readAll());
+    // includes are read from the raw text (a string literal strip would blank them)
+    const QRegularExpression include(QStringLiteral("^\\s*#\\s*include\\s*[<\"]([^>\"]+)[>\"]"),
+                                     QRegularExpression::MultilineOption);
+    auto includes = include.globalMatch(raw);
+    while (includes.hasNext()) {
+      const QString header = includes.next().captured(1);
+      for (const QString &forbidden : forbiddenIncludes)
+        QVERIFY2(!header.contains(forbidden), qPrintable(unit + QStringLiteral(" includes ") + header));
+    }
+    const QString text = stripCommentsAndStrings(raw);
+    QVERIFY2(!reportsTransmit(text), qPrintable(unit));
+    QVERIFY2(!text.contains(QStringLiteral("ITransport")), qPrintable(unit));
+    QVERIFY2(!text.contains(QStringLiteral("KomportSerial")), qPrintable(unit));
+  }
+
+  // The text scan above is supplementary: an include can be spelled through a macro
+  // (`#define H "itransport.h"` / `#include H`) or spliced across lines, which no
+  // text scan of the directive can be trusted to see. The authoritative part asks the
+  // compiler that builds the project for the headers each unit really includes,
+  // transitively, and rejects the transport, the serial transport, the controller and
+  // anything under the widget or serial-port module. Its limit: it audits what the
+  // unit includes, not what it calls - the write-name scan above covers the calls.
+  QStringList includeFlags;
+  for (const QString &dir : QString::fromLatin1(KOMPORT_CORE_INCLUDE_DIRS).split(QLatin1Char('|'), Qt::SkipEmptyParts))
+    includeFlags << QStringLiteral("-isystem") << dir;
+  includeFlags << QStringLiteral("-I") + QStringLiteral(KOMPORT_SOURCE_DIR);
+  for (const QString &define : QString::fromLatin1(KOMPORT_OFFLINE_DEFINES).split(QLatin1Char('|'), Qt::SkipEmptyParts))
+    includeFlags << QStringLiteral("-D") + define;
+  const auto runCompiler = [&](const QString &mode, const QString &unit, QString *output) {
+    QProcess compiler;
+    compiler.start(QStringLiteral(KOMPORT_CXX_COMPILER),
+                   QStringList{ QStringLiteral("-std=c++17"), QStringLiteral("-fPIC"), mode }
+                       + includeFlags + QStringList{ QStringLiteral(KOMPORT_SOURCE_DIR "/") + unit });
+    if (!compiler.waitForFinished(60000)
+        || compiler.exitStatus() != QProcess::NormalExit || compiler.exitCode() != 0) {
+      *output = QString::fromLocal8Bit(compiler.readAllStandardError());
+      return false;
+    }
+    *output = QString::fromLocal8Bit(compiler.readAllStandardOutput());
+    return true;
+  };
+
+  // Allow-list of the project headers the offline units may pull in, transitively.
+  // A new header - whatever it is called - fails here until it is reviewed and added.
+  const QStringList allowedProjectHeaders = { QStringLiteral("sessionreader.h"), QStringLiteral("sessionreplayplayer.h"),
+                                              QStringLiteral("sessionreplayseams.h"), QStringLiteral("sessionevent.h"),
+                                              QStringLiteral("sessionrecorderseams.h") /* SessionMonotonicClock only */ };
+  const QString sourceDir = QStringLiteral(KOMPORT_SOURCE_DIR "/");
+  for (const QString &unit : { QStringLiteral("sessionreader.cpp"), QStringLiteral("sessionreplayplayer.cpp") }) {
+    // (a) the transitive include set, from the compiler
+    QString deps;
+    QVERIFY2(runCompiler(QStringLiteral("-M"), unit, &deps), qPrintable(unit + QStringLiteral(": ") + deps));
+    QVERIFY2(deps.contains(QStringLiteral("QtCore")), qPrintable(unit));   // the listing is real
+    const QStringList paths = deps.replace(QStringLiteral("\\\n"), QStringLiteral(" "))
+                                  .split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    for (const QString &path : paths) {
+      if (path.endsWith(QLatin1Char(':')) || path.endsWith(QStringLiteral(".o")) || path == unit)
+        continue;
+      if (path.startsWith(sourceDir)) {
+        const QString name = path.mid(sourceDir.size());
+        if (name == unit)
+          continue;   // the unit itself
+        QVERIFY2(allowedProjectHeaders.contains(name),
+                 qPrintable(unit + QStringLiteral(" includes the project header ") + name));
+      } else if (path.contains(QStringLiteral("/Qt"))) {
+        // any Qt module header must come from QtCore: no widgets, GUI, serial port, ...
+        QVERIFY2(path.contains(QStringLiteral("/QtCore/")),
+                 qPrintable(unit + QStringLiteral(" includes the non-core Qt header ") + path));
+      }
+    }
+
+    // (b) the active, macro-expanded text of the project's own files: line markers
+    //     attribute each line to its file, so Qt's inline code is not scanned.
+    QString expanded;
+    QVERIFY2(runCompiler(QStringLiteral("-E"), unit, &expanded), qPrintable(unit + QStringLiteral(": ") + expanded));
+    QString ownText;
+    bool inProject = false;
+    for (const QString &line : expanded.split(QLatin1Char('\n'))) {
+      if (line.startsWith(QLatin1String("# "))) {
+        const int open = line.indexOf(QLatin1Char('"'));
+        const int close = line.indexOf(QLatin1Char('"'), open + 1);
+        inProject = open >= 0 && close > open && line.mid(open + 1, close - open - 1).startsWith(sourceDir);
+        continue;
+      }
+      if (inProject)
+        ownText += line + QLatin1Char('\n');
+    }
+    QVERIFY2(ownText.size() > 1000, qPrintable(unit));   // the expansion is real
+    const QString ownStripped = stripCommentsAndStrings(ownText);
+    QVERIFY2(!reportsTransmit(ownStripped), qPrintable(unit + QStringLiteral(" (macro-expanded)")));
+    QVERIFY2(!ownStripped.contains(QStringLiteral("invokeMethod")), qPrintable(unit));
+  }
+  // Remaining, deliberately bounded cases (SPEC-M10 5.8): the audit judges the project's
+  // own expanded source and its include set, not the behaviour of the Qt libraries it
+  // calls, and not a write reached through a name this test does not list; the pty
+  // tests of tst_sessionreplayui are the runtime evidence for those.
 }
 
 QTEST_MAIN(TstReplayReply)

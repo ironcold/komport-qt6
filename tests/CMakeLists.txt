@@ -76,7 +76,23 @@ target_link_libraries(tst_replayreplyui PRIVATE util)
 target_compile_definitions(tst_replayreply PRIVATE
   KOMPORT_EMULATION_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportemulation.cpp"
   KOMPORT_EMULATION_HEADER="${CMAKE_SOURCE_DIR}/komport/komportemulation.h"
-  KOMPORT_VIEW_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportview.cpp")
+  KOMPORT_VIEW_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportview.cpp"
+  KOMPORT_APP_SOURCE="${CMAKE_SOURCE_DIR}/komport/komport.cpp"
+  KOMPORT_SOURCE_DIR="${CMAKE_SOURCE_DIR}/komport"
+  # the compiler-aware part of the offline-unit dependency audit: the compiler that
+  # builds the project lists every header the four units really pull in
+  KOMPORT_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+  # the compile definitions of the audited units, mirrored from the build's own
+  # flags.make (komport_core: the five Qt module guards; the contract check: QT_CORE_LIB).
+  # Not read from the targets by generator expression: referencing komport_core's
+  # COMPILE_DEFINITIONS here drops the Qt guards from this very test, whose QTEST_MAIN
+  # then picks the wrong application class. The list is a documented mirror: if the build
+  # ever gains a module guard, update it here (the audit's limit, see SPEC-M10 5.8).
+  KOMPORT_APP_DEFINES="QT_CORE_LIB|QT_GUI_LIB|QT_WIDGETS_LIB|QT_PRINTSUPPORT_LIB|QT_SERIALPORT_LIB"
+  KOMPORT_OFFLINE_DEFINES="QT_CORE_LIB"
+  KOMPORT_CORE_INCLUDE_DIRS="$<JOIN:$<TARGET_PROPERTY:Qt6::Core,INTERFACE_INCLUDE_DIRECTORIES>,|>"
+  # the same for the application translation unit, which needs the widget modules
+  KOMPORT_APP_INCLUDE_DIRS="$<JOIN:$<TARGET_PROPERTY:Qt6::Widgets,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::Gui,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::PrintSupport,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::SerialPort,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::Core,INTERFACE_INCLUDE_DIRECTORIES>,|>")
 # M10 step 6a: the application wiring of the offline state (SPEC-M10 5.7/5.7.1) in
 # real offscreen windows - indicator, controls in every window, the offline guard
 # inside every entry point. Uses a pty as the peer, so it links libutil.

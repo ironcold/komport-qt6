@@ -832,6 +832,32 @@ How that is checked, and what each check does and does not prove:
     `sendTerminalReply()` (the live reply functions call it directly, the replay entry
     through the suppression).
   Being tests, both run with the rest of `ctest` and are repeatable in one command.
+  *Construction of `offlineUnitsNameNoWriteEntryPointOrTransport`* (amendment 2026-10-16,
+  step 7, review rounds 1-2): the lexical scan of the four units is supplementary. The
+  authoritative part runs the project's own compiler over the two `.cpp` units with the
+  real include path and checks (a) the transitive include set (`-M`) against an
+  **allow-list** of project headers (`sessionreader.h`, `sessionreplayplayer.h`,
+  `sessionreplayseams.h`, `sessionevent.h`, and `sessionrecorderseams.h` for
+  `SessionMonotonicClock` only) and against "any Qt module header comes from `QtCore`",
+  so a new transport-like header fails whatever it is called, and (b) the macro-expanded
+  text of the project's own files (`-E`, attributed by line markers, so Qt's inline code is
+  not scanned) for the write names and `invokeMethod`. The same extraction audits the
+  `KomportApp` functions the offline state drives, on the **preprocessed** text of
+  `komport.cpp` (real include path, lines attributed to the file by the line markers):
+  the only transmitting `KomportApp` function is the macro slot, its first statement
+  (judged on the raw spelling) is the offline refusal, and no replay-driven handler
+  names a write entry point, `invokeMethod`, a port open/close/configure or a live
+  receive/key entry. Every replay handler is also driven once against a live pty by
+  `everyReplayControlReachesNoTransport`. The bounded
+  remainder: the audit judges the project's own expanded source and include set, not the
+  behaviour of the Qt libraries it calls, and not a write reached through a name it does
+  not list - the pty tests below are the runtime evidence for those. Two further bounds:
+  the preprocessing runs with the build's Qt module guards and `KOMPORT_VERSION`, mirrored
+  in `tests/CMakeLists.txt` rather than read from the targets (a generator expression over
+  `komport_core`'s definitions strips the guards from the test itself), so a guard added to
+  the build must be added there too; and the project headers' active text is searched for
+  member calls of the write entry points (a helper defined inline in a header would show
+  up there), while declarations are not calls.
 - **Dynamic no-write evidence, in-process and at the peer.** `KomportDoc` holds its
   transport by value and M10 adds no substitution seam for it, so the M10 tests do not
   pretend to inject a transport double. They use the two observations the existing code

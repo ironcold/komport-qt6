@@ -42,6 +42,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
@@ -58,6 +59,8 @@
 #include <QTimer>
 #include <QToolBar>
 
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <pty.h>
 #include <unistd.h>
@@ -229,6 +232,47 @@ int appWindowCount()
   return count;
 }
 
+/** The peer observation of SPEC-M10 5.8, asserted with a timeout: poll the master for
+  * @p ms, fail on the first received byte and on any read error other than "nothing
+  * there yet". The port must be open on the slave side while this runs (a master
+  * whose slave is closed reports EIO, which is deliberately not silence). */
+bool peerStaysSilent(int masterFd, int ms, QString *why)
+{
+  QElapsedTimer timer;
+  timer.start();
+  do {
+    char buffer[64];
+    const ssize_t n = ::read(masterFd, buffer, sizeof buffer);
+    if (n > 0) {
+      *why = QStringLiteral("the peer received %1 byte(s)").arg(n);
+      return false;
+    }
+    if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
+      *why = QStringLiteral("read on the pty master failed: %1").arg(QString::fromLocal8Bit(::strerror(errno)));
+      return false;
+    }
+    QTest::qWait(10);
+  } while (timer.elapsed() < ms);
+  return true;
+}
+
+/** Read from the master until @p expected has arrived or the timeout ends. */
+QByteArray readPeer(int masterFd, int ms, const QByteArray &expected)
+{
+  QByteArray received;
+  QElapsedTimer timer;
+  timer.start();
+  while (timer.elapsed() < ms && !received.contains(expected)) {
+    char buffer[256];
+    const ssize_t n = ::read(masterFd, buffer, sizeof buffer);
+    if (n > 0)
+      received.append(buffer, n);
+    else
+      QTest::qWait(10);
+  }
+  return received;
+}
+
 const QString kOfflineReason = QStringLiteral("a loaded offline session is being replayed - close it first");
 
 } // namespace
@@ -262,6 +306,9 @@ private slots:
   void aStoppedReplayDisclosesTheNonDataEventsItDelivered();
   void aPartialStepDisclosesTheNonDataEventsItDelivered();
   void aReplayRunsToItsEndAndReportsIt();
+  void noTransmitDuringReplay();
+  void everyReplayControlReachesNoTransport();
+  void replayingARecordedPtySessionTransmitsNothing();
   void replayedTerminalQueriesThroughTheAdapterProduceNoReply();
   void closingTheOfflineSessionStopsARunningReplay();
 
@@ -609,8 +656,8 @@ void TstSessionReplayUi::offlineGuardRefusesInEveryWindow()
   QVERIFY(!watch.opened());
   QCOMPARE(QFile::exists(target), false);
   QCOMPARE(written.count(), 0);
-  char buffer[64];
-  QCOMPARE(::read(masterFd, buffer, sizeof buffer) <= 0, true);   // the peer received nothing
+  QString why;
+  QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
   QCOMPARE(serial->isOpen(), true);   // refused, not closed or reconfigured
   QCOMPARE(serial->deviceName(), slaveName);
 }
@@ -649,8 +696,8 @@ void TstSessionReplayUi::keyInputPasteAndMacrosWhileOfflineReachNoTransport()
   QTest::qWait(50);
 
   QCOMPARE(written.count(), 0);
-  char buffer[64];
-  QCOMPARE(::read(masterFd, buffer, sizeof buffer) <= 0, true);
+  QString why;
+  QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
 }
 
 void TstSessionReplayUi::closingTheOfflineSessionRestoresTheLiveControls()
@@ -932,8 +979,8 @@ void TstSessionReplayUi::replayedTerminalQueriesThroughTheAdapterProduceNoReply(
   QVERIFY2(gridText(view).contains(QStringLiteral("start")) && gridText(view).contains(QStringLiteral("end")),
            qPrintable(gridText(view)));
   QCOMPARE(written.count(), 0);
-  char buffer[64];
-  QCOMPARE(::read(masterFd, buffer, sizeof buffer) <= 0, true);   // the peer received nothing
+  QString why;
+  QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
 }
 
 void TstSessionReplayUi::aStoppedReplayDisclosesTheNonDataEventsItDelivered()
@@ -976,6 +1023,164 @@ void TstSessionReplayUi::aPartialStepDisclosesTheNonDataEventsItDelivered()
   window.slotReplayStepEvent();
   QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("1 non-data event")), qPrintable(statusLabel(&window)->text()));
   window.slotCloseOfflineSession();
+}
+
+/** A full replay of a recorded TX/RX session with a live pty behind the port: the TX
+  * payloads are delivered to the consumer, and nothing reaches the peer. */
+void TstSessionReplayUi::noTransmitDuringReplay()
+{
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+  ::fcntl(masterFd, F_SETFL, ::fcntl(masterFd, F_GETFL, 0) | O_NONBLOCK);
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = writeSessionFile(directory, QStringLiteral("ok.kpsession"));   // RX "hello", TX "ls"
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  KomportSerial *serial = window.getDocument()->getSerial();
+  serial->close();
+  serial->setDeviceName(slaveName);
+  serial->setBaudRate(qint32(9600));
+  QVERIFY(serial->open());   // test seam: a live port that a failing replay would write to
+  QSignalSpy written(serial, &ITransport::bytesWritten);
+
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QByteArray deliveredTx;
+  connect(player, &SessionReplayPlayer::eventDelivered, this, [&deliveredTx](const SessionEvent &e) {
+    if (e.type == SessionEventType::Data && e.direction == SessionDirection::Tx)
+      deliveredTx.append(e.payload);
+  });
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);
+  window.slotReplayPlay();
+  QTRY_COMPARE(player->state(), SessionReplayState::Finished);
+  QTest::qWait(100);
+
+  QCOMPARE(deliveredTx, QByteArrayLiteral("ls\r"));   // delivered to the consumer ...
+  QCOMPARE(written.count(), 0);                       // ... and never written
+  QString why;
+  QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
+}
+
+/** Every replay handler of the window - each step, play, stop and the timing ladder -
+  * driven with a live pty behind the port and a stream that holds terminal queries,
+  * TX data and non-data events: nothing is written, nothing reaches the peer. */
+void TstSessionReplayUi::everyReplayControlReachesNoTransport()
+{
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+  ::fcntl(masterFd, F_SETFL, ::fcntl(masterFd, F_GETFL, 0) | O_NONBLOCK);
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionEvent query, tx, rx;
+  query.type = SessionEventType::Data; query.direction = SessionDirection::Rx;
+  query.payload = QByteArrayLiteral("\x1b[5n\x1b[6n\x1b[c\x1bZ");
+  tx.type = SessionEventType::Data; tx.direction = SessionDirection::Tx; tx.payload = "typed\r";
+  rx.type = SessionEventType::Data; rx.direction = SessionDirection::Rx; rx.payload = "tail";
+  const QString path = writeEvents(directory, QStringLiteral("all.kpsession"),
+                                   { annotation(), query, tx, rx, query, tx, rx, annotation() });
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  KomportSerial *serial = window.getDocument()->getSerial();
+  serial->close();
+  serial->setDeviceName(slaveName);
+  serial->setBaudRate(qint32(9600));
+  QVERIFY(serial->open());   // test seam, as above
+  QSignalSpy written(serial, &ITransport::bytesWritten);
+
+  window.slotReplayStepEvent();
+  window.slotReplayStepRx();
+  window.slotReplayStepTx();
+  window.slotReplayStepRx();
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  for (int index = 0; index < combo->count(); ++index) {   // the whole ladder
+    combo->setCurrentIndex(index);
+    emit combo->activated(index);
+  }
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);
+  window.slotReplayPlay();
+  window.slotReplayStop();
+  window.slotReplayPlay();
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QTRY_COMPARE(player->state(), SessionReplayState::Finished);
+  window.slotCloseOfflineSession();
+
+  QCOMPARE(written.count(), 0);
+  QString why;
+  QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
+}
+
+/** The same for a file the M9 recorder wrote end to end from a live pty session,
+  * including a terminal query the live emulation answered while recording. */
+void TstSessionReplayUi::replayingARecordedPtySessionTransmitsNothing()
+{
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+  ::fcntl(masterFd, F_SETFL, ::fcntl(masterFd, F_GETFL, 0) | O_NONBLOCK);
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = directory.filePath(QStringLiteral("recorded.kpsession"));
+
+  KomportApp window;
+  KomportSerial *serial = window.getDocument()->getSerial();
+  serial->close();
+  serial->setDeviceName(slaveName);
+  serial->setBaudRate(qint32(9600));
+  QVERIFY(serial->open());
+  QVERIFY2(window.startSessionRecording(path), "the recording was refused");
+
+  // RX with a terminal query (the live emulation answers it: a recorded TX), then a TX.
+  const QByteArray rx = QByteArrayLiteral("hi\x1b[5nthere\x00\xff");
+  QCOMPARE(::write(masterFd, rx.constData(), rx.size()), qint64(rx.size()));
+  QTest::qWait(300);
+  serial->putStr("typed\r");
+  QTest::qWait(300);
+  // The live emulation answered the status query: the exact reply reached the peer.
+  const QByteArray liveTraffic = readPeer(masterFd, 2000, QByteArrayLiteral("\x1b[0n") + QByteArrayLiteral("typed\r"));
+  QVERIFY2(liveTraffic.contains(QByteArrayLiteral("\x1b[0n")), qPrintable(QString::fromLatin1(liveTraffic.toHex())));
+  QVERIFY(liveTraffic.contains(QByteArrayLiteral("typed\r")));
+  window.slotToggleSessionRecording(false);
+  serial->close();
+
+  QVERIFY2(window.loadSessionForReplayFile(path), qPrintable(statusLabel(&window)->text()));
+  // The file really holds the injected RX, the emulation's live answer and the typed
+  // TX, byte-exactly per direction (RX may have been read in several chunks).
+  QByteArray recordedRx, recordedTx;
+  for (const SessionEvent &e : window.getDocument()->offlineSession()->events) {
+    if (e.type != SessionEventType::Data) continue;
+    (e.direction == SessionDirection::Rx ? recordedRx : recordedTx).append(e.payload);
+  }
+  QCOMPARE(recordedRx, rx);
+  QCOMPARE(recordedTx, QByteArrayLiteral("\x1b[0n") + QByteArrayLiteral("typed\r"));
+
+  serial->setDeviceName(slaveName);
+  QVERIFY(serial->open());   // test seam, as above
+  QSignalSpy written(serial, &ITransport::bytesWritten);
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);
+  window.slotReplayPlay();
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QTRY_COMPARE(player->state(), SessionReplayState::Finished);
+  QTest::qWait(150);
+
+  QCOMPARE(written.count(), 0);
+  QString why;
+  QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
 }
 
 void TstSessionReplayUi::aReplayRunsToItsEndAndReportsIt()
