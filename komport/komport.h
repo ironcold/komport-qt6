@@ -59,11 +59,18 @@ Q_MOC_INCLUDE("komportview.h")
 // this keeps its full definition out of every translation unit that includes this
 // header.
 Q_MOC_INCLUDE("sessionrecorder.h")
+// Same for the replay signals' types the M10 slots below take by reference.
+Q_MOC_INCLUDE("sessionreplayplayer.h")
 class KomportHexView;
 class KomportMacroBar;
 class KomportSessionLogger;
 /** The M9 recording report, declared in sessionrecorder.h (SPEC-M9 5.6). */
 struct SessionRecordingReport;
+/** The M10 replay types, declared in sessionreplayplayer.h / sessionreader.h. */
+struct SessionEvent;
+struct SessionReplayReport;
+struct SessionReplayStep;
+enum class SessionReplayState;
 
 /**
   * The base class for Komport application windows. It sets up the main
@@ -265,6 +272,23 @@ class KomportApp : public QMainWindow
     /** M10: the document of this window entered or left the offline state - the
       *  trigger for the process-wide user-interface update. */
     void slotOfflineSessionChanged(bool _offline);
+    /** M10 (SPEC-M10 5.7): the replay controls. Each handler consumes the player's
+      *  result value instead of assuming success and reports a refusal through the
+      *  status mechanism; none of them is gated behind a confirmation (ADR-007). */
+    void slotReplayPlay();
+    void slotReplayStop();
+    void slotReplayStepEvent();
+    void slotReplayStepRx();
+    void slotReplayStepTx();
+    /** The user picked a timing-ladder entry: ask the player, then show the policy
+      *  the player reports - the selector is written only from a player result. */
+    void slotReplayTimingActivated(int _index);
+    /** The display adapter: render one delivered event into the terminal view (RX
+      *  data, through the reply-free replay entry) and the hex monitor (RX and TX
+      *  data, by the stored direction); other events are counted, not rendered. */
+    void slotReplayEventDelivered(const SessionEvent &_event);
+    void slotReplayFinished(const SessionReplayReport &_report);
+    void slotReplayStateChanged(SessionReplayState _state);
 
   public:
     /** M10 (SPEC-M10 5.7): the non-interactive part of slotLoadSessionForReplay(),
@@ -287,6 +311,12 @@ class KomportApp : public QMainWindow
     /** M10: updateOfflineUi() for every open KomportApp window (the offline state is
       *  process-wide, ADR-011 D11). */
     static void updateOfflineUiForAllWindows();
+    /** M10: enable the replay controls that make sense in the player's state. */
+    void updateReplayControls();
+    /** M10: report a step result, with the non-data accounting when it ended the replay. */
+    void reportReplayStep(const SessionReplayStep &_step, const QString &_what);
+    /** M10: show @p _timing in the selector without triggering the handler. */
+    void showReplayTiming(int _timing);
 
   private:
     /** Bring the action's checked state and the persistent indicator in line with
@@ -371,6 +401,17 @@ class KomportApp : public QMainWindow
     /** M10: `Close Session` (object name `closeOfflineSession`); enabled exactly
       *  while this window holds the offline session */
     QAction* closeOfflineSessionAction;
+    /** M10 replay controls (object names replayPlay, replayStop, replayStepEvent,
+      *  replayStepRx, replayStepTx) and the timing ladder (replayTimingCombo) */
+    QAction* replayPlay;
+    QAction* replayStop;
+    QAction* replayStepEvent;
+    QAction* replayStepRx;
+    QAction* replayStepTx;
+    QComboBox* replayTimingCombo;
+    QToolBar* replayToolBar;
+    /** events the adapter delivered that no pane renders (non-data events) */
+    quint64 mReplayNonDataEvents = 0;
 
     // Menus/toolbar
     QMenu* fileOpenRecentMenu;

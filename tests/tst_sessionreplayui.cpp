@@ -26,10 +26,13 @@
 
 #include "komport.h"
 #include "komportdoc.h"
+#include "komportcellarray.h"
+#include "komporthexview.h"
 #include "komportmacrobar.h"
 #include "komportserial.h"
 #include "komportview.h"
 #include "sessionrecordcodec.h"
+#include "sessionreplayplayer.h"
 
 #include <QAction>
 #include <QApplication>
@@ -45,6 +48,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QScopeGuard>
 #include <QSettings>
@@ -52,6 +56,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
+#include <QToolBar>
 
 #include <fcntl.h>
 #include <pty.h>
@@ -132,6 +137,56 @@ QString writeSessionFile(const QTemporaryDir &directory, const QString &name)
   return out.fileName();
 }
 
+/** Write a session of the given events (sequences and times are assigned in order). */
+QString writeEvents(const QTemporaryDir &directory, const QString &name, QList<SessionEvent> events)
+{
+  const SessionRecordEncoding header = SessionRecordCodec::encodeHeader(headerFacts());
+  if (!header.ok)
+    return QString();
+  QByteArray file = header.bytes;
+  quint64 sequence = 1;
+  qint64 time = 100;
+  for (SessionEvent &event : events) {
+    event.sequence = sequence++;
+    event.sourceId = 1;
+    event.timestampNs = time;
+    event.sourceTimestampNs = 1000 + time;
+    time += 150;
+    const SessionRecordEncoding record = SessionRecordCodec::encodeRecord(event);
+    if (!record.ok)
+      return QString();
+    file.append(record.bytes);
+  }
+  QFile out(directory.filePath(name));
+  if (!out.open(QIODevice::WriteOnly))
+    return QString();
+  out.write(file);
+  return out.fileName();
+}
+
+SessionEvent annotation()
+{
+  SessionEvent event;
+  event.type = SessionEventType::Annotation;
+  event.direction = SessionDirection::None;
+  return event;
+}
+
+QString gridText(KomportView *view)
+{
+  KomportCellArray *cells = view->cellArray();
+  QString text;
+  for (int y = 0; y < cells->arrayHeight(); ++y) {
+    for (int x = 0; x < cells->arrayWidth(); ++x) {
+      KomportCell *cell = cells->cell(x, y);
+      const QChar c = cell ? cell->character() : QChar();
+      text.append(c.isNull() ? QChar(' ') : c);
+    }
+    text.append(QLatin1Char('\n'));
+  }
+  return text;
+}
+
 /** Catches a modal dialog that a guarded entry point must never open: a guard that
   * fails would otherwise block the test run on the dialog's nested event loop. */
 class ModalWatch
@@ -199,6 +254,16 @@ private slots:
   void closingTheOfflineSessionRestoresTheLiveControls();
   void closingTheWindowThatHoldsTheSessionRestoresTheOthers();
   void loadingIsNotPersistedAcrossRuns();
+
+  void theTimingLadderIsPresentInOrder();
+  void replayControlsFollowThePlayerAndConsumeItsResults();
+  void refusedTimingSelectionRestoresTheSelectorAndReportsIt();
+  void replayRendersIntoTheSameViewAndHexMonitor();
+  void aStoppedReplayDisclosesTheNonDataEventsItDelivered();
+  void aPartialStepDisclosesTheNonDataEventsItDelivered();
+  void aReplayRunsToItsEndAndReportsIt();
+  void replayedTerminalQueriesThroughTheAdapterProduceNoReply();
+  void closingTheOfflineSessionStopsARunningReplay();
 
 private:
   QString mTestConfigFile;
@@ -671,6 +736,289 @@ void TstSessionReplayUi::loadingIsNotPersistedAcrossRuns()
   KomportApp fresh;   // a new window starts live
   QVERIFY(!fresh.getDocument()->hasOfflineSession());
   QVERIFY(action(&fresh, "fileOpen")->isEnabled());
+}
+
+void TstSessionReplayUi::theTimingLadderIsPresentInOrder()
+{
+  KomportApp window;
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  QVERIFY(combo != nullptr);
+  const QStringList expected = { QStringLiteral("Original"), QStringLiteral("Immediate"), QStringLiteral("0.1x"),
+                                 QStringLiteral("0.25x"), QStringLiteral("0.5x"), QStringLiteral("1x"),
+                                 QStringLiteral("2x"), QStringLiteral("5x"), QStringLiteral("10x"),
+                                 QStringLiteral("Step") };
+  QStringList actual;
+  for (int i = 0; i < combo->count(); ++i)
+    actual << combo->itemText(i);
+  QCOMPARE(actual, expected);
+  const SessionReplayTiming order[] = { SessionReplayTiming::Original, SessionReplayTiming::Immediate,
+                                        SessionReplayTiming::Scale0_1, SessionReplayTiming::Scale0_25,
+                                        SessionReplayTiming::Scale0_5, SessionReplayTiming::Scale1,
+                                        SessionReplayTiming::Scale2, SessionReplayTiming::Scale5,
+                                        SessionReplayTiming::Scale10, SessionReplayTiming::Step };
+  for (int i = 0; i < combo->count(); ++i)
+    QCOMPARE(combo->itemData(i).toInt(), int(order[i]));
+  for (const char *name : { "replayPlay", "replayStop", "replayStepEvent", "replayStepRx", "replayStepTx" })
+    QVERIFY2(action(&window, name) != nullptr, name);
+  // Idle: the replay controls are hidden and disabled.
+  QVERIFY(window.findChild<QToolBar *>(QStringLiteral("replayToolBar"))->isHidden());
+  QVERIFY(!action(&window, "replayPlay")->isEnabled());
+  QVERIFY(!combo->isEnabled());
+}
+
+void TstSessionReplayUi::replayControlsFollowThePlayerAndConsumeItsResults()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionEvent rx1, tx, rx2;
+  rx1.type = SessionEventType::Data; rx1.direction = SessionDirection::Rx; rx1.payload = "one";
+  tx.type = SessionEventType::Data; tx.direction = SessionDirection::Tx; tx.payload = "two";
+  rx2.type = SessionEventType::Data; rx2.direction = SessionDirection::Rx; rx2.payload = "three";
+  const QString path = writeEvents(directory, QStringLiteral("steps.kpsession"), { annotation(), tx, rx1, rx2 });
+  QVERIFY(!path.isEmpty());
+
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QVERIFY(player != nullptr);
+  QVERIFY(!window.findChild<QToolBar *>(QStringLiteral("replayToolBar"))->isHidden());
+  QCOMPARE(player->state(), SessionReplayState::Ready);   // nothing auto-plays
+  QCOMPARE(player->deliveredCount(), quint64(0));
+  QVERIFY(action(&window, "replayPlay")->isEnabled());
+  QVERIFY(!action(&window, "replayStop")->isEnabled());
+
+  // Step RX delivers the annotation, the TX and the first RX, and reports it.
+  action(&window, "replayStepRx")->trigger();
+  QCOMPARE(player->deliveredCount(), quint64(3));
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("3 event")), qPrintable(statusLabel(&window)->text()));
+  // Step TX finds none ahead: reported as such, delivered up to the end.
+  action(&window, "replayStepTx")->trigger();
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("No further TX")), qPrintable(statusLabel(&window)->text()));
+  // A replay completed by steps alone still discloses the events no pane renders.
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("1 non-data event")), qPrintable(statusLabel(&window)->text()));
+  QCOMPARE(player->state(), SessionReplayState::Finished);
+  // Finished: the affordances follow, and a refused play is reported.
+  QVERIFY(!action(&window, "replayPlay")->isEnabled());
+  window.slotReplayPlay();
+  QVERIFY2(statusLabel(&window)->text().startsWith(QStringLiteral("Replay not started: ")), qPrintable(statusLabel(&window)->text()));
+  window.slotReplayStepEvent();
+  QVERIFY2(statusLabel(&window)->text().startsWith(QStringLiteral("Step refused: ")), qPrintable(statusLabel(&window)->text()));
+}
+
+void TstSessionReplayUi::refusedTimingSelectionRestoresTheSelectorAndReportsIt()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = writeSessionFile(directory, QStringLiteral("ok.kpsession"));
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QCOMPARE(combo->currentData().toInt(), int(SessionReplayTiming::Original));
+
+  // An accepted change shows the adopted policy.
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);
+  QCOMPARE(player->timing(), SessionReplayTiming::Immediate);
+  QCOMPARE(combo->currentData().toInt(), int(SessionReplayTiming::Immediate));
+  combo->setCurrentIndex(0);
+  emit combo->activated(0);   // back to Original: Immediate would finish in one turn
+
+  // Playing (nothing delivered yet: the first delivery waits for the event loop).
+  window.slotReplayPlay();
+  QCOMPARE(player->state(), SessionReplayState::Playing);
+  const int stepIndex = combo->count() - 1;
+  combo->setCurrentIndex(stepIndex);
+  emit combo->activated(stepIndex);
+
+  QCOMPARE(player->timing(), SessionReplayTiming::Original);               // refused
+  QCOMPARE(combo->currentData().toInt(), int(SessionReplayTiming::Original));   // selector restored
+  QCOMPARE(player->state(), SessionReplayState::Playing);                  // no implicit pause
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("pause the replay before selecting step mode")),
+           qPrintable(statusLabel(&window)->text()));
+
+  window.slotReplayStop();
+  combo->setCurrentIndex(stepIndex);
+  emit combo->activated(stepIndex);
+  QCOMPARE(player->timing(), SessionReplayTiming::Step);
+  QCOMPARE(combo->currentData().toInt(), int(SessionReplayTiming::Step));
+}
+
+void TstSessionReplayUi::replayRendersIntoTheSameViewAndHexMonitor()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionEvent rx, tx, rx2;
+  rx.type = SessionEventType::Data; rx.direction = SessionDirection::Rx;
+  rx.payload = QByteArray("AB\0\xFF" "C", 5);
+  tx.type = SessionEventType::Data; tx.direction = SessionDirection::Tx;
+  tx.payload = QByteArray("typed\0", 6);
+  rx2.type = SessionEventType::Data; rx2.direction = SessionDirection::Rx;
+  rx2.payload = "\r\nSecond";
+  const QString path = writeEvents(directory, QStringLiteral("render.kpsession"), { rx, annotation(), tx, rx2 });
+  QVERIFY(!path.isEmpty());
+
+  KomportApp window;
+  KomportView *view = window.findChild<KomportView *>();
+  auto *hex = window.findChild<KomportHexView *>();
+  auto *log = hex->findChild<QPlainTextEdit *>();
+  QVERIFY(view && hex && log);
+  QVERIFY(window.loadSessionForReplayFile(path));
+  QVERIFY(!gridText(view).contains(QLatin1Char('A')));   // loading renders nothing
+
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);   // Immediate
+  window.slotReplayPlay();
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QTRY_COMPARE(player->state(), SessionReplayState::Finished);
+
+  // RX bytes appear as characters; TX bytes do not (a local TX is not echoed).
+  const QString grid = gridText(view);
+  QVERIFY2(grid.contains(QLatin1Char('A')) && grid.contains(QLatin1Char('B')), qPrintable(grid));
+  QVERIFY(grid.contains(QStringLiteral("Second")));
+  QVERIFY(!grid.contains(QStringLiteral("typed")));
+  // The hex monitor shows every data byte, tagged by the stored direction, byte-exactly.
+  QTRY_VERIFY_WITH_TIMEOUT(log->toPlainText().contains(QStringLiteral("Second")), 2000);
+  const QString hexText = log->toPlainText();
+  QVERIFY2(hexText.contains(QStringLiteral("RX 00000000  41 42 00 ff 43")), qPrintable(hexText));
+  QVERIFY2(hexText.contains(QStringLiteral("TX 00000000  74 79 70 65 64 00")), qPrintable(hexText));
+  // The finish is reported with the non-data count the panes do not render.
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("4 event")), qPrintable(statusLabel(&window)->text()));
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("1 non-data")), qPrintable(statusLabel(&window)->text()));
+  // Nothing was written anywhere.
+  QCOMPARE(window.getDocument()->getSerial()->isOpen(), false);
+}
+
+/** The adapter wiring end to end with a real pty as the peer: the stored terminal
+  * queries are rendered but nothing leaves the process. (The live contrast and the
+  * source audit of the adapter are SPEC-M10 step 7.) */
+void TstSessionReplayUi::replayedTerminalQueriesThroughTheAdapterProduceNoReply()
+{
+  int masterFd = -1;
+  const QString slaveName = makePty(&masterFd);
+  if (slaveName.isEmpty())
+    QSKIP("openpty() unavailable in this sandbox");
+  auto guard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+  ::fcntl(masterFd, F_SETFL, ::fcntl(masterFd, F_GETFL, 0) | O_NONBLOCK);
+
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionEvent queries;
+  queries.type = SessionEventType::Data;
+  queries.direction = SessionDirection::Rx;
+  queries.payload = QByteArrayLiteral("start\x1b[5n\x1b[6n\x1b[c\x1bZ" "end");
+  const QString path = writeEvents(directory, QStringLiteral("queries.kpsession"), { queries });
+  QVERIFY(!path.isEmpty());
+
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  KomportSerial *serial = window.getDocument()->getSerial();
+  serial->close();
+  serial->setDeviceName(slaveName);
+  serial->setBaudRate(qint32(9600));
+  QVERIFY(serial->open());   // test seam: a live port that a failing adapter would write to
+  QSignalSpy written(serial, &ITransport::bytesWritten);
+
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);
+  window.slotReplayPlay();
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QTRY_COMPARE(player->state(), SessionReplayState::Finished);
+  QTest::qWait(100);
+
+  KomportView *view = window.findChild<KomportView *>();
+  QVERIFY2(gridText(view).contains(QStringLiteral("start")) && gridText(view).contains(QStringLiteral("end")),
+           qPrintable(gridText(view)));
+  QCOMPARE(written.count(), 0);
+  char buffer[64];
+  QCOMPARE(::read(masterFd, buffer, sizeof buffer) <= 0, true);   // the peer received nothing
+}
+
+void TstSessionReplayUi::aStoppedReplayDisclosesTheNonDataEventsItDelivered()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionEvent rx;
+  rx.type = SessionEventType::Data; rx.direction = SessionDirection::Rx; rx.payload = "data";
+  const QString path = writeEvents(directory, QStringLiteral("stop.kpsession"), { annotation(), annotation(), rx, rx });
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  window.slotReplayStepEvent();   // delivers the first annotation
+  window.slotReplayStepEvent();   // and the second
+  window.slotReplayPlay();        // Original timing: nothing more is delivered before the loop turns
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QCOMPARE(player->state(), SessionReplayState::Playing);
+
+  window.slotReplayStop();
+
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("2 non-data event")), qPrintable(statusLabel(&window)->text()));
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("2 remaining")), qPrintable(statusLabel(&window)->text()));
+}
+
+void TstSessionReplayUi::aPartialStepDisclosesTheNonDataEventsItDelivered()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  SessionEvent rx;
+  rx.type = SessionEventType::Data; rx.direction = SessionDirection::Rx; rx.payload = "data";
+  const QString path = writeEvents(directory, QStringLiteral("partial.kpsession"), { annotation(), rx, rx });
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+
+  window.slotReplayStepEvent();   // delivers the annotation only; two events remain
+
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QVERIFY(player->state() != SessionReplayState::Finished);
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("1 non-data event")), qPrintable(statusLabel(&window)->text()));
+  // A step that delivers only data after that keeps the cumulative count visible.
+  window.slotReplayStepEvent();
+  QVERIFY2(statusLabel(&window)->text().contains(QStringLiteral("1 non-data event")), qPrintable(statusLabel(&window)->text()));
+  window.slotCloseOfflineSession();
+}
+
+void TstSessionReplayUi::aReplayRunsToItsEndAndReportsIt()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = writeSessionFile(directory, QStringLiteral("ok.kpsession"));
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  auto *combo = window.findChild<QComboBox *>(QStringLiteral("replayTimingCombo"));
+  combo->setCurrentIndex(1);
+  emit combo->activated(1);
+  action(&window, "replayPlay")->trigger();
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QTRY_COMPARE(player->state(), SessionReplayState::Finished);
+  QVERIFY2(statusLabel(&window)->text().startsWith(QStringLiteral("Replay finished: 2 event")),
+           qPrintable(statusLabel(&window)->text()));
+  QVERIFY(!action(&window, "replayPlay")->isEnabled());
+  QVERIFY(!action(&window, "replayStop")->isEnabled());
+}
+
+void TstSessionReplayUi::closingTheOfflineSessionStopsARunningReplay()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = writeSessionFile(directory, QStringLiteral("ok.kpsession"));
+  KomportApp window;
+  QVERIFY(window.loadSessionForReplayFile(path));
+  window.slotReplayPlay();
+  SessionReplayPlayer *player = window.getDocument()->getReplayPlayer();
+  QCOMPARE(player->state(), SessionReplayState::Playing);
+  QPointer<SessionReplayPlayer> watch(player);
+
+  window.slotCloseOfflineSession();
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QTest::qWait(50);
+
+  QVERIFY(window.getDocument()->getReplayPlayer() == nullptr);
+  QVERIFY(watch.isNull());   // destroyed, nothing delivered afterwards
+  // No replay report reached the user: only the close message.
+  QCOMPARE(statusLabel(&window)->text(), QStringLiteral("Offline session closed."));
+  QVERIFY(!action(&window, "replayStop")->isEnabled());
+  QVERIFY(window.findChild<QToolBar *>(QStringLiteral("replayToolBar"))->isHidden());
 }
 
 QTEST_MAIN(TstSessionReplayUi)

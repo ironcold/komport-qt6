@@ -53,6 +53,7 @@
 #include "komporthexview.h"
 #include "komportmacrobar.h"
 #include "komportsessionlogger.h"
+#include "sessionreplayplayer.h"
 
 static const int MAX_RECENT_FILES = 10;
 
@@ -254,6 +255,26 @@ void KomportApp::initActions()
   connect( closeOfflineSessionAction, &QAction::triggered, this, &KomportApp::slotCloseOfflineSession );
   closeOfflineSessionAction->setStatusTip( tr("Close the loaded session and leave the offline state") );
   closeOfflineSessionAction->setEnabled( false );
+
+  // M10 replay controls (SPEC-M10 5.7). The icons are theme icons with a text
+  // fallback, like the other actions.
+  auto makeReplayAction = [this](const char *name, const QString &text, const QString &icon, const QString &tip) {
+    auto *a = new QAction( QIcon::fromTheme(icon), text, this );
+    a->setObjectName( QString::fromLatin1(name) );
+    a->setStatusTip( tip );
+    a->setEnabled( false );
+    return a;
+  };
+  replayPlay = makeReplayAction( "replayPlay", tr("Play"), QStringLiteral("media-playback-start"), tr("Replay the loaded session from the current position") );
+  replayStop = makeReplayAction( "replayStop", tr("Stop"), QStringLiteral("media-playback-stop"), tr("Stop the replay, keeping the position") );
+  replayStepEvent = makeReplayAction( "replayStepEvent", tr("Step Event"), QStringLiteral("media-skip-forward"), tr("Deliver events up to and including the next event") );
+  replayStepRx = makeReplayAction( "replayStepRx", tr("Step RX"), QStringLiteral("go-down"), tr("Deliver events up to and including the next received data") );
+  replayStepTx = makeReplayAction( "replayStepTx", tr("Step TX"), QStringLiteral("go-up"), tr("Deliver events up to and including the next sent data") );
+  connect( replayPlay, &QAction::triggered, this, &KomportApp::slotReplayPlay );
+  connect( replayStop, &QAction::triggered, this, &KomportApp::slotReplayStop );
+  connect( replayStepEvent, &QAction::triggered, this, &KomportApp::slotReplayStepEvent );
+  connect( replayStepRx, &QAction::triggered, this, &KomportApp::slotReplayStepRx );
+  connect( replayStepTx, &QAction::triggered, this, &KomportApp::slotReplayStepTx );
 }
 
 void KomportApp::initMenus()
@@ -288,6 +309,12 @@ void KomportApp::initMenus()
   sessionMenu->addSeparator();
   sessionMenu->addAction( loadSessionForReplay );
   sessionMenu->addAction( closeOfflineSessionAction );
+  sessionMenu->addSeparator();
+  sessionMenu->addAction( replayPlay );
+  sessionMenu->addAction( replayStop );
+  sessionMenu->addAction( replayStepEvent );
+  sessionMenu->addAction( replayStepRx );
+  sessionMenu->addAction( replayStepTx );
 
   QMenu *settingsMenu = menuBar()->addMenu( tr("&Settings") );
   settingsMenu->addAction( showPreferences );
@@ -383,6 +410,39 @@ void KomportApp::initToolBar()
   // (see eventFilter()) - icon-to-icon moves are handled directly above,
   // this only catches leaving the last icon with nothing else to enter.
   mainToolBar->installEventFilter(this);
+
+  // M10: the replay controls, visible only in the window that holds a session.
+  replayToolBar = addToolBar( tr("Replay") );
+  replayToolBar->setObjectName( QStringLiteral("replayToolBar") );
+  replayToolBar->setToolButtonStyle( Qt::ToolButtonTextOnly );
+  replayToolBar->addAction( replayPlay );
+  replayToolBar->addAction( replayStop );
+  replayToolBar->addAction( replayStepEvent );
+  replayToolBar->addAction( replayStepRx );
+  replayToolBar->addAction( replayStepTx );
+  replayToolBar->addWidget( new QLabel( tr(" Timing: "), replayToolBar ) );
+  replayTimingCombo = new QComboBox( replayToolBar );
+  replayTimingCombo->setObjectName( QStringLiteral("replayTimingCombo") );
+  // The ladder of SPEC-M10 5.7, in this order; the item data is the player's enum.
+  const struct { SessionReplayTiming timing; QString label; } ladder[] = {
+    { SessionReplayTiming::Original, tr("Original") },
+    { SessionReplayTiming::Immediate, tr("Immediate") },
+    { SessionReplayTiming::Scale0_1, QStringLiteral("0.1x") },
+    { SessionReplayTiming::Scale0_25, QStringLiteral("0.25x") },
+    { SessionReplayTiming::Scale0_5, QStringLiteral("0.5x") },
+    { SessionReplayTiming::Scale1, QStringLiteral("1x") },
+    { SessionReplayTiming::Scale2, QStringLiteral("2x") },
+    { SessionReplayTiming::Scale5, QStringLiteral("5x") },
+    { SessionReplayTiming::Scale10, QStringLiteral("10x") },
+    { SessionReplayTiming::Step, tr("Step") },
+  };
+  for ( const auto &entry : ladder )
+    replayTimingCombo->addItem( entry.label, int(entry.timing) );
+  replayTimingCombo->setEnabled( false );
+  // activated: only a user pick, never the programmatic showReplayTiming().
+  connect( replayTimingCombo, QOverload<int>::of(&QComboBox::activated), this, &KomportApp::slotReplayTimingActivated );
+  replayToolBar->addWidget( replayTimingCombo );
+  replayToolBar->setVisible( false );
 }
 
 void KomportApp::initStatusBar()
@@ -1641,6 +1701,9 @@ void KomportApp::updateOfflineUi()
   offlineReplayStatusLabel->setToolTip( mine ? doc->offlinePath() : QString() );
   offlineReplayStatusLabel->setVisible( mine );
   closeOfflineSessionAction->setEnabled( mine );
+
+  replayToolBar->setVisible( mine );
+  updateReplayControls();
 }
 
 void KomportApp::updateOfflineUiForAllWindows()
@@ -1652,8 +1715,18 @@ void KomportApp::updateOfflineUiForAllWindows()
   }
 }
 
-void KomportApp::slotOfflineSessionChanged(bool)
+void KomportApp::slotOfflineSessionChanged(bool _offline)
 {
+  if ( _offline ) {
+    // This window holds the new session: subscribe the display adapter to its
+    // player. The connections die with the player when the session is closed.
+    if ( SessionReplayPlayer *player = doc->getReplayPlayer() ) {
+      mReplayNonDataEvents = 0;
+      connect( player, &SessionReplayPlayer::eventDelivered, this, &KomportApp::slotReplayEventDelivered );
+      connect( player, &SessionReplayPlayer::replayFinished, this, &KomportApp::slotReplayFinished );
+      connect( player, &SessionReplayPlayer::stateChanged, this, &KomportApp::slotReplayStateChanged );
+    }
+  }
   // The offline state is process-wide: every window follows, not only this one.
   updateOfflineUiForAllWindows();
 }
@@ -1690,4 +1763,143 @@ void KomportApp::slotCloseOfflineSession()
   // recorded setting. The document announces the change, and every window follows.
   doc->closeOfflineSession();
   slotStatusMsg( tr("Offline session closed.") );
+}
+
+/////////////////////////////////////////////////////////////////////
+// M10: THE REPLAY CONTROLS AND THE DISPLAY ADAPTER (SPEC-M10 5.7)
+/////////////////////////////////////////////////////////////////////
+
+void KomportApp::updateReplayControls()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  const bool mine = player != nullptr;
+  const SessionReplayState state = mine ? player->state() : SessionReplayState::Idle;
+  const bool playing = state == SessionReplayState::Playing;
+  const bool finished = state == SessionReplayState::Finished;
+  // The player refuses what does not apply and says why; these only keep the
+  // affordance honest, they are not the guard.
+  replayPlay->setEnabled( mine && !playing && !finished );
+  replayStop->setEnabled( mine && playing );
+  const bool canStep = mine && !playing && !finished;
+  replayStepEvent->setEnabled( canStep );
+  replayStepRx->setEnabled( canStep );
+  replayStepTx->setEnabled( canStep );
+  replayTimingCombo->setEnabled( mine );
+  if ( mine ) showReplayTiming( int(player->timing()) );
+}
+
+void KomportApp::showReplayTiming(int _timing)
+{
+  const int index = replayTimingCombo->findData( _timing );
+  if ( index < 0 ) return;
+  const QSignalBlocker blocker( replayTimingCombo );
+  replayTimingCombo->setCurrentIndex( index );
+}
+
+void KomportApp::slotReplayPlay()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  const SessionReplayStart started = player->play();
+  if ( !started.ok )
+    slotStatusMsg( tr("Replay not started: %1").arg( started.reason ) );
+  else
+    slotStatusMsg( tr("Replaying the session...") );
+}
+
+void KomportApp::slotReplayStop()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  const SessionReplayReport report = player->stop();
+  // Stop ends the replay for the user without replayFinished, so it carries the
+  // accounting of what no pane renders as well.
+  slotStatusMsg( tr("Replay stopped: %1 delivered, %2 remaining, %3 non-data event(s) not rendered")
+                     .arg( report.delivered ).arg( report.remaining ).arg( mReplayNonDataEvents ) );
+}
+
+namespace {
+/** One line for the result of a step. */
+QString stepSummary(const SessionReplayStep &_step, const QString &_what)
+{
+  if ( !_step.ok )
+    return KomportApp::tr("Step refused: %1").arg( _step.reason );
+  if ( !_step.matched )
+    return KomportApp::tr("No further %1 - %2 event(s) delivered up to the end of the session").arg( _what ).arg( _step.advanced );
+  return KomportApp::tr("Stepped: %1 event(s) delivered up to the next %2").arg( _step.advanced ).arg( _what );
+}
+} // namespace
+
+void KomportApp::reportReplayStep(const SessionReplayStep &_step, const QString &_what)
+{
+  QString message = stepSummary( _step, _what );
+  // No pane renders non-data events, and a step reports only through its result, so
+  // every successful step that has delivered any (cumulatively) discloses them, and
+  // the step that ends the replay always states the count, zero included - there is
+  // no replayFinished for it.
+  if ( _step.ok && ( _step.reachedEnd || mReplayNonDataEvents > 0 ) )
+    message += ( _step.reachedEnd ? tr(" - end of the session, ") : tr(" - ") )
+        + tr("%1 non-data event(s) not rendered").arg( mReplayNonDataEvents );
+  slotStatusMsg( message );
+}
+
+void KomportApp::slotReplayStepEvent()
+{
+  if ( SessionReplayPlayer *player = doc->getReplayPlayer() )
+    reportReplayStep( player->stepNextEvent(), tr("event") );
+}
+
+void KomportApp::slotReplayStepRx()
+{
+  if ( SessionReplayPlayer *player = doc->getReplayPlayer() )
+    reportReplayStep( player->stepNextRx(), tr("RX data") );
+}
+
+void KomportApp::slotReplayStepTx()
+{
+  if ( SessionReplayPlayer *player = doc->getReplayPlayer() )
+    reportReplayStep( player->stepNextTx(), tr("TX data") );
+}
+
+void KomportApp::slotReplayTimingActivated(int _index)
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  const SessionReplayTimingChange change =
+      player->setTiming( SessionReplayTiming( replayTimingCombo->itemData( _index ).toInt() ) );
+  // Never show a policy the player did not adopt: the selector is written from the
+  // result, whether the change was accepted or refused.
+  showReplayTiming( int(change.timing) );
+  if ( !change.ok )
+    slotStatusMsg( tr("Timing not changed: %1").arg( change.reason ) );
+}
+
+void KomportApp::slotReplayEventDelivered(const SessionEvent &_event)
+{
+  // Display only: nothing here calls into the player or the transport (a receiver
+  // of the player's synchronous signal must not mutate it, SPEC-M10 5.11).
+  if ( _event.type != SessionEventType::Data ) {
+    ++mReplayNonDataEvents;
+    return;
+  }
+  const bool rx = _event.direction == SessionDirection::Rx;
+  for ( const char byte : _event.payload ) {
+    if ( rx ) {
+      view->slotReplayReceivedChar( byte );   // the reply-free entry, never the live one
+      hexView->appendRx( byte );
+    } else {
+      hexView->appendTx( byte );
+    }
+  }
+}
+
+void KomportApp::slotReplayFinished(const SessionReplayReport &_report)
+{
+  slotStatusMsg( tr("Replay finished: %1 event(s) delivered, %2 non-data event(s) not rendered")
+                     .arg( _report.delivered ).arg( mReplayNonDataEvents ) );
+}
+
+void KomportApp::slotReplayStateChanged(SessionReplayState)
+{
+  updateReplayControls();
 }
