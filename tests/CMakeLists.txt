@@ -61,6 +61,10 @@ komport_add_test(tst_sessionreplayplayer)
 # live/recording preconditions, hence libutil.
 komport_add_test(tst_sessionofflinedocument)
 target_link_libraries(tst_sessionofflinedocument PRIVATE util)
+# M10 step 8: the end-to-end proof over a real pty - M9 recorder, M10 reader and
+# player, byte-exact replay, a silent peer and the recovery rule.
+komport_add_test(tst_sessionreplayendtoend)
+target_link_libraries(tst_sessionreplayendtoend PRIVATE util)
 # M10: the reply-free rendering path (SPEC-M10 5.7/5.8) - the live entry points
 # still answer, a replayed query is rendered but not answered. Uses a real pty as
 # the peer and ITransport::bytesWritten as the observation, so it links libutil.
