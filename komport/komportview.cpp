@@ -523,6 +523,8 @@ void KomportView::slotReplayReceivedChar(char _ch){
 /** enable or suppress terminal key input (SPEC-M10 5.7.1) */
 void KomportView::setKeyInputEnabled(bool _enabled){
     mKeyInputEnabled = _enabled;
+    if ( mEmulation )
+        mEmulation->setTransmitEnabled( _enabled );   // the transmit sites themselves, not just this view
 }
 
 /** get serial port */
@@ -825,6 +827,11 @@ bool KomportView::hasSelection(){
 }
 /** simulated key press for inserting from clipboard, etc... */
 void KomportView::slotSimKeyPressed(QChar _c){
+    // Same promise as keyPressEvent(): while key input is suppressed (the offline
+    // state, SPEC-M10 5.7.1) this public slot is just as closed a transmit door as
+    // the real key event, so a caller that reaches it directly gets no byte on the
+    // wire and no scroll side effect.
+    if ( !mKeyInputEnabled ) return;
     if ( mScrollBar->value() != mScrollBar->maximum() ) {
         resetScroll();
         slotScroll( mScrollBar->value() );

@@ -729,8 +729,14 @@ Fenster. Tragende Entscheidungen: `ADR-006` bleibt alleinige normative Formatque
 (M10-eigene Regel ist genau die Quellenanzahl), ein reply-freier
 Replay-Rendering-Eingang mit dem einen Antwort-Knoten `sendTerminalReply()`, `Step`
 während `Playing` wird abgelehnt, jede Ablehnung ist ein Rückgabewert, der Offline-Pfad
-hält keinen Transport. Nächster Schritt: Umsetzung nach `SPEC-M10` §11, Schritt 1
-(`SessionReader`) mit eigenem Review vor dem Commit.
+hält keinen Transport. **Umsetzung (Schritte 1–8) abgeschlossen (2026-10-17):** Reader,
+Replay-Player (Kern und Mutationsfreigabe), reply-freier Rendering-Pfad, Dokument-Eigentum,
+prozessweiter Offline-Zustand mit Steuerelement-Sperre, Wiedergabe-Steuerung und der
+pty-Ende-zu-Ende-Test sind committet und einzeln reviewt. Schritt 9 (Selbstreview,
+`docs/reviews/2026-11-15-M10-implementation-selfreview.md`; §8-Abnahme abgehakt, zwei
+dokumentierte Lücken: `theReaderNeverTouchesTheLivePath` nur indirekt belegt,
+`noSeekOperationExists` nur per Inspektion) ist erstellt; offen bleiben der unabhängige
+Abschluss-Review, der Merge nach `master` und die Qt-6.3-Zeile (keine CI).
 
 ### Meilenstein 13 — Produktsplit / gemeinsame Bibliotheksgrenzen — Backlog
 

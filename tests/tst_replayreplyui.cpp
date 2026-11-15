@@ -239,6 +239,7 @@ private slots:
 
   void aReplayedStreamRendersLikeALiveOne();
   void suppressedKeyInputNeitherSignalsNorWrites();
+  void suppressedSimulatedKeyInputNeitherSignalsNorWrites();
 
 private:
   QString mTestConfigFile;
@@ -513,6 +514,55 @@ void TstReplayReplyUi::suppressedKeyInputNeitherSignalsNorWrites()
   QVERIFY(!readPeerWithTimeout(masterFd, 1, 500).isEmpty());
   QCOMPARE(bar->value(), bar->maximum());   // the live path follows its output
   QVERIFY(bar->value() > scrollBefore);     // i.e. the suppressed path really skipped that
+}
+
+
+// Review 2026-11-15 finding 1: KomportView::slotSimKeyPressed() is a public slot, so it must be
+// as closed as the real key event while key input is suppressed - a direct call reaches neither
+// the emulation nor the wire, and moves nothing.
+void TstReplayReplyUi::suppressedSimulatedKeyInputNeitherSignalsNorWrites()
+{
+  KomportApp *window = new KomportApp();
+  auto windowGuard = qScopeGuard([window]() { delete window; });
+  KomportView *view = window->findChild<KomportView *>();
+  QVERIFY(view != nullptr);
+  KomportSerial *serial = window->getDocument()->getSerial();
+  int masterFd = -1;
+  QVERIFY(openPtySerial(serial, &masterFd));
+  auto fdGuard = qScopeGuard([&masterFd]() { if (masterFd >= 0) ::close(masterFd); });
+
+  QSignalSpy simulated(view, &KomportView::simKeyPressed);
+  QSignalSpy written(serial, &KomportSerial::bytesWritten);
+
+  view->setKeyInputEnabled(false);
+  view->slotSimKeyPressed(QLatin1Char('x'));
+  view->slotSimKeyPressed(QLatin1Char('\r'));
+  QCOMPARE(simulated.count(), 0);
+  QCOMPARE(written.count(), 0);
+  QCOMPARE(readPeerWithTimeout(masterFd, 1, 200), QByteArray());
+
+  // The emulation's own public entries are closed by the same flag (closing review round 2):
+  // direct key and simulated-key calls, and a terminal query arriving on the *live* receive
+  // entry with the port open, must neither write nor answer.
+  QKeyEvent key(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, QStringLiteral("a"));
+  view->mEmulation->slotKeyPressed(&key);
+  view->mEmulation->slotSimKeyPressed(QLatin1Char('y'));
+  for (const char byte : QByteArray("\x1b[5n\x1b[6n\x1b[c\x1bZ"))
+    view->mEmulation->slotReceivedChar(byte);
+  QCOMPARE(written.count(), 0);
+  QCOMPARE(readPeerWithTimeout(masterFd, 1, 200), QByteArray());
+
+  // The enabled control writes, so the silence above is the guard's doing.
+  view->setKeyInputEnabled(true);
+  view->mEmulation->slotReceivedChar('\x1b'); view->mEmulation->slotReceivedChar('['); view->mEmulation->slotReceivedChar('5'); view->mEmulation->slotReceivedChar('n');
+  QTRY_VERIFY_WITH_TIMEOUT(written.count() >= 1, 2000);
+  QVERIFY(!readPeerWithTimeout(masterFd, 1, 500).isEmpty());
+  written.clear();
+  readPeerWithTimeout(masterFd, 1, 100);
+  view->slotSimKeyPressed(QLatin1Char('x'));
+  QCOMPARE(simulated.count(), 1);
+  QTRY_VERIFY_WITH_TIMEOUT(written.count() >= 1, 2000);
+  QVERIFY(!readPeerWithTimeout(masterFd, 1, 500).isEmpty());
 }
 
 QTEST_MAIN(TstReplayReplyUi)

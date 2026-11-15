@@ -311,6 +311,7 @@ private slots:
   void replayingARecordedPtySessionTransmitsNothing();
   void replayedTerminalQueriesThroughTheAdapterProduceNoReply();
   void closingTheOfflineSessionStopsARunningReplay();
+  void aReceiverThatDeletesTheWindowDuringAnAppSlotIsHarmless();
 
 private:
   QString mTestConfigFile;
@@ -1224,6 +1225,77 @@ void TstSessionReplayUi::closingTheOfflineSessionStopsARunningReplay()
   QCOMPARE(statusLabel(&window)->text(), QStringLiteral("Offline session closed."));
   QVERIFY(!action(&window, "replayStop")->isEnabled());
   QVERIFY(window.findChild<QToolBar *>(QStringLiteral("replayToolBar"))->isHidden());
+}
+
+
+// SPEC-M10 5.11 / review 2026-11-15 finding 2: the player's and the document's signals are
+// synchronous, so a receiver can delete the whole window while an application slot is still
+// inside its call. The slot must then neither touch the freed window nor report anything.
+void TstSessionReplayUi::aReceiverThatDeletesTheWindowDuringAnAppSlotIsHarmless()
+{
+  QTemporaryDir directory;
+  QVERIFY(directory.isValid());
+  const QString path = writeSessionFile(directory, QStringLiteral("ok.kpsession"));
+  QVERIFY(!path.isEmpty());
+
+  enum class Operation { Load, Close, Play, Stop, StepEvent, StepRx, StepTx };
+  const auto run = [&](Operation operation) {
+    QObject receivers;
+    auto *window = new KomportApp();
+    QPointer<KomportApp> watch(window);
+    // Once only: the window's own destructor leaves the offline state and emits again.
+    bool deleting = false;
+    const auto destroyWindow = [window, &watch, &deleting]() {
+      if (watch && !deleting) { deleting = true; delete window; }
+    };
+    KomportDoc *doc = window->getDocument();
+    if (operation == Operation::Load) {
+      connect(doc, &KomportDoc::offlineSessionChanged, &receivers, destroyWindow);
+      window->loadSessionForReplayFile(path);
+      QVERIFY2(watch.isNull(), "the load must complete without touching the deleted window");
+      return;
+    }
+    QVERIFY(window->loadSessionForReplayFile(path));
+    SessionReplayPlayer *player = doc->getReplayPlayer();
+    QVERIFY(player != nullptr);
+    if (operation == Operation::Stop) {
+      QVERIFY(player->play().ok);
+      QCOMPARE(player->state(), SessionReplayState::Playing);
+    }
+    switch (operation) {
+    case Operation::Close:
+      connect(doc, &KomportDoc::offlineSessionChanged, &receivers, destroyWindow);
+      window->slotCloseOfflineSession();
+      break;
+    case Operation::Play:
+      connect(player, &SessionReplayPlayer::stateChanged, &receivers, destroyWindow);
+      window->slotReplayPlay();
+      break;
+    case Operation::Stop:
+      connect(player, &SessionReplayPlayer::stateChanged, &receivers, destroyWindow);
+      window->slotReplayStop();
+      break;
+    case Operation::StepEvent:
+      connect(player, &SessionReplayPlayer::eventDelivered, &receivers, destroyWindow);
+      window->slotReplayStepEvent();
+      break;
+    case Operation::StepRx:
+      connect(player, &SessionReplayPlayer::eventDelivered, &receivers, destroyWindow);
+      window->slotReplayStepRx();
+      break;
+    case Operation::StepTx:
+      connect(player, &SessionReplayPlayer::eventDelivered, &receivers, destroyWindow);
+      window->slotReplayStepTx();
+      break;
+    case Operation::Load:
+      break;
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY2(watch.isNull(), "the receiver deleted the window during the slot");
+  };
+  for (Operation operation : { Operation::Load, Operation::Close, Operation::Play, Operation::Stop,
+                               Operation::StepEvent, Operation::StepRx, Operation::StepTx })
+    run(operation);
 }
 
 QTEST_MAIN(TstSessionReplayUi)

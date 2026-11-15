@@ -697,7 +697,7 @@ KomportEmulation::~KomportEmulation(){
 void KomportEmulation::slotKeyPressed(QKeyEvent* _e)
 {
   KomportSerial* s = serial();
-  if ( s->isOpen() ) {
+  if ( mTransmitEnabled && s->isOpen() ) {
     // DECCKM: application cursor-key mode sends "ESC O x" instead of the
     // normal "ESC [ x" - real hardware (Cisco/Juniper CLIs, vi, htop, ...)
     // switches this on for full-screen apps and back off for line input.
@@ -1503,7 +1503,7 @@ KomportEmulationReplyModeScope::~KomportEmulationReplyModeScope()
   *  replay render is in progress. Nothing else in this class answers the terminal. */
 void KomportEmulation::sendTerminalReply(const QByteArray &reply)
 {
-  if ( !mTerminalRepliesAllowed )
+  if ( !mTerminalRepliesAllowed || !mTransmitEnabled )
     return;
   serial()->putStr( reply.constData() );
 }
@@ -1647,7 +1647,7 @@ void KomportEmulation::advanceCursorWithWrap()
 /** simulated key press for pasting from clipboard, etc... */
 void KomportEmulation::slotSimKeyPressed(QChar _c){
    KomportSerial* s = serial();
-   if ( s->isOpen() ) {
+   if ( mTransmitEnabled && s->isOpen() ) {
       s->putChar( KomportCharset::toWire(mCharset, _c, mCustomCharsetId) ); // Milestone 7
    }
 }

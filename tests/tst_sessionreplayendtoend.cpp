@@ -357,7 +357,19 @@ void TstSessionReplayEndToEnd::replayingARecordedPtySessionTransmitsNothing()
 
   QCOMPARE(written.count(), 0);
   QVERIFY2(peerStaysSilent(masterFd, 300, &why), qPrintable(why));
+  // Closing the offline session is the third phase of SPEC-M10 8's no-transport
+  // claim: it must neither write to, close, reconfigure nor otherwise touch the port.
+  const QJsonObject configurationBeforeClose = serial->appliedConfigurationSnapshot();
+  const int openedBeforeClose = opened.count();
+  const int reconfiguredBeforeClose = reconfigured.count();
   window.slotCloseOfflineSession();
+  QCOMPARE(serial->isOpen(), true);          // the offline close leaves the transport as it was
+  QCOMPARE(serial->appliedConfigurationSnapshot(), configurationBeforeClose);
+  QCOMPARE(written.count(), 0);
+  QCOMPARE(closed.count(), 0);
+  QCOMPARE(opened.count(), openedBeforeClose);
+  QCOMPARE(reconfigured.count(), reconfiguredBeforeClose);
+  QCOMPARE(failed.count(), 0);
   QVERIFY2(peerStaysSilent(masterFd, 100, &why), qPrintable(why));
 }
 

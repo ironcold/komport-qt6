@@ -18,6 +18,7 @@
 
 // include files for Qt
 #include <climits>
+#include <QPointer>
 #include <QDir>
 #include <QPrinter>
 #include <QPrintDialog>
@@ -1741,7 +1742,11 @@ void KomportApp::slotLoadSessionForReplay()
 
 bool KomportApp::loadSessionForReplayFile(const QString &_path)
 {
+  // The document announces the change synchronously; a receiver of that signal may
+  // delete this window, so nothing of it is touched after the call unless it survived.
+  QPointer<KomportApp> self( this );
   const SessionLoadOutcome outcome = doc->loadOfflineSession( _path );
+  if ( !self ) return outcome.ok;
   if ( !outcome.ok ) {
     // A refusal or a load failure enters no offline state and changes nothing.
     slotStatusMsg( tr("Session not loaded: %1").arg( outcome.reason ) );
@@ -1761,7 +1766,11 @@ void KomportApp::slotCloseOfflineSession()
 {
   // Permitted in every replay state (SPEC-M10 5.7); it opens no port and applies no
   // recorded setting. The document announces the change, and every window follows.
+  // The player's and the document's signals are synchronous; a receiver may delete
+  // this window, in which case there is nothing left to report to.
+  QPointer<KomportApp> self( this );
   doc->closeOfflineSession();
+  if ( !self ) return;
   slotStatusMsg( tr("Offline session closed.") );
 }
 
@@ -1800,7 +1809,9 @@ void KomportApp::slotReplayPlay()
 {
   SessionReplayPlayer *player = doc->getReplayPlayer();
   if ( !player ) return;
+  QPointer<KomportApp> self( this );   // play() emits synchronously; see slotCloseOfflineSession()
   const SessionReplayStart started = player->play();
+  if ( !self ) return;
   if ( !started.ok )
     slotStatusMsg( tr("Replay not started: %1").arg( started.reason ) );
   else
@@ -1811,7 +1822,9 @@ void KomportApp::slotReplayStop()
 {
   SessionReplayPlayer *player = doc->getReplayPlayer();
   if ( !player ) return;
+  QPointer<KomportApp> self( this );
   const SessionReplayReport report = player->stop();
+  if ( !self ) return;
   // Stop ends the replay for the user without replayFinished, so it carries the
   // accounting of what no pane renders as well.
   slotStatusMsg( tr("Replay stopped: %1 delivered, %2 remaining, %3 non-data event(s) not rendered")
@@ -1845,28 +1858,42 @@ void KomportApp::reportReplayStep(const SessionReplayStep &_step, const QString 
 
 void KomportApp::slotReplayStepEvent()
 {
-  if ( SessionReplayPlayer *player = doc->getReplayPlayer() )
-    reportReplayStep( player->stepNextEvent(), tr("event") );
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // the step emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStep step = player->stepNextEvent();
+  if ( !self ) return;
+  reportReplayStep( step, tr("event") );
 }
 
 void KomportApp::slotReplayStepRx()
 {
-  if ( SessionReplayPlayer *player = doc->getReplayPlayer() )
-    reportReplayStep( player->stepNextRx(), tr("RX data") );
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // the step emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStep step = player->stepNextRx();
+  if ( !self ) return;
+  reportReplayStep( step, tr("RX data") );
 }
 
 void KomportApp::slotReplayStepTx()
 {
-  if ( SessionReplayPlayer *player = doc->getReplayPlayer() )
-    reportReplayStep( player->stepNextTx(), tr("TX data") );
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // the step emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStep step = player->stepNextTx();
+  if ( !self ) return;
+  reportReplayStep( step, tr("TX data") );
 }
 
 void KomportApp::slotReplayTimingActivated(int _index)
 {
   SessionReplayPlayer *player = doc->getReplayPlayer();
   if ( !player ) return;
-  const SessionReplayTimingChange change =
-      player->setTiming( SessionReplayTiming( replayTimingCombo->itemData( _index ).toInt() ) );
+  const SessionReplayTiming requested = SessionReplayTiming( replayTimingCombo->itemData( _index ).toInt() );
+  QPointer<KomportApp> self( this );
+  const SessionReplayTimingChange change = player->setTiming( requested );
+  if ( !self ) return;
   // Never show a policy the player did not adopt: the selector is written from the
   // result, whether the change was accepted or refused.
   showReplayTiming( int(change.timing) );

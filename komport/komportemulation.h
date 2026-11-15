@@ -583,6 +583,15 @@ public:
   /** what the Return key/macro commands send at end-of-line */
   LineEnding lineEnding() const { return mLineEnding; }
   void setLineEnding(LineEnding _le) { mLineEnding = _le; }
+  /** Transmit gate (SPEC-M10 5.7.1/5.8, closing review 2026-11-15): while false, no
+   *  keystroke, simulated keystroke or terminal reply is written, whatever entry
+   *  reached this object and whatever the port's state. The gate is a plain setter
+   *  driven by the application (the one place that knows the process-wide offline
+   *  state); it protects against stray calls to the transmit entries, not against
+   *  code that deliberately reopens it - nothing in C++ could. The view drives it together
+   *  with its key-input flag; the replay render path never needed it (it is reply-free). */
+  void setTransmitEnabled(bool _enabled) { mTransmitEnabled = _enabled; }
+  bool transmitEnabled() const { return mTransmitEnabled; }
   /** the raw bytes for the current line ending, e.g. for use by callers
    *  that send a whole line themselves (the macro bar) */
   QByteArray lineEndingBytes() const;
@@ -685,6 +694,7 @@ private:
    *  entry sets it false through a scoped rollback and restores its caller's
    *  value on every exit (SPEC-M10 5.7) */
   bool mTerminalRepliesAllowed = true;
+  bool mTransmitEnabled = true;
   /** cell array  */
   KomportCellArray* mCellArray;
   /** terminal control sequence  */

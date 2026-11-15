@@ -750,7 +750,7 @@ a missing row instead of as an unexamined risk.
 | `New &Window` (`fileNewWindow`) | `slotFileNewWindow()` constructs a second `KomportApp`, whose construction runs `initProfiles()` -> `loadProfile()` -> `applyConnectionSettings()` (close, configure, open): a real live port reached from the offline user interface | disabled; `slotFileNewWindow()` refuses, so no second window and no port activation happens while a replay is loaded (review round 2, finding 2) |
 | profile combo (`profileCombo`), `Settings` (`showPreferences`) | `loadProfile()`/`applyConnectionSettings()` (close, configure, open) and the settings dialog | disabled; both entry points refuse before touching the port or opening a dialog |
 | `Save Profile` (`profileSave`), `Delete Profile` (`profileDelete`) | `QSettings` only - no port access; disabled because a profile describes the live connection and the offline state does not change connection configuration | disabled; both slots refuse |
-| terminal key input | `KomportView::keyPressed` -> `KomportEmulation::slotKeyPressed()` -> `putChar()`/`putStr()` | input suppressed: `KomportView::setKeyInputEnabled(false)` makes `keyPressEvent()` consume the event without emitting `keyPressed`, so the view keeps its focus, its selection and its scrolling but produces no bytes |
+| terminal key input | `KomportView::keyPressed` -> `KomportEmulation::slotKeyPressed()` -> `putChar()`/`putStr()` | input suppressed: `KomportView::setKeyInputEnabled(false)` makes `keyPressEvent()` consume the event without emitting `keyPressed`, so the view keeps its focus, its selection and its scrolling but produces no bytes; the public `KomportView::slotSimKeyPressed()` (the paste path) is closed by the same flag, and the flag is forwarded to the emulation's transmit gate `KomportEmulation::setTransmitEnabled()`, which `slotKeyPressed()`, `slotSimKeyPressed()` and the reply choke point `sendTerminalReply()` all consult - so a direct call to an emulation entry, or a terminal query on the live receive entry with a port open, writes nothing either while the gate is closed; the gate is an application-driven setter, so in-process code that deliberately reopens it is outside the claim (amendment 2026-11-15, closing review rounds 1-3) |
 | macro bar (`KomportMacroBar`) | `slotMacroTriggered()` -> `serial->putStr()` | disabled; `slotMacroTriggered()` refuses |
 | `Record Live Session...` (`recordLiveSession`) | `SessionRecorder` on the live path (`startSessionRecording()`) | disabled; `slotToggleSessionRecording()` and `startSessionRecording()` refuse |
 | `Record Session...` (the text logger, `recordSession`) | the legacy RX character signal -> a text file | disabled; `slotToggleRecording()` refuses (the logger is a live-path consumer and a replay cannot feed it) |
@@ -844,7 +844,10 @@ How that is checked, and what each check does and does not prove:
   not scanned) for the write names and `invokeMethod`. The same extraction audits the
   `KomportApp` functions the offline state drives, on the **preprocessed** text of
   `komport.cpp` (real include path, lines attributed to the file by the line markers):
-  the only transmitting `KomportApp` function is the macro slot, its first statement
+  the only function of `komport.cpp` that names a write entry itself is the macro slot (the
+  file-transfer slots transmit through `KomportTransfer`, whose writes the lexical audit does
+  not see; they are guarded by the same first-statement refusal and driven by
+  `invokingEachOfflineGuardedEntryPointReachesNoTransport` - amendment 2026-11-15), its first statement
   (judged on the raw spelling) is the offline refusal, and no replay-driven handler
   names a write entry point, `invokeMethod`, a port open/close/configure or a live
   receive/key entry. Every replay handler is also driven once against a live pty by
@@ -1377,14 +1380,16 @@ is criteria-based rather than a test inventory: §7 is the exhaustive plan, so a
 no criterion below names (the zero-event and zero-record readings, the reader's
 statelessness, the lifetime and report assertions) still runs as part of the suite.
 
-- [ ] A `.kpsession` v1 file written by M9's recorder loads into one offline session with
+- [x] A `.kpsession` v1 file written by M9's recorder loads into one offline session with
   every header fact typed, validated and every event verbatim -
   `sessionWithEveryEventTypeLoadsFieldByField`, `payloadsSurviveByteExactly`,
   `recordPrefixIsReadFieldByField`, `readerLimitsMatchTheWriterCodec`,
   `recordPtySessionThenLoadAndReplayByteExactly`, `zeroRecordFileIsAValidSessionWithNoEvents`,
   `zeroEventSessionRefusesPlayAndStep`, `theReaderHoldsNoStateBetweenLoads`,
-  `theReaderNeverTouchesTheLivePath`.
-- [ ] Every refusal of §5.3 is implemented, reported with its reason, and leaves no
+  `aValidFileEntersTheOfflineStateWithoutReplayingOrOpeningAPort` and the load phase of
+  `replayingARecordedPtySessionTransmitsNothing` (shipped evidence for the planned
+  `theReaderNeverTouchesTheLivePath`).
+- [x] Every refusal of §5.3 is implemented, reported with its reason, and leaves no
   session and no rendering; the header is read by applying ADR-006's required members and
   shapes (ADR-006 remaining the sole normative source of the format), and ADR-006's
   permitted optional content never refuses a file - `badMagicVersionOrEncodingRefusesTheFile`,
@@ -1401,16 +1406,16 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   `sessionTimeMustNotDecreaseInTheDomain`,
   `readErrorRefusesTheFileWithoutASession`,
   `aRefusedLoadReportsItsReasonAndEntersNoOfflineState`.
-- [ ] ADR-006's recovery rule is implemented as the only partial result and is reported -
+- [x] ADR-006's recovery rule is implemented as the only partial result and is reported -
   `recoveredTruncatedFinalRecordIsReportedNotDelivered`,
   `truncationInsideTheStartBlockOrHeaderRefusesTheFile`,
   `theRecoveryRuleSurvivesARealRecording`.
-- [ ] The source count is the one rule M10 adds to ADR-006: a file with more than one
+- [x] The source count is the one rule M10 adds to ADR-006: a file with more than one
   source is refused with the fixed message and no partial rendering, a file with none is
   refused with its own reason, and M10 adds no rule of its own about the number of clock
   domains (ADR-011 D2) - `multiSourceFileIsRefusedWithTheM10Message`,
   `fileWithoutASourceIsRefused`, `clockDomainCountIsNotAnM10Rule`.
-- [ ] Re-entrancy (step 3b): with a receiver of `eventDelivered`, `stateChanged` or
+- [x] Re-entrancy (step 3b): with a receiver of `eventDelivered`, `stateChanged` or
   `replayFinished` calling player operations, the player never delivers, arms, mutates or reports
   for a replay it no longer is - the §5.11 rules hold, `mayMutateReplay(snapshot, phase, expectedPosition)`
   authorizes exactly its own replay and phase, a superseded operation keeps its snapshot-based
@@ -1431,7 +1436,7 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   `aStopReportSurvivesAReceiverThatActsOnTheStateSignal`,
   `aNoOpStopFromAFinishedReceiverStillReportsTheCompletion`,
   `delayedReceiversSeeTheEventAfterAFirstSlotClosesThePlayer`.
-- [ ] Passive replay distributes the stored, immutable events in stored order to its
+- [x] Passive replay distributes the stored, immutable events in stored order to its
   consumer, with no gaps, duplication or modification, without mutating the session and
   with a report at the end and from `stop()` -
   `playDeliversEveryEventInStoredOrder`, `deliveredEventsAreTheStoredEvents`,
@@ -1441,14 +1446,14 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   `replayFinishedReportsDeliveredRemainingAndTiming`,
   `closeReleasesTheSessionAndReturnsToIdle`, `closeWhilePlayingCancelsAndReturnsToIdle`,
   `refusalsAreValuesThatChangeNothing`.
-- [ ] The timing ladder is complete and exact: original timing and 1x are the stored
+- [x] The timing ladder is complete and exact: original timing and 1x are the stored
   gaps, immediate is scheduled with delay 0, each scale multiplies or divides the stored
   gap with truncation, and no policy ever rewrites stored timing -
   `originalTimingUsesTheStoredSessionTimeGaps`, `scaleOneEqualsOriginalTiming`,
   `eachScaleMultipliesOrDividesTheStoredGap`, `equalStoredTimestampsDeliverWithoutDelayInOrder`,
   `changingTimingAppliesToTheNextEventOnly`, `theTimingLadderIsPresentInOrder`,
   `refusedTimingSelectionRestoresTheSelectorAndReportsIt`.
-- [ ] Step mode offers next event, next RX and next TX, delivers the inclusive prefix,
+- [x] Step mode offers next event, next RX and next TX, delivers the inclusive prefix,
   never advances on its own, refuses `play()` while selected and refuses to be selected
   while `Playing` (no implicit pause, no mixed state); "next decoded frame" is absent
   (M11) - `playingIsRefusedInStepMode`, `selectingStepWhilePlayingIsRefused`,
@@ -1457,12 +1462,12 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   `stepNextTxDeliversEveryEventUpToAndIncludingTheNextTx`,
   `stepPastTheLastMatchAdvancesToTheEndAndReportsNoMatch`, `stepIsRefusedWhilePlaying`,
   `stepAfterFinishIsRefused`.
-- [ ] Navigation is forward-only: start/restart, play/stop and the three steps exist, and
+- [x] Navigation is forward-only: start/restart, play/stop and the three steps exist, and
   no seek, position setter or range operation does -
   `stopPreservesPositionAndCount`, `playResumesFromThePreservedPosition`,
   `restartReplaysTheWholeStreamAgain`, `noSeekOperationExists` (static inspection,
   recorded as such in the self-review).
-- [ ] The offline state is explicit, exclusive and **process-wide**: the indicator reads
+- [x] The offline state is explicit, exclusive and **process-wide**: the indicator reads
   exactly `Offline Session — Passive Replay`, every output-relevant control of §5.7.1 -
   including `New &Window` and `Edit → Paste` - is disabled and every one of those entry
   points refuses when it is called directly, and loading is refused while any window has a
@@ -1479,7 +1484,7 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   `newWindowIsRefusedWhileAnyWindowIsOffline`,
   `offlineStateDisablesControlsInEveryOpenWindow`, `offlineGuardRefusesInEveryWindow`,
   `closingTheOfflineSessionRestoresTheLiveControls`, `loadingIsNotPersistedAcrossRuns`.
-- [ ] No code path can transmit: the player and reader hold no transport and no output
+- [x] No code path can transmit: the player and reader hold no transport and no output
   target, a replayed byte cannot answer the terminal, the offline state closes the
   user-facing transmit path, replay starts without a confirmation, and no bytes leave the
   process or reach a peer during loading or replay. The claim rests on the
@@ -1488,16 +1493,20 @@ statelessness, the lifetime and report assertions) still runs as part of the sui
   widget-free compile check is stated as covering widget/application types only -
   `offlineUnitsNameNoWriteEntryPointOrTransport`,
   `replayEntriesAndReplySitesPassTheSourceAudit`,
-  `replayedTerminalQueriesProduceNoReply`, `liveTerminalQueriesStillAnswer`,
+  `everyReplayedQueryIsRenderedButNotAnswered`,
+  `replayedTerminalQueriesThroughTheAdapterProduceNoReply`, `theLiveEntryPointsStillAnswer`,
   `noTransmitDuringReplay`, `invokingEachOfflineGuardedEntryPointReachesNoTransport`,
   `keyInputPasteAndMacrosWhileOfflineReachNoTransport`,
-  `theOfflineStateNeverOpensConfiguresOrWritesTheTransport`,
+  `aValidFileEntersTheOfflineStateWithoutReplayingOrOpeningAPort` (shipped name of the
+  planned `theOfflineStateNeverOpensConfiguresOrWritesTheTransport`; the pty observation
+  of load, replay and close is `replayingARecordedPtySessionTransmitsNothing` in
+  `tst_sessionreplayendtoend`),
   `recordedSettingsAreNeverApplied`, `replayingARecordedPtySessionTransmitsNothing`, and
   the widget-free contract check.
-- [ ] Loading and replaying render into the existing view and hex monitor byte-exactly,
+- [x] Loading and replaying render into the existing view and hex monitor byte-exactly,
   and the file is never modified - `replayRendersIntoTheSameViewAndHexMonitor`,
   `theFileIsUnchangedByLoading`, `closingTheOfflineSessionStopsARunningReplay`.
-- [ ] The existing full `ctest` suite passes warning-free under `-Wall -Wextra`, with
+- [x] The existing full `ctest` suite passes warning-free under `-Wall -Wextra`, with
   M9's reader, writer and tests unchanged - the regression statement of §7.
 
 ## 9. Risks
