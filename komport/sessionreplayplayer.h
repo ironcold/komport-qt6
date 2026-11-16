@@ -1,0 +1,241 @@
+/***************************************************************************
+                    sessionreplayplayer.h  -  Komport Serial Port Communicator
+                             -------------------
+    begin                : 2026
+    copyright            : (C) 2026 by Harald Stürmer
+    email                : ironcold@ironcold.de
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef SESSIONREPLAYPLAYER_H
+#define SESSIONREPLAYPLAYER_H
+
+// ADR-011 D6-D10 (accepted 2026-09-19) and SPEC-M10 sections 5.5, 5.6 and 5.10:
+// the read-only passive replay of one loaded session.
+//
+// The player has exactly one output - `eventDelivered` - and holds no transport,
+// no output target, no file and no widget. It distributes the stored, immutable
+// events of a session in stored order, at a timing the user chooses from the
+// ladder, forward-only, and reports every refusal as a value carrying a reason.
+// Automatic advancement always goes through the scheduler seam, one event per
+// callback, so `stop()` is honoured at a delivery boundary and no operation
+// blocks or iterates over the session.
+//
+// It never consults wall-clock time: every delay is computed from the stored
+// session timeline (`timestampNs`) and handed to the scheduler; the clock seam is
+// injected so that a test can prove that (ADR-005).
+//
+// QtCore only (ADR-009): the compile proof is in tests/session_contract_compile.cpp.
+
+#include "sessionreader.h"        // SessionFilePtr, SessionEvent
+#include "sessionreplayseams.h"   // SessionReplayScheduler, SessionMonotonicClock
+
+#include <QObject>
+#include <QString>
+
+#include <memory>
+
+/** The M10 timing ladder (ADR-011 D7; architecture section 9.1). */
+enum class SessionReplayTiming {
+  Original, Immediate,
+  Scale0_1, Scale0_25, Scale0_5, Scale1, Scale2, Scale5, Scale10,
+  Step
+};
+
+/** The player's states (ADR-011 D6). */
+enum class SessionReplayState { Idle, Ready, Playing, Paused, Finished };
+
+/** The result of `start()`: whether a session is attached. */
+struct SessionReplayStart {
+  bool ok = false;
+  QString reason;
+};
+
+/** The result of a step: a refusal is a value, and the command's effect is
+  * reported rather than assumed. */
+struct SessionReplayStep {
+  bool ok = false;
+  QString reason;
+  quint64 advanced = 0;      ///< events this call delivered
+  bool matched = false;      ///< the requested event/direction was found
+  bool reachedEnd = false;   ///< the position is at the end after the call
+};
+
+/** The result of a timing change: a refusal is a value, and `timing` is the
+  * policy in effect after the call (unchanged when `ok` is false). */
+struct SessionReplayTimingChange {
+  bool ok = false;
+  QString reason;
+  SessionReplayTiming timing = SessionReplayTiming::Original;
+};
+
+/** What a replay reports at its end and at an explicit stop. */
+struct SessionReplayReport {
+  quint64 delivered = 0;
+  quint64 remaining = 0;
+  quint64 position = 0;
+  bool finished = false;
+  SessionReplayTiming timing = SessionReplayTiming::Original;
+  QString reason;
+};
+
+struct SessionReplayPlayerSeamsForTest;
+
+/** Read-only passive replay of one loaded session (ADR-007, ADR-011 D6). QtCore only. */
+class SessionReplayPlayer : public QObject
+{
+  Q_OBJECT
+public:
+  explicit SessionReplayPlayer(QObject *parent = nullptr);
+  ~SessionReplayPlayer() override;    ///< cancels a pending delivery; emits nothing
+
+  /** Attach @p session and position at its first event; calling it again is the
+    * explicit restart (it stops a running replay first and resets the delivered
+    * count). Refuses only a null session. */
+  SessionReplayStart start(const SessionFilePtr &session);
+  /** Begin or resume automatic replay from the current position. */
+  SessionReplayStart play();
+  /** Stop; keep the position and the delivered count. Never an error. */
+  SessionReplayReport stop();
+  SessionReplayStep stepNextEvent();
+  SessionReplayStep stepNextRx();
+  SessionReplayStep stepNextTx();
+  /** Detach the session and return to `Idle`; cannot refuse. */
+  void close();
+  /** End of life (SPEC-M10 5.11 rule 11): takes over the ownership of @p player,
+    * makes it terminal - from now on every operation refuses with a reason, so a
+    * receiver of the closing `Idle` cannot restart it - and closes it, announcing
+    * `Idle`. If none of the player's own calls is on the stack it is then destroyed
+    * synchronously, here; otherwise (a receiver of one of its synchronous signals
+    * retires it) it deletes itself with `deleteLater()` when the outermost of those
+    * calls returns, so it is never freed under a call that will resume. Taking a
+    * `std::unique_ptr` is the ownership contract: a player that is not heap-owned
+    * by exactly one owner cannot be retired. */
+  static void retire(std::unique_ptr<SessionReplayPlayer> player);
+
+  SessionReplayState state() const;
+  SessionReplayTiming timing() const;
+  /** Change the timing policy; `Step` is refused while `Playing` (§5.6). */
+  SessionReplayTimingChange setTiming(SessionReplayTiming timing);
+  quint64 position() const;        ///< index of the next event to deliver
+  quint64 deliveredCount() const;
+  quint64 eventCount() const;      ///< 0 while `Idle`
+
+signals:
+  /** Exactly one stored event per delivery, in stored order, by `const`
+    * reference to a value that is never modified afterwards (ADR-011 D5). */
+  void eventDelivered(const SessionEvent &event);
+  void stateChanged(SessionReplayState state);
+  /** Emitted when an automatic replay delivers its last event; a step that
+    * reaches the end reports through its result value instead (§5.5/§5.6). */
+  void replayFinished(const SessionReplayReport &report);
+
+private:
+  /** Injection constructor for the SPEC-M10 5.10 seams; reachable only through
+    * `SessionReplayPlayerSeamsForTest`, because the seams are not public API. The
+    * injected objects are not owned and must outlive the player. */
+  SessionReplayPlayer(SessionReplayScheduler *scheduler, SessionMonotonicClock *clock,
+                      QObject *parent);
+  friend struct SessionReplayPlayerSeamsForTest;
+
+  /** Counts the player's own calls that are on the stack (SPEC-M10 5.11 rule 11):
+    * a retired player is only deleted when the count returns to zero. */
+  class CallScope
+  {
+  public:
+    explicit CallScope(SessionReplayPlayer *player) : mPlayer(player) { ++mPlayer->mCallDepth; }
+    ~CallScope()
+    {
+      if (--mPlayer->mCallDepth == 0 && mPlayer->mDeleteWhenUnwound) {
+        mPlayer->mDeleteWhenUnwound = false;
+        mPlayer->deleteLater();   // last statement: nothing touches the player afterwards
+      }
+    }
+    CallScope(const CallScope &) = delete;
+    CallScope &operator=(const CallScope &) = delete;
+
+  private:
+    SessionReplayPlayer *mPlayer;
+  };
+  friend class CallScope;
+
+  /** The delay before the event at @p index, from the stored session timeline. */
+  qint64 delayNsFor(quint64 index) const;
+  /** Ask the scheduler for the next delivery of the event at the current position. */
+  void scheduleNextDelivery();
+  /** The facts a continuation captured before the emission it guards (SPEC-M10 5.11). */
+  struct OperationSnapshot
+  {
+    quint64 scheduleToken = 0;
+    quint64 replayId = 0;
+    SessionFilePtr session;
+    SessionReplayState state = SessionReplayState::Idle;
+    quint64 position = 0;
+    quint64 delivered = 0;
+    SessionReplayTiming timing = SessionReplayTiming::Original;
+
+    bool sameReplay(const SessionReplayPlayer &player) const;
+    quint64 eventCount() const;
+    bool deliveryIsTheLastOne() const;
+    SessionReplayReport report() const;
+    SessionReplayReport completionReport() const;
+  };
+
+  /** The phase a continuation is in. SPEC-M10 5.11's table is the whole authorization model. */
+  enum class MutationPhase { Arm, Continue, Complete, StepContinue, Finish };
+
+  /** Capture the current facts; the only way to build an `OperationSnapshot`. */
+  OperationSnapshot captureSnapshot() const;
+  /** The single authorization of §5.11: may this continuation mutate the player? */
+  bool mayMutateReplay(const OperationSnapshot &snapshot, MutationPhase phase,
+                       quint64 expectedPosition) const;
+
+  /** The scheduled callback: deliver one event, then schedule the next or finish. The two
+    * identities it carries are the ones it was armed with (SPEC-M10 5.11). */
+  void onDeliveryDue(quint64 scheduleToken, quint64 replayId);
+  /** Deliver the event at the current position, emitting `eventDelivered` with a
+    * reference into @p snapshot's session - the snapshot keeps the stream alive
+    * for the whole emission, so a receiver that closes the player cannot leave
+    * the signal with a dangling reference (SPEC-M10 5.11: the snapshot's session
+    * is kept alive). */
+  void deliverAtCurrentPosition(const OperationSnapshot &snapshot);
+  /** The report of the current state (delivered, remaining, position, finished). */
+  SessionReplayReport report() const;
+  /** Enter @p state, emitting `stateChanged` only when it actually changes. */
+  void setState(SessionReplayState state);
+  /** Whether @p timing is one of the declared ladder entries. */
+  static bool isDeclaredTiming(SessionReplayTiming timing);
+  /** The refusal of a step in the current state, or an empty string. */
+  QString stepRefusal() const;
+  /** A step that looks for the next `Data` event of @p direction. */
+  SessionReplayStep stepToMatch(SessionDirection direction);
+  /** Perform a step, delivering everything up to and including @p matchIndex. */
+  SessionReplayStep performStep(qint64 matchIndex, bool matched);
+
+  SessionFilePtr mSession;             ///< the attached session, or null while Idle
+  SessionReplayState mState = SessionReplayState::Idle;
+  SessionReplayTiming mTiming = SessionReplayTiming::Original;
+  quint64 mPosition = 0;               ///< index of the next event to deliver
+  quint64 mDelivered = 0;
+  /** The identity of the *pending schedule* (SPEC-M10 5.11): bumped by every canceller. */
+  quint64 mScheduleToken = 0;
+  /** The identity of the *replay*: bumped by `start()` and `close()`, never by `stop()`. */
+  quint64 mReplayId = 0;
+  int mCallDepth = 0;               ///< the player's own calls on the stack (rule 11)
+  bool mRetired = false;            ///< terminal: every operation refuses (rule 11)
+  bool mDeleteWhenUnwound = false;  ///< retired while a call was on the stack (rule 11)
+  SessionReplayScheduler *mScheduler;  ///< injected or owned; see below
+  SessionMonotonicClock *mClock;       ///< injected or owned, and never consulted
+  std::unique_ptr<SessionReplayScheduler> mOwnedScheduler;  ///< the production default
+  std::unique_ptr<SessionMonotonicClock> mOwnedClock;       ///< the production default
+};
+
+#endif // SESSIONREPLAYPLAYER_H

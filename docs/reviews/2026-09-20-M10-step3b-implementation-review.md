@@ -1,0 +1,23 @@
+Verdict: **do not adopt or commit step 3b as it stands.**
+
+1. **Critical — blocking:** §5.11 rule 8 says a receiver that calls `stop()` from an interim step delivery ends the outer step, but the implementation deliberately lets that no-op `stop()` continue it. The test encodes the implementation, not the contract. [SPEC-M10-session-reader-passive-replay.md](/home/max/Development/misc/komport-qt6/docs/specs/SPEC-M10-session-reader-passive-replay.md:1034), [tst_sessionreplayplayer.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessionreplayplayer.cpp:1668)
+
+   Minimal fix: make a normative §5.11 amendment explicitly exempt a no-op `stop()` in `Ready`/`Paused` from rule 8, then adjust its prose/table and retain the test. The current text and code cannot both be accepted.
+
+2. **High — blocking:** `expectedPosition` is caller-trusted, although the table gives phase-specific coordinates. `Arm` and `Continue` have identical predicates; notably, the direct test declares a pre-delivery `Continue` authorized when passed position `0`, contradicting the table’s required `snapshot.position + 1`. [sessionreplayplayer.cpp](/home/max/Development/misc/komport-qt6/komport/sessionreplayplayer.cpp:237), [SPEC-M10-session-reader-passive-replay.md](/home/max/Development/misc/komport-qt6/docs/specs/SPEC-M10-session-reader-passive-replay.md:995), [tst_sessionreplayplayer.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessionreplayplayer.cpp:1731)
+
+   Minimal fix: have the helper verify the fixed `Arm`/`Continue` relations to the entry snapshot, and extend the direct test accordingly. For `StepContinue`, where progress is inherently supplied by the caller, add explicit positive and wrong-coordinate coverage against a real `Ready`/`Paused` step context.
+
+3. **High — blocking acceptance-evidence gap:** the test specified to pin the final-stop observable sequence does not inspect `signalLog` at all; it only checks final state/report. [SPEC-M10-session-reader-passive-replay.md](/home/max/Development/misc/komport-qt6/docs/specs/SPEC-M10-session-reader-passive-replay.md:1096), [tst_sessionreplayplayer.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessionreplayplayer.cpp:1595)
+
+   Minimal fix: clear the log before the final callback and assert exactly `eventDelivered → Paused → Finished → replayFinished`. Also assert the first stop’s captured timing in the transient-`Paused` matrix; it currently only checks the completion report’s timing. [tst_sessionreplayplayer.cpp](/home/max/Development/misc/komport-qt6/tests/tst_sessionreplayplayer.cpp:1813)
+
+4. **Medium — same-pass documentation correction:** §5.11 and the milestone/checklist still name the old two-argument helper, while implementation and the new contract use three arguments. The design note also leaves its superseded “per-delivery snapshot” proposal alongside the later entry-snapshot correction without marking it superseded. [SPEC-M10-session-reader-passive-replay.md](/home/max/Development/misc/komport-qt6/docs/specs/SPEC-M10-session-reader-passive-replay.md:979), [SPEC-M10-session-reader-passive-replay.md](/home/max/Development/misc/komport-qt6/docs/specs/SPEC-M10-session-reader-passive-replay.md:1492), [2026-09-20-M10-step3b-design-note.md](/home/max/Development/misc/komport-qt6/docs/reviews/2026-09-20-M10-step3b-design-note.md:22)
+
+   Minimal fix: update every normative/checklist signature to `mayMutateReplay(snapshot, phase, expectedPosition)` and label findings 1–2’s earlier proposal as superseded by finding 3.
+
+What is sound: the two identities bump at the specified points; same-session restart is protected by replay ID; completion correctly exempts only the schedule token; cancellation precedes state emission; snapshot-owned session lifetime protects later slots; and the QtCore-only boundary remains intact. The `Arm` and entry-snapshot amendments are directionally correct, but the position device is not sufficiently constrained or evidenced.
+
+Test assessment against `41460f8`: several named 3b tests appear vacuous individually—`aNoOpStopFromAFinishedReceiverStillReportsTheCompletion`, `aStopAtTheLastDeliveryStillCompletesTheReplay`, `aStepResultIsASnapshotThatAReceiverCannotRewrite`, and `timingChangedFromADeliverySlotAppliesToTheNextArming`; the no-op-stop row of the interrupted-step matrix is likewise core-compatible. The rest exercise behavior absent from, or unsafe in, 3a.
+
+I could run the existing player binary: 48/48 QtTest entries passed. I could not perform a clean rebuild or complete `ctest`: the read-only sandbox prevents CTest from writing `build/Testing/Temporary/LastTest.log`; nor could I build and run the `41460f8` baseline, so the vacuity assessment is static code comparison.

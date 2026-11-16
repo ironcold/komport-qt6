@@ -68,9 +68,9 @@ ADRs win.
   findings, pause, propose re-cutting the milestone or sharpening the spec instead
   of starting another text cycle.
 - **Language.** New ADRs, specs, milestone/backlog entries, design and review
-  documents, and engineering handoffs are written in English. Existing German
-  documents (`CLAUDE.md`, `TODO.md`, `TODO-ARCHIVE.md`, `docs/project-context.md`)
-  stay German and are not translated proactively.
+  documents, and engineering handoffs are written in English. Remaining German
+  documentation is translated to English in controlled, reviewed batches; do
+  not make unrelated content changes during that work.
 - Keep diffs small, local and testable. Do not invent APIs, commands, config
   fields or dependencies. Run the relevant validation and report the result.
 
@@ -87,7 +87,8 @@ Tests are Qt Test targets in `tests/` (run through `ctest`), and they force
 
 ## Where things are
 
-- `CLAUDE.md` — product vision, architecture overview, port history (German).
+- `CLAUDE.md` — product vision, architecture overview, port history (currently
+  German; scheduled for controlled translation).
 - `TODO.md` — open items, milestone roadmap; `TODO-ARCHIVE.md` — completed work.
 - `docs/komport-engineering-governance-spec-review-workflow.md` — the binding
   spec-first and review process.
@@ -97,7 +98,7 @@ Tests are Qt Test targets in `tests/` (run through `ctest`), and they force
   is accepted; its §17 lists the implementation steps).
 - `docs/reviews/` — the review record of the M8 foundation gate (pre-review, five
   independent rounds, consolidated amendment package, application verification).
-- `docs/project-context.md` — handover for new sessions (German).
+- `docs/project-context.md` — handover for new sessions.
 - `komport/` — sources; `tests/` — regression tests; `spike/qtermwidget-bridge/`
   — the ADR-001 spike, kept for the record.
 

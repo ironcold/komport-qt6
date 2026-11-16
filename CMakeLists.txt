@@ -93,6 +93,17 @@ add_library(komport_core OBJECT
   komport/sessionrecorder.cpp
   komport/sessionrecorder.h
   komport/sessionrecorderseams.h
+  # M10 reader (ADR-011, SPEC-M10): the read-only loader of the `.kpsession`
+  # container, QtCore-only like the rest of the session surface - the same
+  # header is compiled on its own against Qt6::Core by
+  # tests/session_contract_compile.cpp (ADR-009).
+  komport/sessionreader.cpp
+  komport/sessionreader.h
+  # M10 player (ADR-011 D6-D10, SPEC-M10 5.5/5.6/5.10): the read-only passive
+  # replay, QtCore-only like the rest of the session surface.
+  komport/sessionreplayplayer.cpp
+  komport/sessionreplayplayer.h
+  komport/sessionreplayseams.h
   komport/komport.qrc
 )
 

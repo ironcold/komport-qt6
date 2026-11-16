@@ -59,11 +59,18 @@ Q_MOC_INCLUDE("komportview.h")
 // this keeps its full definition out of every translation unit that includes this
 // header.
 Q_MOC_INCLUDE("sessionrecorder.h")
+// Same for the replay signals' types the M10 slots below take by reference.
+Q_MOC_INCLUDE("sessionreplayplayer.h")
 class KomportHexView;
 class KomportMacroBar;
 class KomportSessionLogger;
 /** The M9 recording report, declared in sessionrecorder.h (SPEC-M9 5.6). */
 struct SessionRecordingReport;
+/** The M10 replay types, declared in sessionreplayplayer.h / sessionreader.h. */
+struct SessionEvent;
+struct SessionReplayReport;
+struct SessionReplayStep;
+enum class SessionReplayState;
 
 /**
   * The base class for Komport application windows. It sets up the main
@@ -255,6 +262,61 @@ class KomportApp : public QMainWindow
     /** A recording that ended without a user action (a write or flush failure)
       *  still has to restore the user interface and tell the user. */
     void slotSessionRecordingEnded(const SessionRecordingReport &_report);
+    /** M10 (SPEC-M10 5.7): ask for a `.kpsession` file and load it for passive
+      *  replay. The dialog is modal and interactive, so the tests drive
+      *  loadSessionForReplayFile() instead. */
+    void slotLoadSessionForReplay();
+    /** M10: leave the offline state (SPEC-M10 5.7, `Close Session`). Permitted in
+      *  every replay state; opens no port and resumes nothing. */
+    void slotCloseOfflineSession();
+    /** M10: the document of this window entered or left the offline state - the
+      *  trigger for the process-wide user-interface update. */
+    void slotOfflineSessionChanged(bool _offline);
+    /** M10 (SPEC-M10 5.7): the replay controls. Each handler consumes the player's
+      *  result value instead of assuming success and reports a refusal through the
+      *  status mechanism; none of them is gated behind a confirmation (ADR-007). */
+    void slotReplayPlay();
+    void slotReplayStop();
+    void slotReplayStepEvent();
+    void slotReplayStepRx();
+    void slotReplayStepTx();
+    /** The user picked a timing-ladder entry: ask the player, then show the policy
+      *  the player reports - the selector is written only from a player result. */
+    void slotReplayTimingActivated(int _index);
+    /** The display adapter: render one delivered event into the terminal view (RX
+      *  data, through the reply-free replay entry) and the hex monitor (RX and TX
+      *  data, by the stored direction); other events are counted, not rendered. */
+    void slotReplayEventDelivered(const SessionEvent &_event);
+    void slotReplayFinished(const SessionReplayReport &_report);
+    void slotReplayStateChanged(SessionReplayState _state);
+
+  public:
+    /** M10 (SPEC-M10 5.7): the non-interactive part of slotLoadSessionForReplay(),
+      *  separated so that a load and its refusal are testable. Reports the outcome
+      *  through the status mechanism; returns false when nothing was loaded. */
+    bool loadSessionForReplayFile(const QString &_path);
+
+  private:
+    /** M10 (SPEC-M10 5.7.1): the offline guard every output-relevant entry point
+      *  starts with. True - after reporting the refusal through the status
+      *  mechanism - while this window or any other open window holds an offline
+      *  session; the caller returns without a side effect. The predicate is the
+      *  document's one process-wide `isAnyOfflineSession()`. */
+    bool refuseWhileOffline();
+    /** M10: apply the offline state to this window: the transmit, capture and
+      *  connection controls are disabled and key input is suppressed while any
+      *  window is offline; the indicator and `Close Session` follow this window's
+      *  own document. */
+    void updateOfflineUi();
+    /** M10: updateOfflineUi() for every open KomportApp window (the offline state is
+      *  process-wide, ADR-011 D11). */
+    static void updateOfflineUiForAllWindows();
+    /** M10: enable the replay controls that make sense in the player's state. */
+    void updateReplayControls();
+    /** M10: report a step result, with the non-data accounting when it ended the replay. */
+    void reportReplayStep(const SessionReplayStep &_step, const QString &_what);
+    /** M10: show @p _timing in the selector without triggering the handler. */
+    void showReplayTiming(int _timing);
 
   private:
     /** Bring the action's checked state and the persistent indicator in line with
@@ -304,6 +366,11 @@ class KomportApp : public QMainWindow
      *  and synchronously before open() returns, while the QSerialPort error of
      *  that same attempt is suppressed as its duplicate. */
     bool mSerialErrorPending = false;
+    /** M10: whether the controls currently carry the offline state (some window
+      *  holds an offline session). Kept as a member so that code which re-enables a
+      *  control on its own - the paste action, the recent-files menu - never undoes
+      *  the offline disabling, and so that it is usable before the document exists. */
+    bool mOfflineUi = false;
 
     // Actions
     QAction* fileNewWindow;
@@ -329,6 +396,22 @@ class KomportApp : public QMainWindow
     QAction* profileSave;
     /** deletes the profile selected in profileCombo */
     QAction* profileDelete;
+    /** M10: `Load Session for Replay...` (object name `loadSessionForReplay`) */
+    QAction* loadSessionForReplay;
+    /** M10: `Close Session` (object name `closeOfflineSession`); enabled exactly
+      *  while this window holds the offline session */
+    QAction* closeOfflineSessionAction;
+    /** M10 replay controls (object names replayPlay, replayStop, replayStepEvent,
+      *  replayStepRx, replayStepTx) and the timing ladder (replayTimingCombo) */
+    QAction* replayPlay;
+    QAction* replayStop;
+    QAction* replayStepEvent;
+    QAction* replayStepRx;
+    QAction* replayStepTx;
+    QComboBox* replayTimingCombo;
+    QToolBar* replayToolBar;
+    /** events the adapter delivered that no pane renders (non-data events) */
+    quint64 mReplayNonDataEvents = 0;
 
     // Menus/toolbar
     QMenu* fileOpenRecentMenu;
@@ -344,6 +427,9 @@ class KomportApp : public QMainWindow
       *  runs, so a recording is not invisible just because its menu is closed or
       *  another view has focus. Carries an object name for the tests. */
     QLabel* recordingStatusLabel;
+    /** M10: persistent offline indicator `offlineReplayStatusLabel`, visible exactly
+      *  while this window holds an offline session; its tooltip carries the path. */
+    QLabel* offlineReplayStatusLabel;
     /** left-hand status-bar label showing toolbar-icon hover hints and
      *  "Ready." when idle - a real ("normal", addWidget()) status-bar
      *  widget with QSizePolicy::Ignored horizontally, so its *allocated*

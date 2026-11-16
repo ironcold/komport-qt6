@@ -56,6 +56,11 @@ class KomportView : public QWidget
   // with a real QPainter and inspect the resulting painter font
   // deterministically, instead of a fragile pixel/rendering comparison.
   friend class TstAppearance;
+  /** M10 step 4: the view-level replay test drives the established pixel-based
+   *  selection setup (selectStart()/selectEnd()/select()), which is protected -
+   *  the same friend-for-testability pattern as TstAppearance/TstCharset, and it
+   *  adds no product API. */
+  friend class TstReplayReplyUi;
   public:
     /** Constructor for the main view */
     explicit KomportView(QWidget *parent = nullptr);
@@ -180,6 +185,8 @@ protected: // Protected methods
 private: // Private attributes
   /** character cell array */
   KomportCellArray mCellArray;
+  /** whether keyPressEvent() transmits; true unless a replay disables it */
+  bool mKeyInputEnabled = true;
   /** scroll buffer */
   KomportScrollBuffer mScrollBuffer;
   /** cursor time */
@@ -227,6 +234,10 @@ public slots: // Public slots
   void slotRowChanged(int _row);
   /** received a char */
   void slotReceivedChar(char _ch);
+  /** render a replayed char (SPEC-M10 5.7): forwards to the emulation's replay
+   *  entry, which answers nothing, and does the same display bookkeeping as the
+   *  live slot - its own slot, so the live connection stays untouched */
+  void slotReplayReceivedChar(char _ch);
   /** notification that the cell array has scrolled up so we need to scroll visually */
   void slotScrolledUp();
   /** before the actual scroll takes place */
@@ -237,6 +248,12 @@ public slots: // Public slots
   void slotSimKeyPressed(QChar _c);
   /** scroll bar moved */
   void slotScroll(int _value);
+  /** enable or suppress terminal key input (SPEC-M10 5.7.1): while suppressed,
+   *  keyPressEvent() consumes the event without emitting keyPressed, so the view
+   *  keeps its focus, its selection and its scrolling but produces no bytes */
+  void setKeyInputEnabled(bool _enabled);
+  /** whether key input is currently transmitted (default: yes) */
+  bool keyInputEnabled() const { return mKeyInputEnabled; }
 public: // Public attributes
   /** terminal emulation */
   KomportEmulation* mEmulation;

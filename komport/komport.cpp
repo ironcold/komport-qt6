@@ -17,6 +17,8 @@
  ***************************************************************************/
 
 // include files for Qt
+#include <climits>
+#include <QPointer>
 #include <QDir>
 #include <QPrinter>
 #include <QPrintDialog>
@@ -52,6 +54,7 @@
 #include "komporthexview.h"
 #include "komportmacrobar.h"
 #include "komportsessionlogger.h"
+#include "sessionreplayplayer.h"
 
 static const int MAX_RECENT_FILES = 10;
 
@@ -106,6 +109,8 @@ KomportApp::KomportApp(QWidget* parent):QMainWindow(parent)
   reconcileCharsetSelectionAfterReloadForAllWindows();
   seedBuiltinProfiles();
   initProfiles();
+  // M10: a window opened while another one replays starts in the offline state too.
+  updateOfflineUi();
 }
 
 KomportApp::~KomportApp()
@@ -116,6 +121,10 @@ KomportApp::~KomportApp()
   // WA_DeleteOnClose above) - now that they are, unregister this window's
   // view here, while doc/view are still valid, rather than leaving a
   // dangling pointer behind for the next slotUpdateAllViews() broadcast.
+  // M10: a window destroyed while it holds an offline session leaves the offline
+  // state first, so that the other windows' controls are restored (idempotent: the
+  // close path of closeEvent() has normally done this already).
+  doc->closeOfflineSession();
   doc->removeView( view );
 }
 
@@ -128,16 +137,19 @@ void KomportApp::initActions()
   // so a full sentence there just gets cut off (this is what "tooltips get
   // cut off in the menu" actually was).
   fileNewWindow = new QAction( tr("New &Window"), this );
+  fileNewWindow->setObjectName( QStringLiteral("fileNewWindow") ); // lets the M10 tests find the controls of SPEC-M10 5.7.1
   connect( fileNewWindow, &QAction::triggered, this, &KomportApp::slotFileNewWindow );
   fileNewWindow->setStatusTip( tr("Open a new window") );
 
   fileOpen = new QAction( QIcon::fromTheme(QStringLiteral("document-open")), tr("&Upload..."), this );
   fileOpen->setShortcut( QKeySequence::Open );
+  fileOpen->setObjectName( QStringLiteral("fileOpen") );
   connect( fileOpen, &QAction::triggered, this, &KomportApp::slotFileOpen );
   fileOpen->setStatusTip( tr("Upload a file") );
 
   fileSave = new QAction( QIcon::fromTheme(QStringLiteral("document-save")), tr("&Download..."), this );
   fileSave->setShortcut( QKeySequence::Save );
+  fileSave->setObjectName( QStringLiteral("fileSave") );
   connect( fileSave, &QAction::triggered, this, &KomportApp::slotFileSave );
   fileSave->setStatusTip( tr("Download a file") );
 
@@ -170,6 +182,7 @@ void KomportApp::initActions()
 
   editPaste = new QAction( QIcon::fromTheme(QStringLiteral("edit-paste")), tr("&Paste"), this );
   editPaste->setShortcut( QKeySequence::Paste );
+  editPaste->setObjectName( QStringLiteral("editPaste") );
   connect( editPaste, &QAction::triggered, this, &KomportApp::slotEditPaste );
   editPaste->setStatusTip( tr("Paste") );
   editPaste->setEnabled( false );
@@ -192,6 +205,7 @@ void KomportApp::initActions()
   // Terminal/Appearance tabs) - see TODO.md section 0.9 addendum.
   showPreferences = new QAction( QIcon::fromTheme(QStringLiteral("preferences-system")), tr("&Settings..."), this );
   showPreferences->setShortcut( QKeySequence::Preferences );
+  showPreferences->setObjectName( QStringLiteral("showPreferences") );
   connect( showPreferences, &QAction::triggered, this, &KomportApp::slotShowPreferences );
   showPreferences->setStatusTip( tr("Connection, terminal and appearance settings") );
 
@@ -207,6 +221,7 @@ void KomportApp::initActions()
 
   recordSession = new QAction( QIcon::fromTheme(QStringLiteral("media-record")), tr("&Record Session..."), this );
   recordSession->setCheckable( true );
+  recordSession->setObjectName( QStringLiteral("recordSession") );
   connect( recordSession, &QAction::toggled, this, &KomportApp::slotToggleRecording );
   recordSession->setStatusTip( tr("Log the session to a file") );
 
@@ -221,12 +236,46 @@ void KomportApp::initActions()
   recordLiveSession->setStatusTip( tr("Record the live session to a .kpsession file") );
 
   profileSave = new QAction( QIcon::fromTheme(QStringLiteral("document-save")), tr("Save Profile"), this );
+  profileSave->setObjectName( QStringLiteral("profileSave") );
   connect( profileSave, &QAction::triggered, this, &KomportApp::slotSaveProfile );
   profileSave->setStatusTip( tr("Save as this profile") );
 
   profileDelete = new QAction( QIcon::fromTheme(QStringLiteral("edit-delete")), tr("Delete Profile"), this );
+  profileDelete->setObjectName( QStringLiteral("profileDelete") );
   connect( profileDelete, &QAction::triggered, this, &KomportApp::slotDeleteProfile );
   profileDelete->setStatusTip( tr("Delete this profile") );
+
+  // M10: passive replay of a recorded session (SPEC-M10 5.7).
+  loadSessionForReplay = new QAction( QIcon::fromTheme(QStringLiteral("media-playback-start")), tr("Load Session for &Replay..."), this );
+  loadSessionForReplay->setObjectName( QStringLiteral("loadSessionForReplay") );
+  connect( loadSessionForReplay, &QAction::triggered, this, &KomportApp::slotLoadSessionForReplay );
+  loadSessionForReplay->setStatusTip( tr("Load a .kpsession file for passive replay") );
+
+  closeOfflineSessionAction = new QAction( tr("Close Sessio&n"), this );
+  closeOfflineSessionAction->setObjectName( QStringLiteral("closeOfflineSession") );
+  connect( closeOfflineSessionAction, &QAction::triggered, this, &KomportApp::slotCloseOfflineSession );
+  closeOfflineSessionAction->setStatusTip( tr("Close the loaded session and leave the offline state") );
+  closeOfflineSessionAction->setEnabled( false );
+
+  // M10 replay controls (SPEC-M10 5.7). The icons are theme icons with a text
+  // fallback, like the other actions.
+  auto makeReplayAction = [this](const char *name, const QString &text, const QString &icon, const QString &tip) {
+    auto *a = new QAction( QIcon::fromTheme(icon), text, this );
+    a->setObjectName( QString::fromLatin1(name) );
+    a->setStatusTip( tip );
+    a->setEnabled( false );
+    return a;
+  };
+  replayPlay = makeReplayAction( "replayPlay", tr("Play"), QStringLiteral("media-playback-start"), tr("Replay the loaded session from the current position") );
+  replayStop = makeReplayAction( "replayStop", tr("Stop"), QStringLiteral("media-playback-stop"), tr("Stop the replay, keeping the position") );
+  replayStepEvent = makeReplayAction( "replayStepEvent", tr("Step Event"), QStringLiteral("media-skip-forward"), tr("Deliver events up to and including the next event") );
+  replayStepRx = makeReplayAction( "replayStepRx", tr("Step RX"), QStringLiteral("go-down"), tr("Deliver events up to and including the next received data") );
+  replayStepTx = makeReplayAction( "replayStepTx", tr("Step TX"), QStringLiteral("go-up"), tr("Deliver events up to and including the next sent data") );
+  connect( replayPlay, &QAction::triggered, this, &KomportApp::slotReplayPlay );
+  connect( replayStop, &QAction::triggered, this, &KomportApp::slotReplayStop );
+  connect( replayStepEvent, &QAction::triggered, this, &KomportApp::slotReplayStepEvent );
+  connect( replayStepRx, &QAction::triggered, this, &KomportApp::slotReplayStepRx );
+  connect( replayStepTx, &QAction::triggered, this, &KomportApp::slotReplayStepTx );
 }
 
 void KomportApp::initMenus()
@@ -236,6 +285,7 @@ void KomportApp::initMenus()
   fileMenu->addSeparator();
   fileMenu->addAction( fileOpen );
   fileOpenRecentMenu = fileMenu->addMenu( tr("Upload &recent file") );
+  fileOpenRecentMenu->setObjectName( QStringLiteral("fileOpenRecentMenu") );
   fileMenu->addAction( fileSave );
   fileMenu->addSeparator();
   fileMenu->addAction( fileClose );
@@ -257,6 +307,15 @@ void KomportApp::initMenus()
   QMenu *sessionMenu = menuBar()->addMenu( tr("&Session") );
   sessionMenu->addAction( recordSession );
   sessionMenu->addAction( recordLiveSession );
+  sessionMenu->addSeparator();
+  sessionMenu->addAction( loadSessionForReplay );
+  sessionMenu->addAction( closeOfflineSessionAction );
+  sessionMenu->addSeparator();
+  sessionMenu->addAction( replayPlay );
+  sessionMenu->addAction( replayStop );
+  sessionMenu->addAction( replayStepEvent );
+  sessionMenu->addAction( replayStepRx );
+  sessionMenu->addAction( replayStepTx );
 
   QMenu *settingsMenu = menuBar()->addMenu( tr("&Settings") );
   settingsMenu->addAction( showPreferences );
@@ -290,6 +349,7 @@ void KomportApp::initToolBar()
   mainToolBar->addWidget( new QLabel( tr(" Profile: "), mainToolBar ) );
   profileCombo = new QComboBox( mainToolBar );
   profileCombo->setEditable( true );
+  profileCombo->setObjectName( QStringLiteral("profileCombo") );
   profileCombo->setInsertPolicy( QComboBox::NoInsert ); // typing a name doesn't add it to the list - Save does
   profileCombo->setMinimumContentsLength( 14 );
   profileCombo->setToolTip( tr("Device profile: pick one to load it, or type a new\n"
@@ -351,6 +411,39 @@ void KomportApp::initToolBar()
   // (see eventFilter()) - icon-to-icon moves are handled directly above,
   // this only catches leaving the last icon with nothing else to enter.
   mainToolBar->installEventFilter(this);
+
+  // M10: the replay controls, visible only in the window that holds a session.
+  replayToolBar = addToolBar( tr("Replay") );
+  replayToolBar->setObjectName( QStringLiteral("replayToolBar") );
+  replayToolBar->setToolButtonStyle( Qt::ToolButtonTextOnly );
+  replayToolBar->addAction( replayPlay );
+  replayToolBar->addAction( replayStop );
+  replayToolBar->addAction( replayStepEvent );
+  replayToolBar->addAction( replayStepRx );
+  replayToolBar->addAction( replayStepTx );
+  replayToolBar->addWidget( new QLabel( tr(" Timing: "), replayToolBar ) );
+  replayTimingCombo = new QComboBox( replayToolBar );
+  replayTimingCombo->setObjectName( QStringLiteral("replayTimingCombo") );
+  // The ladder of SPEC-M10 5.7, in this order; the item data is the player's enum.
+  const struct { SessionReplayTiming timing; QString label; } ladder[] = {
+    { SessionReplayTiming::Original, tr("Original") },
+    { SessionReplayTiming::Immediate, tr("Immediate") },
+    { SessionReplayTiming::Scale0_1, QStringLiteral("0.1x") },
+    { SessionReplayTiming::Scale0_25, QStringLiteral("0.25x") },
+    { SessionReplayTiming::Scale0_5, QStringLiteral("0.5x") },
+    { SessionReplayTiming::Scale1, QStringLiteral("1x") },
+    { SessionReplayTiming::Scale2, QStringLiteral("2x") },
+    { SessionReplayTiming::Scale5, QStringLiteral("5x") },
+    { SessionReplayTiming::Scale10, QStringLiteral("10x") },
+    { SessionReplayTiming::Step, tr("Step") },
+  };
+  for ( const auto &entry : ladder )
+    replayTimingCombo->addItem( entry.label, int(entry.timing) );
+  replayTimingCombo->setEnabled( false );
+  // activated: only a user pick, never the programmatic showReplayTiming().
+  connect( replayTimingCombo, QOverload<int>::of(&QComboBox::activated), this, &KomportApp::slotReplayTimingActivated );
+  replayToolBar->addWidget( replayTimingCombo );
+  replayToolBar->setVisible( false );
 }
 
 void KomportApp::initStatusBar()
@@ -383,6 +476,13 @@ void KomportApp::initStatusBar()
   recordingStatusLabel->setToolTip( tr("A live session recording is running") );
   statusBar()->addPermanentWidget( recordingStatusLabel );
   recordingStatusLabel->setVisible( false );
+
+  // M10: the offline indicator - the one state that must not be mistaken for a live
+  // connection, so it stays on screen exactly while a session is loaded for replay.
+  offlineReplayStatusLabel = new QLabel( tr("Offline Session — Passive Replay"), statusBar() );
+  offlineReplayStatusLabel->setObjectName( QStringLiteral("offlineReplayStatusLabel") );
+  statusBar()->addPermanentWidget( offlineReplayStatusLabel );
+  offlineReplayStatusLabel->setVisible( false );
 }
 
 void KomportApp::initDocument()
@@ -390,6 +490,7 @@ void KomportApp::initDocument()
   doc = new KomportDoc(this);
   QObject::connect(doc,SIGNAL(documentModified()),this,SLOT(slotDocumentModified()));
   QObject::connect(doc,SIGNAL(viewModified(KomportView*)),this,SLOT(slotViewModified(KomportView*)));
+  QObject::connect(doc, &KomportDoc::offlineSessionChanged, this, &KomportApp::slotOfflineSessionChanged);
   // M9: a recording can end without the user asking for it (a write or flush
   // failure ends it as damaged), and then the action and the indicator must not
   // keep claiming that it runs.
@@ -425,6 +526,7 @@ void KomportApp::initView()
 void KomportApp::initMacroBar()
 {
   macroBar = new KomportMacroBar(this);
+  macroBar->setObjectName( QStringLiteral("macroBar") );
   connect( macroBar, &KomportMacroBar::macroTriggered, this, &KomportApp::slotMacroTriggered );
 
   addToolBarBreak( Qt::BottomToolBarArea );
@@ -743,6 +845,7 @@ void KomportApp::reconcileCharsetSelectionAfterReloadForAllWindows()
 
 void KomportApp::loadProfile(const QString &_name)
 {
+  if ( refuseWhileOffline() ) return;
   if ( _name.isEmpty() ) return;
   config->beginGroup( QStringLiteral("Profiles") );
   config->beginGroup( _name );
@@ -826,6 +929,7 @@ void KomportApp::loadProfile(const QString &_name)
 
 void KomportApp::slotSaveProfile()
 {
+  if ( refuseWhileOffline() ) return;
   const QString name = profileCombo->currentText().trimmed();
   if ( name.isEmpty() ) {
     QMessageBox::warning( this, tr("Save Profile"), tr("Please enter a profile name first.") );
@@ -846,6 +950,7 @@ void KomportApp::slotSaveProfile()
 
 void KomportApp::slotDeleteProfile()
 {
+  if ( refuseWhileOffline() ) return;
   const QString name = profileCombo->currentText().trimmed();
   if ( name.isEmpty() || !profileNames().contains(name) ) {
     QMessageBox::information( this, tr("Delete Profile"), tr("\"%1\" is not a saved profile.").arg(name) );
@@ -892,7 +997,7 @@ void KomportApp::addRecentFile(const QUrl& url)
 void KomportApp::rebuildRecentFilesMenu()
 {
   fileOpenRecentMenu->clear();
-  fileOpenRecentMenu->setEnabled( !mRecentFiles.isEmpty() );
+  fileOpenRecentMenu->setEnabled( !mRecentFiles.isEmpty() && !mOfflineUi );
   for ( const QUrl &url : std::as_const(mRecentFiles) ) {
     QAction *action = fileOpenRecentMenu->addAction( url.toDisplayString() );
     connect( action, &QAction::triggered, this, [this, url]() { slotFileOpenRecent(url); } );
@@ -964,6 +1069,9 @@ void KomportApp::closeEvent(QCloseEvent *event)
     // document operation, so that the normative ordering is testable without a
     // window.
     const SessionRecordingReport report = doc->closeSession();
+    // M10: teardown is how the offline state is left (SPEC-M10 5.7.1); it writes
+    // nothing, and it restores the other windows' live controls.
+    doc->closeOfflineSession();
     if ( report.damaged )
       qWarning( "M9: the recording of %s ended damaged after %llu complete records and %lld bytes in %.1f s: %s",
                 qPrintable( report.path ), report.records, report.bytes,
@@ -1013,6 +1121,9 @@ bool KomportApp::eventFilter(QObject *watched, QEvent *event)
 
 void KomportApp::slotFileNewWindow()
 {
+  // A second window would run initProfiles() -> applyConnectionSettings(): a live
+  // port reached from the offline state (SPEC-M10 5.7.1).
+  if ( refuseWhileOffline() ) return;
   slotStatusMsg(tr("Opening a new application window..."));
 
   KomportApp *new_window= new KomportApp();
@@ -1041,6 +1152,7 @@ void KomportApp::slotFileNew()
 
 void KomportApp::slotFileOpen()
 {
+  if ( refuseWhileOffline() ) return;
   slotStatusMsg(tr("Uploading file..."));
   QString fileName = QFileDialog::getOpenFileName( this, tr("Upload File...") );
   if ( !fileName.isEmpty() )
@@ -1061,6 +1173,7 @@ void KomportApp::slotFileOpen()
 
 void KomportApp::slotFileOpenRecent(const QUrl& url)
 {
+  if ( refuseWhileOffline() ) return;
   slotStatusMsg(tr("Uploading file..."));
   if(!url.isEmpty())
     {
@@ -1080,6 +1193,7 @@ void KomportApp::slotFileSave()
 
 void KomportApp::slotFileSaveAs()
 {
+  if ( refuseWhileOffline() ) return;
   slotStatusMsg(tr("Downloading a file..."));
   QString fileName = QFileDialog::getSaveFileName( this, tr("Save as..."), QDir::currentPath() );
   if ( !fileName.isEmpty() )
@@ -1171,6 +1285,7 @@ void KomportApp::slotEditCopy()
 
 void KomportApp::slotEditPaste()
 {
+  if ( refuseWhileOffline() ) return;
   slotStatusMsg(tr("Inserting clipboard contents..."));
   QClipboard* cb = QApplication::clipboard();
   QString str = cb->text( QClipboard::Clipboard );
@@ -1197,6 +1312,7 @@ void KomportApp::slotViewStatusBar()
 
 void KomportApp::slotShowPreferences()
 {
+  if ( refuseWhileOffline() ) return;
   slotStatusMsg(tr("Open settings form..."));
   // Reset here, at the very start - not just before the settings are
   // applied below - so an error reported while the modal dialog itself is
@@ -1385,7 +1501,8 @@ void KomportApp::slotSerialSettingsFailed(const QString &_reason){
 /** No descriptions */
 void KomportApp::slotViewModified(KomportView* _v){
     editCopy->setEnabled( _v->hasSelection() );
-    editPaste->setEnabled( !QApplication::clipboard()->text( QClipboard::Clipboard ).isEmpty() );
+    // never re-enabled by a clipboard change while a session is loaded (M10)
+    editPaste->setEnabled( !mOfflineUi && !QApplication::clipboard()->text( QClipboard::Clipboard ).isEmpty() );
 }
 /** get configuration object */
 QSettings* KomportApp::getConfig(){
@@ -1401,6 +1518,7 @@ void KomportApp::slotViewHexMonitor(bool checked)
 /** send a macro bar command (plus the configured line ending) */
 void KomportApp::slotMacroTriggered(const QString &command)
 {
+  if ( refuseWhileOffline() ) return;
   KomportSerial *serial = view->getSerial();
   if ( !serial->isOpen() || command.isEmpty() ) return;
   // Milestone 7 (Codex review finding): route each character through the
@@ -1435,6 +1553,7 @@ void KomportApp::slotMacroTriggered(const QString &command)
 /** toggles session logging - prompts for a file to start, if not already logging */
 void KomportApp::slotToggleRecording(bool checked)
 {
+  if ( refuseWhileOffline() ) return;
   if ( checked ) {
     QString fileName = QFileDialog::getSaveFileName( this, tr("Start Session Log..."), QDir::currentPath(),
                                                        tr("Text files (*.log *.txt);;All files (*)") );
@@ -1456,6 +1575,7 @@ void KomportApp::slotToggleRecording(bool checked)
 
 void KomportApp::slotToggleSessionRecording(bool checked)
 {
+  if ( refuseWhileOffline() ) return;
   if ( !checked ) {
     const SessionRecordingReport report = doc->getSessionRecorder()->stop();
     updateRecordingUi();
@@ -1480,6 +1600,7 @@ void KomportApp::slotToggleSessionRecording(bool checked)
 
 bool KomportApp::startSessionRecording(const QString &_path)
 {
+  if ( refuseWhileOffline() ) return false;
   SessionRecordingRequest request;
   request.path = _path;
   request.applicationName = QStringLiteral("Komport");
@@ -1542,4 +1663,270 @@ void KomportApp::slotLineEndingChanged(const QString &text)
   else if ( text == QLatin1String("CR+LF") ) le = KomportEmulation::LineEnding::CRLF;
   view->mEmulation->setLineEnding(le);
   updateConnectionStatusLabel();
+}
+
+/////////////////////////////////////////////////////////////////////
+// M10: OFFLINE STATE AND PASSIVE REPLAY (SPEC-M10 5.7)
+/////////////////////////////////////////////////////////////////////
+
+bool KomportApp::refuseWhileOffline()
+{
+  if ( !doc->isAnyOfflineSession() ) return false;
+  slotStatusMsg( tr("a loaded offline session is being replayed - close it first") );
+  return true;
+}
+
+void KomportApp::updateOfflineUi()
+{
+  const bool offline = doc->isAnyOfflineSession();   // process-wide
+  const bool mine = doc->hasOfflineSession();
+  mOfflineUi = offline;
+  const bool live = !offline;
+
+  // SPEC-M10 5.7.1: every control that can transmit, capture the live path or
+  // change the connection. The entry points refuse as well; this is the affordance.
+  fileNewWindow->setEnabled( live );
+  fileOpen->setEnabled( live );
+  fileSave->setEnabled( live );
+  fileOpenRecentMenu->setEnabled( live && !mRecentFiles.isEmpty() );
+  editPaste->setEnabled( live && !QApplication::clipboard()->text( QClipboard::Clipboard ).isEmpty() );
+  recordSession->setEnabled( live );
+  recordLiveSession->setEnabled( live );
+  profileCombo->setEnabled( live );
+  profileSave->setEnabled( live );
+  profileDelete->setEnabled( live );
+  showPreferences->setEnabled( live );
+  macroBar->setEnabled( live );
+  view->setKeyInputEnabled( live );
+
+  offlineReplayStatusLabel->setToolTip( mine ? doc->offlinePath() : QString() );
+  offlineReplayStatusLabel->setVisible( mine );
+  closeOfflineSessionAction->setEnabled( mine );
+
+  replayToolBar->setVisible( mine );
+  updateReplayControls();
+}
+
+void KomportApp::updateOfflineUiForAllWindows()
+{
+  const QWidgetList windows = QApplication::topLevelWidgets();
+  for ( QWidget *w : windows ) {
+    if ( auto *win = qobject_cast<KomportApp*>(w) )
+      win->updateOfflineUi();
+  }
+}
+
+void KomportApp::slotOfflineSessionChanged(bool _offline)
+{
+  if ( _offline ) {
+    // This window holds the new session: subscribe the display adapter to its
+    // player. The connections die with the player when the session is closed.
+    if ( SessionReplayPlayer *player = doc->getReplayPlayer() ) {
+      mReplayNonDataEvents = 0;
+      connect( player, &SessionReplayPlayer::eventDelivered, this, &KomportApp::slotReplayEventDelivered );
+      connect( player, &SessionReplayPlayer::replayFinished, this, &KomportApp::slotReplayFinished );
+      connect( player, &SessionReplayPlayer::stateChanged, this, &KomportApp::slotReplayStateChanged );
+    }
+  }
+  // The offline state is process-wide: every window follows, not only this one.
+  updateOfflineUiForAllWindows();
+}
+
+void KomportApp::slotLoadSessionForReplay()
+{
+  const QString fileName = QFileDialog::getOpenFileName( this, tr("Load Session for Replay..."), QDir::currentPath(),
+                                                         tr("Komport session files (*.kpsession);;All files (*)") );
+  if ( fileName.isEmpty() ) return;   // cancelled: nothing to load, nothing to report
+  loadSessionForReplayFile( fileName );
+}
+
+bool KomportApp::loadSessionForReplayFile(const QString &_path)
+{
+  // The document announces the change synchronously; a receiver of that signal may
+  // delete this window, so nothing of it is touched after the call unless it survived.
+  QPointer<KomportApp> self( this );
+  const SessionLoadOutcome outcome = doc->loadOfflineSession( _path );
+  if ( !self ) return outcome.ok;
+  if ( !outcome.ok ) {
+    // A refusal or a load failure enters no offline state and changes nothing.
+    slotStatusMsg( tr("Session not loaded: %1").arg( outcome.reason ) );
+    return false;
+  }
+  // Qt's numerus API takes an int; a session beyond INT_MAX events would need more
+  // than 90 GB of records, so the narrowing only bounds the status text.
+  const int pluralCount = int( qMin<quint64>( outcome.eventCount, quint64(INT_MAX) ) );
+  QString message = tr("Loaded %1 for replay: %n event(s)", nullptr, pluralCount).arg( _path );
+  if ( outcome.recoveredTruncatedFinalRecord )
+    message += tr(" - the truncated final record was dropped, the complete prefix was loaded");
+  slotStatusMsg( message );
+  return true;
+}
+
+void KomportApp::slotCloseOfflineSession()
+{
+  // Permitted in every replay state (SPEC-M10 5.7); it opens no port and applies no
+  // recorded setting. The document announces the change, and every window follows.
+  // The player's and the document's signals are synchronous; a receiver may delete
+  // this window, in which case there is nothing left to report to.
+  QPointer<KomportApp> self( this );
+  doc->closeOfflineSession();
+  if ( !self ) return;
+  slotStatusMsg( tr("Offline session closed.") );
+}
+
+/////////////////////////////////////////////////////////////////////
+// M10: THE REPLAY CONTROLS AND THE DISPLAY ADAPTER (SPEC-M10 5.7)
+/////////////////////////////////////////////////////////////////////
+
+void KomportApp::updateReplayControls()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  const bool mine = player != nullptr;
+  const SessionReplayState state = mine ? player->state() : SessionReplayState::Idle;
+  const bool playing = state == SessionReplayState::Playing;
+  const bool finished = state == SessionReplayState::Finished;
+  // The player refuses what does not apply and says why; these only keep the
+  // affordance honest, they are not the guard.
+  replayPlay->setEnabled( mine && !playing && !finished );
+  replayStop->setEnabled( mine && playing );
+  const bool canStep = mine && !playing && !finished;
+  replayStepEvent->setEnabled( canStep );
+  replayStepRx->setEnabled( canStep );
+  replayStepTx->setEnabled( canStep );
+  replayTimingCombo->setEnabled( mine );
+  if ( mine ) showReplayTiming( int(player->timing()) );
+}
+
+void KomportApp::showReplayTiming(int _timing)
+{
+  const int index = replayTimingCombo->findData( _timing );
+  if ( index < 0 ) return;
+  const QSignalBlocker blocker( replayTimingCombo );
+  replayTimingCombo->setCurrentIndex( index );
+}
+
+void KomportApp::slotReplayPlay()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // play() emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStart started = player->play();
+  if ( !self ) return;
+  if ( !started.ok )
+    slotStatusMsg( tr("Replay not started: %1").arg( started.reason ) );
+  else
+    slotStatusMsg( tr("Replaying the session...") );
+}
+
+void KomportApp::slotReplayStop()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );
+  const SessionReplayReport report = player->stop();
+  if ( !self ) return;
+  // Stop ends the replay for the user without replayFinished, so it carries the
+  // accounting of what no pane renders as well.
+  slotStatusMsg( tr("Replay stopped: %1 delivered, %2 remaining, %3 non-data event(s) not rendered")
+                     .arg( report.delivered ).arg( report.remaining ).arg( mReplayNonDataEvents ) );
+}
+
+namespace {
+/** One line for the result of a step. */
+QString stepSummary(const SessionReplayStep &_step, const QString &_what)
+{
+  if ( !_step.ok )
+    return KomportApp::tr("Step refused: %1").arg( _step.reason );
+  if ( !_step.matched )
+    return KomportApp::tr("No further %1 - %2 event(s) delivered up to the end of the session").arg( _what ).arg( _step.advanced );
+  return KomportApp::tr("Stepped: %1 event(s) delivered up to the next %2").arg( _step.advanced ).arg( _what );
+}
+} // namespace
+
+void KomportApp::reportReplayStep(const SessionReplayStep &_step, const QString &_what)
+{
+  QString message = stepSummary( _step, _what );
+  // No pane renders non-data events, and a step reports only through its result, so
+  // every successful step that has delivered any (cumulatively) discloses them, and
+  // the step that ends the replay always states the count, zero included - there is
+  // no replayFinished for it.
+  if ( _step.ok && ( _step.reachedEnd || mReplayNonDataEvents > 0 ) )
+    message += ( _step.reachedEnd ? tr(" - end of the session, ") : tr(" - ") )
+        + tr("%1 non-data event(s) not rendered").arg( mReplayNonDataEvents );
+  slotStatusMsg( message );
+}
+
+void KomportApp::slotReplayStepEvent()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // the step emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStep step = player->stepNextEvent();
+  if ( !self ) return;
+  reportReplayStep( step, tr("event") );
+}
+
+void KomportApp::slotReplayStepRx()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // the step emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStep step = player->stepNextRx();
+  if ( !self ) return;
+  reportReplayStep( step, tr("RX data") );
+}
+
+void KomportApp::slotReplayStepTx()
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  QPointer<KomportApp> self( this );   // the step emits synchronously; see slotCloseOfflineSession()
+  const SessionReplayStep step = player->stepNextTx();
+  if ( !self ) return;
+  reportReplayStep( step, tr("TX data") );
+}
+
+void KomportApp::slotReplayTimingActivated(int _index)
+{
+  SessionReplayPlayer *player = doc->getReplayPlayer();
+  if ( !player ) return;
+  const SessionReplayTiming requested = SessionReplayTiming( replayTimingCombo->itemData( _index ).toInt() );
+  QPointer<KomportApp> self( this );
+  const SessionReplayTimingChange change = player->setTiming( requested );
+  if ( !self ) return;
+  // Never show a policy the player did not adopt: the selector is written from the
+  // result, whether the change was accepted or refused.
+  showReplayTiming( int(change.timing) );
+  if ( !change.ok )
+    slotStatusMsg( tr("Timing not changed: %1").arg( change.reason ) );
+}
+
+void KomportApp::slotReplayEventDelivered(const SessionEvent &_event)
+{
+  // Display only: nothing here calls into the player or the transport (a receiver
+  // of the player's synchronous signal must not mutate it, SPEC-M10 5.11).
+  if ( _event.type != SessionEventType::Data ) {
+    ++mReplayNonDataEvents;
+    return;
+  }
+  const bool rx = _event.direction == SessionDirection::Rx;
+  for ( const char byte : _event.payload ) {
+    if ( rx ) {
+      view->slotReplayReceivedChar( byte );   // the reply-free entry, never the live one
+      hexView->appendRx( byte );
+    } else {
+      hexView->appendTx( byte );
+    }
+  }
+}
+
+void KomportApp::slotReplayFinished(const SessionReplayReport &_report)
+{
+  slotStatusMsg( tr("Replay finished: %1 event(s) delivered, %2 non-data event(s) not rendered")
+                     .arg( _report.delivered ).arg( mReplayNonDataEvents ) );
+}
+
+void KomportApp::slotReplayStateChanged(SessionReplayState)
+{
+  updateReplayControls();
 }

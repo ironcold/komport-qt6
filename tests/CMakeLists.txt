@@ -50,6 +50,58 @@ target_link_libraries(tst_sessionrecordingui PRIVATE util)
 # the chunking property (one record per accepted unit, not per character).
 komport_add_test(tst_sessionrecordingendtoend)
 target_link_libraries(tst_sessionrecordingendtoend PRIVATE util)
+# M10: the `.kpsession` reader (ADR-006 applied, ADR-011 D1-D4). Uses the
+# injected byte-source seam and real temp files; no pty, hence no libutil.
+komport_add_test(tst_sessionreader)
+# M10: the passive replay player (ADR-011 D6-D10, SPEC-M10 5.5/5.6). Uses the
+# scripted scheduler and the counting clock, so no wall-clock time and no pty.
+komport_add_test(tst_sessionreplayplayer)
+# M10 step 5: the document-level offline state (SPEC-M10 5.7/5.9) - ownership,
+# the process-wide loading preconditions and the close path. Uses a pty for the
+# live/recording preconditions, hence libutil.
+komport_add_test(tst_sessionofflinedocument)
+target_link_libraries(tst_sessionofflinedocument PRIVATE util)
+# M10 step 8: the end-to-end proof over a real pty - M9 recorder, M10 reader and
+# player, byte-exact replay, a silent peer and the recovery rule.
+komport_add_test(tst_sessionreplayendtoend)
+target_link_libraries(tst_sessionreplayendtoend PRIVATE util)
+# M10: the reply-free rendering path (SPEC-M10 5.7/5.8) - the live entry points
+# still answer, a replayed query is rendered but not answered. Uses a real pty as
+# the peer and ITransport::bytesWritten as the observation, so it links libutil.
+komport_add_test(tst_replayreply)
+target_link_libraries(tst_replayreply PRIVATE util)
+# The source audit part of that test reads the two emulation files, so their
+# paths are compiled in rather than guessed from the working directory.
+# M10 step 4 at the view level: a real KomportApp offscreen drives the replay
+# rendering through KomportView::slotReplayReceivedChar() and the key-input
+# suppression with a real key event. Uses a pty as the peer, so it links libutil.
+komport_add_test(tst_replayreplyui)
+target_link_libraries(tst_replayreplyui PRIVATE util)
+target_compile_definitions(tst_replayreply PRIVATE
+  KOMPORT_EMULATION_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportemulation.cpp"
+  KOMPORT_EMULATION_HEADER="${CMAKE_SOURCE_DIR}/komport/komportemulation.h"
+  KOMPORT_VIEW_SOURCE="${CMAKE_SOURCE_DIR}/komport/komportview.cpp"
+  KOMPORT_APP_SOURCE="${CMAKE_SOURCE_DIR}/komport/komport.cpp"
+  KOMPORT_SOURCE_DIR="${CMAKE_SOURCE_DIR}/komport"
+  # the compiler-aware part of the offline-unit dependency audit: the compiler that
+  # builds the project lists every header the four units really pull in
+  KOMPORT_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
+  # the compile definitions of the audited units, mirrored from the build's own
+  # flags.make (komport_core: the five Qt module guards; the contract check: QT_CORE_LIB).
+  # Not read from the targets by generator expression: referencing komport_core's
+  # COMPILE_DEFINITIONS here drops the Qt guards from this very test, whose QTEST_MAIN
+  # then picks the wrong application class. The list is a documented mirror: if the build
+  # ever gains a module guard, update it here (the audit's limit, see SPEC-M10 5.8).
+  KOMPORT_APP_DEFINES="QT_CORE_LIB|QT_GUI_LIB|QT_WIDGETS_LIB|QT_PRINTSUPPORT_LIB|QT_SERIALPORT_LIB"
+  KOMPORT_OFFLINE_DEFINES="QT_CORE_LIB"
+  KOMPORT_CORE_INCLUDE_DIRS="$<JOIN:$<TARGET_PROPERTY:Qt6::Core,INTERFACE_INCLUDE_DIRECTORIES>,|>"
+  # the same for the application translation unit, which needs the widget modules
+  KOMPORT_APP_INCLUDE_DIRS="$<JOIN:$<TARGET_PROPERTY:Qt6::Widgets,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::Gui,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::PrintSupport,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::SerialPort,INTERFACE_INCLUDE_DIRECTORIES>,|>|$<JOIN:$<TARGET_PROPERTY:Qt6::Core,INTERFACE_INCLUDE_DIRECTORIES>,|>")
+# M10 step 6a: the application wiring of the offline state (SPEC-M10 5.7/5.7.1) in
+# real offscreen windows - indicator, controls in every window, the offline guard
+# inside every entry point. Uses a pty as the peer, so it links libutil.
+komport_add_test(tst_sessionreplayui)
+target_link_libraries(tst_sessionreplayui PRIVATE util)
 komport_add_test(tst_windowlifetime)
 komport_add_test(tst_profileerror)
 komport_add_test(tst_selection)
@@ -71,6 +123,8 @@ add_library(komport_session_contract_check OBJECT
   ${CMAKE_SOURCE_DIR}/komport/sessioncontroller.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionrecordcodec.cpp
   ${CMAKE_SOURCE_DIR}/komport/sessionrecorder.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessionreader.cpp
+  ${CMAKE_SOURCE_DIR}/komport/sessionreplayplayer.cpp
 )
 target_include_directories(komport_session_contract_check PRIVATE ${CMAKE_SOURCE_DIR}/komport)
 target_link_libraries(komport_session_contract_check PRIVATE Qt6::Core)

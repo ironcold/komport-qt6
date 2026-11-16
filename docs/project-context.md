@@ -1,160 +1,81 @@
-# Projektkontext und Vereinbarungen
+# Project Context and Agreements
 
-Stand: 2026-09-18
+As of: 2026-09-18
 
-Diese Datei ist die zentrale Uebergabe fuer neue Chats und Entwicklungs-Sessions.
-Sie soll bei neuen Zielen, fachlichen Entscheidungen, Architekturaenderungen und
-wichtigen Betriebsabsprachen aktuell gehalten werden. Die kurze agentenbezogene
-Arbeitsanweisung steht in `AGENTS.md`, die ausfuehrliche Produkt-/Architektur-
-referenz in `CLAUDE.md`.
+This file is the central handoff for new chats and development sessions. It shall be kept up to date with new goals, technical decisions, architectural changes, and important operational agreements. Brief agent-specific instructions are in `AGENTS.md`, and the detailed product/architecture reference is in `CLAUDE.md`.
 
-## Workspace-Struktur
+## Workspace Structure
 
 ```text
 /home/max/Development/misc/komport-qt6/
 ```
 
-Ein eigenstaendiges Projekt; es gehoert nicht zum Billard-Arena-Arbeitsbereich,
-und aus anderen Repositories duerfen keine Annahmen uebernommen werden. Remotes:
-`origin` (Codeberg) und `github`. Branch `master` traegt den Stand `1.0.0`, die
-Session-/Transport-Arbeit laeuft auf `v2/session-platform`.
+This is an independent project; it does not belong to the Billard-Arena workspace, and no assumptions from other repositories may be adopted. The remotes are `origin` (Codeberg) and `github`. Branch `master` is at version `1.0.0`; work on the session/transport layer is on `v2/session-platform`.
 
 ## Architecture Decision Records
 
-Tiefere Begruendungen liegen in `docs/architecture-decisions/`:
+Deeper justifications are located in `docs/architecture-decisions/`:
 
-- `ADR-001` — Terminal-Engine-Strategie: QTermWidget als Backend geprueft und
-  verworfen, Status: rejected (Spike in `spike/qtermwidget-bridge/`).
-- `ADR-002` … `ADR-009` — Session-Event-Modell, Transportschnittstelle,
-  TX/RX-Semantik, Zeitstempel-Semantik, `.kpsession`-Format, Replay-Sicherheit,
-  Mehrquellen-/Zeitausrichtung, Multi-Executable-Produktarchitektur.
-  Status: accepted (2026-09-18, nach unabhaengigem Review-Gate).
+- `ADR-001` — Terminal Engine Strategy: QTermWidget examined as a backend and rejected, status: rejected (Spike in `spike/qtermwidget-bridge/`).
+- `ADR-002` … `ADR-009` — Session event model, transport interface, TX/RX semantics, timestamp semantics, `.kpsession` format, replay safety, multi-source/time alignment, multi-executable product architecture. Status: accepted (2026-09-18, after independent review gate).
 
-Konvention: jede ADR traegt eine Statuszeile (`Proposed`/`Accepted`/`Rejected`)
-und ein Datum. Neue ADRs werden auf Englisch geschrieben. Der verbindliche
-Prozess steht in `docs/komport-engineering-governance-spec-review-workflow.md`
-(Spec vor Code, unabhaengiges Review, Fix-Zyklus bis Freigabe).
+Convention: each ADR carries a status line (`Proposed`/`Accepted`/`Rejected`) and a date. New ADRs are written in English. The binding process is described in `docs/komport-engineering-governance-spec-review-workflow.md` (Spec before code, independent review, fix cycle until approval).
 
-## Aktive Roadmap
+## Active Roadmap
 
-- `TODO.md` — offene Punkte, Wunschliste und Meilenstein-Roadmap (deutsch);
-  `TODO-ARCHIVE.md` — abgeschlossene Arbeit, Reviews, Fixes.
-- `docs/specs/SPEC-M8-session-transport-foundation.md` — erster
-  Session-/Transport-Schnitt, Status: accepted. Das Gate ist am 2026-09-18
-  geschlossen; als naechstes folgt die Umsetzung nach Spec-Abschnitt 17.
-- Danach: M9 Recorder/`.kpsession`, M10 Loader und passive Replay, M11 Decoder,
-  M12 aktive Wiedergabe/Simulation, M13 Bibliotheks-Extraktion plus Analyzer,
-  M14 Mehrquellen-Capture/Sniffer, M15 TCP/Remote-Agent.
-- `docs/reviews/` — der komplette Review-Verlauf des M8-Gates (Pre-Review, fuenf
-  unabhaengige Codex-Runden, konsolidiertes Amendment-Paket,
-  Anwendungs-Verifikation).
+- `TODO.md` — open points, wish list and milestone roadmap (German); `TODO-ARCHIVE.md` — completed work, reviews, fixes.
+- `docs/specs/SPEC-M8-session-transport-foundation.md` — first session/transport interface, status: accepted. The gate closed on 2026-09-18; the next step is implementation according to Spec section 17.
+- Afterwards: M9 Recorder/`.kpsession`, M10 Loader and passive replay, M11 Decoder, M12 active playback/simulation, M13 library extraction plus Analyzer, M14 multi-source capture/sniffer, M15 TCP/Remote Agent.
+- `docs/reviews/` — the complete review history of the M8 gate (Pre-Review, five independent Codex rounds, consolidated amendment package, application verification).
 
-## Ziel des Projekts
+## Project Goal
 
-Ein serielles Terminal fuer die Spezialfaelle, in denen generische Terminals
-unzureichend sind: Konsolen von Netzwerk- und Industriegeraeten, historische
-Rechner, ungewoehnliche Zeilenenden, rohe Steuerzeichen, Diagnose-Mitschnitte,
-Makros, Geraeteprofile und Zeichensatz-Eigenheiten. Bewusst kein weiteres
-generisches Shell-Terminal: der serielle Spezialfall ist die Daseinsberechtigung,
-Retro-Kompatibilitaet ist der Produktanker, nicht der Selbstzweck.
+A serial terminal for special cases where generic terminals are insufficient: consoles of network and industrial devices, historical computers, unusual line endings, raw control characters, diagnostic recordings, macros, device profiles, and charset peculiarities. Deliberately not another generic shell terminal: the serial special case is its reason for existing; retro compatibility is the product anchor, not an end in itself.
 
-## Technischer Rahmen
+## Technical Framework
 
-- Sprache/Framework: C++17, Qt 6 (Untergrenze 6.3 laut `CMakeLists.txt`, lokal
-  installiert 6.11.1), kein KDE/KF6. Module: Widgets, PrintSupport, SerialPort,
-  LinguistTools, im Test zusaetzlich Test.
-- Build: CMake (`cmake_minimum_required 3.16`). Objekt-Library `komport_core`
-  (alles ausser `main.cpp`) plus Executable `komport-qt6`; Tests linken gegen
-  `komport_core` und `Qt6::Test`.
-- Tests: `ctest` im Build-Verzeichnis, Targets in `tests/` (Qt Test), erzwungenes
-  `QT_QPA_PLATFORM=offscreen`; `tst_serial` braucht `openpty()` aus `libutil`.
-- Persistenz: `QSettings` (`~/.config/Komport-Qt6/Komport-Qt6.conf`), Geraete-
-  profile unter `Profiles/<Name>`, benutzerdefinierte Zeichensaetze unter
-  `~/.config/Komport-Qt6/charsets/`.
-- Externe Schnittstelle: serielle Geraete ueber `QSerialPort`/`QSerialPortInfo`;
-  PTYs in Tests. Keine Netzwerkfunktionalitaet in 1.x.
-- Es gibt keine CI (nur Issue-/PR-Templates): die Qt-6.3-Untergrenze ist
-  dokumentiert, aber nicht automatisiert verifiziert. Warnungsfreiheit muss
-  explizit geprueft werden, weil das Projekt selbst keine Warnflags setzt:
-  `cmake -B build -DCMAKE_CXX_FLAGS="-Wall -Wextra" && cmake --build build`.
+- Language/Framework: C++17, Qt 6 (lower bound 6.3 according to `CMakeLists.txt`, locally installed 6.11.1), no KDE/KF6. Modules: Widgets, PrintSupport, SerialPort, LinguistTools, and Test for testing.
+- Build: CMake (`cmake_minimum_required 3.16`). Object library `komport_core` (everything except `main.cpp`) plus executable `komport-qt6`; tests link against `komport_core` and `Qt6::Test`.
+- Tests: `ctest` in the build directory, targets in `tests/` (Qt Test), forced `QT_QPA_PLATFORM=offscreen`; `tst_serial` requires `openpty()` from `libutil`.
+- Persistence: `QSettings` (`~/.config/Komport-Qt6/Komport-Qt6.conf`), device profiles under `Profiles/<Name>`, custom charsets under `~/.config/Komport-Qt6/charsets/`.
+- External interface: serial devices via `QSerialPort`/`QSerialPortInfo`; PTYs in tests. No network functionality in 1.x.
+- There is no CI (only issue/PR templates): the Qt 6.3 lower bound is documented but not automatically verified. Warning-freedom must be explicitly checked because the project itself does not set warning flags: `cmake -B build -DCMAKE_CXX_FLAGS="-Wall -Wextra" && cmake --build build`.
 
-## Zentrale Architektur
+## Central Architecture
 
-Datenfluss (verbindliche Leitlinie aus `CLAUDE.md`):
+Data flow (binding guideline from `CLAUDE.md`):
 
 ```text
-QSerialPort -> KomportSerial/ITransport -> RX/TX-Diagnose, Logging,
-Zeichensatz-Uebersetzung -> Terminal-Backend (KomportEmulation)
+QSerialPort -> KomportSerial/ITransport -> RX/TX diagnostics, logging,
+charset translation -> Terminal backend (KomportEmulation)
 
-Terminal-Backend -> Zeichensatz-Uebersetzung / Line-Ending / Makros -> QSerialPort
+Terminal backend -> charset translation / Line-Ending / Macros -> QSerialPort
 ```
 
-Session-Schicht (M8, akzeptiert, noch nicht implementiert): `ITransport` (reine
-Byte-Bewegung, `activationId` pro Open-Versuch, QtCore-only) -> `SessionController`
-(Sequenz, Quell-ID 1, Session-Origin-Mapping nach ADR-005, Aktivierungsfilter,
-FIFO-Zustellung) -> `SessionEvent` (ADR-002) -> spaeter Recorder/Replay/Decoder.
-Eine Beobachtung wird genau ein Event; Chunks sind Schreib-/Lese-Grenzen der
-Anwendung, keine Draht-Frames, und duerfen von Decodern zu groesseren Streams
-zusammengesetzt werden.
+Session layer (M8, accepted, not yet implemented): `ITransport` (pure byte movement, `activationId` per open attempt, QtCore-only) -> `SessionController` (sequence, source ID 1, session-origin mapping according to ADR-005, activation filter, FIFO delivery) -> `SessionEvent` (ADR-002) -> later Recorder/Replay/Decoder. One observation is exactly one event; chunks are write/read boundaries of the application, not wire frames, and may be assembled by decoders into larger streams.
 
-Legacy-Pfad: `receivedChar`/`sentChar` bleiben Anzeige-Adapter fuer
-Terminal-View, Hex-Monitor und Text-Logger und sind ausdruecklich keine
-Session-Quelle. Der Anzeigepfad ist bewusst verlustbehaftet und verzoegert
-(RX-Puffer-Trimming, Flush-Timer); der Session-Strom ist verlustfrei an der
-Anwendungs-Beobachtungsgrenze. Byte-Exaktheit heisst: RX ist exakt das, was
-`readAll()` geliefert hat, TX exakt das, was `write()` akzeptiert hat -- keine
-elektrische Garantie.
+Legacy path: `receivedChar`/`sentChar` remain display adapters for terminal view, hex monitor and text logger and are explicitly not session sources. The display path is deliberately lossy and delayed (RX buffer trimming, flush timer); the session stream is lossless at the application observation boundary. Byte-exactness means: RX is exactly what `readAll()` delivered, TX exactly what `write()` accepted -- no electrical guarantee.
 
-Zentrale Klassen: `KomportApp` (Fenster, Menues/Toolbar, Profile, Makros,
-Recording), `KomportDoc` (Dokument; Eigentuemer von Transport und Controller),
-`KomportView` + `KomportMinimapScrollBar`, `KomportEmulation` (VT100/VT102-nah
-mit bewusst aufgenommenen xterm-Erweiterungen; groesstes Modul),
-`KomportCell`/`KomportCellArray`, Scroll-Buffer, `KomportCharset`,
-`KomportHexView`, `KomportMacroBar`, `KomportSessionLogger`, `SettingsDialog`.
+Central classes: `KomportApp` (window, menus/toolbar, profiles, macros, recording), `KomportDoc` (document; owner of transport and controller), `KomportView` + `KomportMinimapScrollBar`, `KomportEmulation` (VT100/VT102-like with deliberately included xterm extensions; largest module), `KomportCell`/`KomportCellArray`, scroll buffer, `KomportCharset`, `KomportHexView`, `KomportMacroBar`, `KomportSessionLogger`, `SettingsDialog`.
 
-Lose Kopplung ist Grundprinzip: die neuen Session-/Transportvertraege bleiben
-widget- und frontend-neutral (ADR-009), damit ein spaeterer Analyzer oder
-Headless-Agent ohne Umbau des Terminals moeglich bleibt. Fail-Policy: serielle
-und Konfigurationsfehler bleiben sichtbar (Legacy `settingsFailed`, kuenftig
-`Error`-Events mit `kind`/`code`); die Zeichensatz-Uebersetzung darf niemals
-still falsche Bytes auf die Leitung legen.
+Loose coupling is a basic principle: the new session/transport contracts remain widget- and frontend-neutral (ADR-009), so that a later analyzer or headless agent can be added without modifying the terminal. Fail policy: serial and configuration errors remain visible (legacy `settingsFailed`, future `Error` events with `kind`/`code`); charset translation must never silently put wrong bytes on the wire.
 
-## Entwicklungsvereinbarungen
+## Development Agreements
 
-- Spec vor Code: vor Implementierung relevanter Architektur- oder
-  Verhaltensaenderungen eine ADR oder Spezifikation schreiben und reviewen lassen.
-- Review-Gate ueber die Codex-CLI ausloesen, solange kein Companion-Befehl
-  fehlt; Review-Artefakte liegen englischsprachig in `docs/reviews/`. Findings
-  iterativ beheben, erneut testen und erneut Review anfordern, bis ausdruecklich
-  freigegeben wurde. Nach fuenf Fix-Zyklen mit weiterhin kritischen Findings
-  kontrolliert pausieren und den Meilenstein neu schneiden.
-- Reviewer-Aussagen sind Behauptungen: vor Uebernahme im Code verifizieren, und
-  eigene Fehlaussagen offen korrigieren.
-- Ein normatives Amendment-/Aenderungsdokument statt Delta-Schichten; ersetzte
-  Passagen in aelteren Dokumenten sind die Quelle spaeterer Widersprueche.
-- Neue technische Planungsartefakte (ADRs, Specs, Reviews, Handoffs) auf
-  Englisch; bestehende deutsche Dokumente bleiben deutsch.
-- Keine produktiven Secrets, Tokens, Geraetepfade mit Zugangsdaten oder
-  Runtime-Daten versionieren. Kein automatischer Commit oder Push; nach
-  abgeschlossener Arbeit Review-Stopp einhalten.
-- Repository-Grenzen respektieren: keine Schreibzugriffe auf Nachbar-Repos.
-- Verhalten an der Draht- oder Anzeige-Grenze nicht stillschweigend aendern
-  (Legacy-RX-Puffer, doppelte Konfigurationsanwendung, Zeilenende-Semantik);
-  solche Aenderungen brauchen einen eigenen, gereviewten Schnitt.
-- Validierung immer ausfuehren und das Ergebnis berichten (`ctest`,
-  Warnungsfreiheit unter `-Wall -Wextra`).
+- Spec before code: write an ADR or specification for relevant architectural or behavioral changes and have it reviewed before implementation.
+- Trigger review gate via Codex CLI, as long as no companion command is missing; review artifacts are in English in `docs/reviews/`. Fix findings iteratively, test again and request review again until explicitly approved. After five fix cycles with continuing critical findings, pause in a controlled manner and redefine the milestone.
+- Reviewer statements are assertions: verify them before adopting them in code, and openly correct your own misstatements.
+- A normative amendment/change document instead of delta layers; replaced passages in older documents are the source of later contradictions.
+- New technical planning artifacts (ADRs, Specs, Reviews, Handoffs) are in English; existing German documents are translated to English in controlled, reviewed batches.
+- Do not version production secrets or tokens, device paths with credentials, or runtime data. No automatic commit or push; observe the review stop after completed work.
+- Respect repository boundaries: no write access to neighboring repos.
+- Do not silently change behavior at the wire or display boundary (legacy RX buffer, double configuration application, line-ending semantics); such changes require their own separate, reviewed change.
+- Always execute validation and report the result (`ctest`, warning-freedom under `-Wall -Wextra`).
 
-## Offene Punkte
+## Open Points
 
-- [ ] M8 implementieren: `SPEC-M8` Abschnitt 17, Schritte 2–7 (Core-Typen,
-      Raw-Chunk-Observations, Konfigurations-Einstiegspunkt, `SessionController`,
-      Migration der beiden App-Aufrufstellen, Tests, anschliessend Selbst- und
-      Fremdreview).
-- [ ] Qt-6.3-CI oder Release-Gate einrichten, damit die deklarierte Untergrenze
-      tatsaechlich verifiziert wird.
-- [ ] Follow-ups ausserhalb M8: M9 Streaming-Writer, M10 Replay-Player-Interface,
-      Cross-Domain-Synchronisation/Uncertainty-UI, separat gereviewte Aenderung
-      des Legacy-RX-Puffers.
-- [ ] Bekannte Emulationsluecken aus `TODO.md` Abschnitt 6 (u. a. DECOM/
-      Origin-Mode, VT52) bei Bedarf schliessen.
-- [ ] Dieses Dokument bei Architektur- oder Prozessaenderungen aktualisieren.
+- [ ] Implement M8: `SPEC-M8` section 17, steps 2–7 (core types, raw chunk observations, configuration entry point, `SessionController`, migration of the two app call sites, tests, followed by self-review and independent review).
+- [ ] Set up Qt 6.3 CI or release gate so that the declared lower bound is actually verified.
+- [ ] Follow-ups outside M8: M9 streaming writer, M10 replay player interface, cross-domain synchronization/uncertainty UI, separately reviewed change of the legacy RX buffer.
+- [ ] Close known emulation gaps from `TODO.md` section 6 (e.g. DECOM/origin mode, VT52) if necessary.
+- [ ] Update this document upon architectural or process changes.

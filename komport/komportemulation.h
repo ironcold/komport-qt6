@@ -557,6 +557,13 @@ ESC[Ps;...;Psm
 
 **/
 
+class KomportEmulation;
+
+/** Scoped reply mode (SPEC-M10 5.7). Named here only so KomportEmulation can declare it
+  *  as a friend: it is **defined privately in komportemulation.cpp**, so this header adds no
+  *  capability for anyone to suppress or re-enable replies of an emulation from outside. */
+class KomportEmulationReplyModeScope;
+
 class KomportEmulation : public QObject  {
 Q_OBJECT
 public:
@@ -576,6 +583,15 @@ public:
   /** what the Return key/macro commands send at end-of-line */
   LineEnding lineEnding() const { return mLineEnding; }
   void setLineEnding(LineEnding _le) { mLineEnding = _le; }
+  /** Transmit gate (SPEC-M10 5.7.1/5.8, closing review 2026-11-15): while false, no
+   *  keystroke, simulated keystroke or terminal reply is written, whatever entry
+   *  reached this object and whatever the port's state. The gate is a plain setter
+   *  driven by the application (the one place that knows the process-wide offline
+   *  state); it protects against stray calls to the transmit entries, not against
+   *  code that deliberately reopens it - nothing in C++ could. The view drives it together
+   *  with its key-input flag; the replay render path never needed it (it is reply-free). */
+  void setTransmitEnabled(bool _enabled) { mTransmitEnabled = _enabled; }
+  bool transmitEnabled() const { return mTransmitEnabled; }
   /** the raw bytes for the current line ending, e.g. for use by callers
    *  that send a whole line themselves (the macro bar) */
   QByteArray lineEndingBytes() const;
@@ -642,9 +658,43 @@ public slots:
   virtual void slotKeyPressed(QKeyEvent* _e);
   /** received and process an incoming character */
   virtual void slotReceivedChar(char _ch);
+  /** render a replayed character: the same rendering as slotReceivedChar(),
+   *  with the terminal-generated replies suppressed for the duration of the
+   *  call (SPEC-M10 5.7/5.8, reply-free replay rendering) */
+  virtual void slotReplayReceivedChar(char _ch);
 private:
+  /** Scoped reply modes are the one thing allowed to touch the reply flag directly. */
+  friend class KomportEmulationReplyModeScope;
+
+  /** The shared receive/render work; both public entries differ only in the reply mode
+   *  they install around it.
+   *
+   *  Render contract (pre-existing and unchanged by M10 step 4, now written down because
+   *  the reply-free path depends on it): rendering is synchronous and draws into the shared
+   *  cell array, which emits `cellChanged` from drawChar(). A receiver that acts on the
+   *  emulation or its view during that emission must not **destroy** either of them - this
+   *  method continues after the emission (advanceCursorWithWrap() and the line-ending work)
+   *  and cannot be made deletion-safe here. Synchronous destruction of the view or the
+   *  emulation from inside a render callback is therefore **not supported**.
+   *
+   *  This is an **accepted, known limit**: the hazard predates M10 step 4 - the live path
+   *  has the same synchronous `cellChanged` emission from drawChar() - and the step-4 review
+   *  accepted it explicitly rather than adding a lifetime guard. Nothing enforces the
+   *  precondition; what the reply-mode scope protects is only its own restoration, and it is
+   *  not a lifetime guarantee for the render. */
+  void renderReceivedChar(char _ch);
+  /** the single choke point for every terminal-generated reply (SPEC-M10 5.8):
+   *  it is the only place the emulation answers the terminal, and it answers
+   *  nothing while a replay render is in progress */
+  void sendTerminalReply(const QByteArray &reply);
   /** serial */
   KomportSerial* mSerial;
+  /** whether the emulation may answer the terminal right now. Initialised to
+   *  "allowed", so the live path is never suppressed by default; the replay
+   *  entry sets it false through a scoped rollback and restores its caller's
+   *  value on every exit (SPEC-M10 5.7) */
+  bool mTerminalRepliesAllowed = true;
+  bool mTransmitEnabled = true;
   /** cell array  */
   KomportCellArray* mCellArray;
   /** terminal control sequence  */
